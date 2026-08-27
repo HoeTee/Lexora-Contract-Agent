@@ -16,9 +16,7 @@ def is_level1(item: BodyItem, profile: CompiledHeadingProfile | None = None) -> 
         return False
     if profile is not None:
         return profile.level_for(item.text) == 1
-    if MAIN_SECTION_RE.match(item.text):
-        return True
-    return False
+    return bool(MAIN_SECTION_RE.match(item.text))
 
 
 def heading_level(item: BodyItem, profile: CompiledHeadingProfile | None = None) -> int | None:

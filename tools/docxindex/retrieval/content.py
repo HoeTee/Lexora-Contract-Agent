@@ -167,6 +167,8 @@ def _chunk_oversized_node(index: dict[str, Any], node: dict[str, Any], candidate
     used = 0
     chunk_start_anchor = anchors[0].get("anchor")
     chunk_start_index = anchors[0].get("body_child_index")
+    chunk_end_anchor = None
+    chunk_end_index = None
     chunk_index = 1
     for anchor in anchors:
         text = anchor.get("text") or ""
@@ -179,9 +181,9 @@ def _chunk_oversized_node(index: dict[str, Any], node: dict[str, Any], candidate
                     chunk_index,
                     parts,
                     chunk_start_anchor,
-                    parts_end_anchor,
+                    chunk_end_anchor,
                     chunk_start_index,
-                    parts_end_index,
+                    chunk_end_index,
                 )
             )
             chunk_index += 1
@@ -191,8 +193,8 @@ def _chunk_oversized_node(index: dict[str, Any], node: dict[str, Any], candidate
             chunk_start_index = anchor.get("body_child_index")
         parts.append(text)
         used += tokens
-        parts_end_anchor = anchor.get("anchor")
-        parts_end_index = anchor.get("body_child_index")
+        chunk_end_anchor = anchor.get("anchor")
+        chunk_end_index = anchor.get("body_child_index")
     if parts:
         chunks.append(
             _chunk_item(
@@ -201,9 +203,9 @@ def _chunk_oversized_node(index: dict[str, Any], node: dict[str, Any], candidate
                 chunk_index,
                 parts,
                 chunk_start_anchor,
-                parts_end_anchor,
+                chunk_end_anchor,
                 chunk_start_index,
-                parts_end_index,
+                chunk_end_index,
             )
         )
     return chunks

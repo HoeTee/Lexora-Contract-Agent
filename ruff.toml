@@ -1,2 +1,14 @@
+target-version = "py312"
+line-length = 120
+extend-exclude = [
+    "protect/out",
+    "protect/tmp",
+    "tests/api_batch_runner/.venv",
+]
+
 [lint]
-ignore = ["I001", "UP037", "SIM117", "RUF059", "BLE001"]
+select = ["E4", "E7", "E9", "F", "B", "SIM"]
+ignore = ["B008", "SIM115", "SIM117"]
+
+[lint.per-file-ignores]
+"mcp_service/server/server.py" = ["E402"]

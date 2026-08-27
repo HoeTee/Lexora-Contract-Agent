@@ -1,5 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from config import DATA_DIR
@@ -83,8 +84,6 @@ def list_user_log_tasks(tenant_id: str, username: str) -> list[dict]:
         logs_dir = task_dir / "logs"
         api_events = logs_dir / "events.log"
         try:
-            import json
-
             task = json.loads(task_json.read_text(encoding="utf-8"))
         except Exception:
             continue

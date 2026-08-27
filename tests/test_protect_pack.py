@@ -6,6 +6,7 @@ from io import BytesIO
 from pathlib import Path
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.exceptions import InvalidTag
 
 from protect import pack
 
@@ -48,7 +49,7 @@ class ProtectPackTests(unittest.TestCase):
 
         tampered = bytearray(ciphertext)
         tampered[0] ^= 1
-        with self.assertRaises(Exception):
+        with self.assertRaises(InvalidTag):
             AESGCM(key).decrypt(nonce, bytes(tampered), pack.PACKAGE_MAGIC)
 
     def test_load_key_rejects_non_256_bit_key(self) -> None:

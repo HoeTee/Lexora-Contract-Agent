@@ -1,6 +1,8 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
+import logging
 import os
 import socket
 import traceback
@@ -36,6 +38,7 @@ from workflow.workflow import ContractReviewWorkflow
 
 
 HEARTBEAT_INTERVAL_SECONDS = 10
+logger = logging.getLogger(__name__)
 
 
 def new_worker_id() -> str:
@@ -47,8 +50,18 @@ async def heartbeat_worker(client_dir: str, task_id: str, worker_id: str) -> Non
         await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
         try:
             mark_worker_heartbeat(client_dir, task_id, worker_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Worker heartbeat update failed for task %s", task_id)
+            try:
+                write_task_log_event(
+                    client_dir,
+                    task_id,
+                    "worker_heartbeat_failed",
+                    worker_id=worker_id,
+                    error=repr(exc),
+                )
+            except Exception:
+                logger.exception("Worker heartbeat failure event could not be written for task %s", task_id)
 
 
 async def run_async_review_job(client_dir: str, task_id: str) -> None:
@@ -175,8 +188,6 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
     finally:
         if heartbeat_task is not None:
             heartbeat_task.cancel()
-            try:
+            with suppress(asyncio.CancelledError):
                 await heartbeat_task
-            except asyncio.CancelledError:
-                pass
         cleanup_runtime_input(client_dir, task_id)

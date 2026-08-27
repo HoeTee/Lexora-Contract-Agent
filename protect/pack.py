@@ -70,10 +70,7 @@ def collect_python_files(roots: list[Path]) -> list[Path]:
 def module_metadata(project_root: Path, source_path: Path) -> tuple[str, bool, str]:
     relative = source_path.relative_to(project_root)
     package = relative.name == "__init__.py"
-    if package:
-        module_parts = relative.parent.parts
-    else:
-        module_parts = relative.with_suffix("").parts
+    module_parts = relative.parent.parts if package else relative.with_suffix("").parts
     module_name = ".".join(module_parts)
     if not module_name:
         raise ValueError(f"Cannot derive module name from {source_path}")

@@ -3,6 +3,7 @@ from __future__ import annotations
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from loggers.api_event_logger import append_api_event
 
@@ -30,8 +31,6 @@ def append_model_event(event: str, **fields: Any) -> None:
 
 
 def safe_endpoint(url: str) -> str:
-    from urllib.parse import urlparse
-
     parsed = urlparse(url)
     if not parsed.netloc:
         return parsed.path

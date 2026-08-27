@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 EXPAND_PROMPT_VERSION = "docx_expand_v2"
 SUMMARY_PROMPT_VERSION = "docx_summary_v3"
 SUMMARY_BATCH_PROMPT_VERSION = "docx_summary_batch_v1"
@@ -124,8 +126,6 @@ node 类型：{node_type}
 
 
 def summary_batch_prompt(nodes: list[dict[str, str]], max_tokens: int = 200) -> str:
-    import json
-
     return f"""你正在批量为合同结构树 node 生成检索摘要。
 
 待摘要 node：

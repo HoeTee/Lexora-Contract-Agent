@@ -134,7 +134,6 @@ class DocxCleaner:
         return len(grandchildren)
 
     def _clean_word_element(self, element, *, is_settings: bool = False) -> None:
-        from xml.etree import ElementTree as ET
 
         index = 0
         while index < len(element):

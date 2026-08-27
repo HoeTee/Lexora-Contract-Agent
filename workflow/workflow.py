@@ -1,4 +1,4 @@
-﻿"""
+"""
 ContractReviewWorkflow orchestrates one annotated-DOCX contract review run.
 
 Phases:

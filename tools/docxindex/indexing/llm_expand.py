@@ -60,7 +60,7 @@ def expand_large_leaves(
                     infer_entries.append((node, depth))
 
             results = list(executor.map(infer, infer_entries))
-            for (node, depth), children in zip(infer_entries, results):
+            for (node, depth), children in zip(infer_entries, results, strict=True):
                 if not children:
                     _fallback_chunk(node, items, split_threshold_tokens, chunk_target_tokens)
                     continue

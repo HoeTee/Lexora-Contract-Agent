@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
 import zipfile
@@ -66,7 +66,7 @@ def validate_uploaded_docx(path: Path) -> None:
         raise HTTPException(
             status_code=400,
             detail="上传的文件不是有效的 .docx 文件。",
-        )
+        ) from None
 
     missing_parts = sorted(REQUIRED_DOCX_PARTS - names)
     if missing_parts:
@@ -88,7 +88,7 @@ def validate_criteria_content(path: Path) -> None:
             if paragraph.text and paragraph.text.strip()
         )
     except Exception:
-        raise HTTPException(status_code=400, detail="审查要点文件解析失败，请上传可正常读取的 DOCX 文件。")
+        raise HTTPException(status_code=400, detail="审查要点文件解析失败，请上传可正常读取的 DOCX 文件。") from None
 
     normalized_text = criteria_text.strip()
     keyword_hits = sum(1 for keyword in CRITERIA_KEYWORDS if keyword in normalized_text)

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Base Agent class — handles LLM communication, tool calling, context
 management, token tracking, and conversation logging.
 """

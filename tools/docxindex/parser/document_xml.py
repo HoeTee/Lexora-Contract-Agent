@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from contextlib import suppress
+
 from pathlib import Path
 
 from lxml import etree
@@ -67,10 +69,8 @@ def paragraph_item(
             bold_chars += len(run_text)
         size = attr_value(xpath_one(rpr, "./w:sz"))
         if size:
-            try:
+            with suppress(ValueError):
                 sizes.append(int(size))
-            except ValueError:
-                pass
 
     raw_text = text_of(element)
     numbering_prefix = numbering.next_prefix(num_id, num_ilvl)

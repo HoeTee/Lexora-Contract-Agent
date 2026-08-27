@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import secrets
@@ -10,7 +10,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from config import DATA_DIR, PROJECT_ROOT, USERS_FILE
+from config import DATA_DIR, PROJECT_ROOT
 from loggers.resolve_review_task_paths import resolve_review_task_paths
 from loggers.review_history import (
     HISTORY_SCHEMA_VERSION,
@@ -22,7 +22,6 @@ from endpoints.review.job_worker import run_async_review_job
 from endpoints.review.task_store import (
     create_task,
     ensure_task_dirs,
-    output_dir,
     read_task,
     save_task_input_upload,
     update_task,
@@ -234,11 +233,6 @@ def remove_auth_context(request: Request, ctx: str | None) -> None:
         return
     contexts.pop(ctx, None)
     request.session["auth_contexts"] = contexts
-
-
-def build_report_display_name(contract_original_name: str) -> str:
-    stem = Path(contract_original_name).stem or "review_result"
-    return f"【已AI审查】{stem}.docx"
 
 
 def build_history_display_names(record: dict) -> tuple[str, str]:

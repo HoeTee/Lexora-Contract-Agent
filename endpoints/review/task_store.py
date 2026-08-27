@@ -1,6 +1,6 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 import json
 import os
 import re
@@ -103,7 +103,7 @@ def task_write_lock(path: Path):
                 pass
 
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"Timed out waiting for task state write lock: {lock_path}")
+                raise TimeoutError(f"Timed out waiting for task state write lock: {lock_path}") from None
             time.sleep(TASK_WRITE_LOCK_POLL_SECONDS)
 
     try:
@@ -111,10 +111,8 @@ def task_write_lock(path: Path):
     finally:
         if fd is not None:
             os.close(fd)
-        try:
+        with suppress(FileNotFoundError):
             lock_path.unlink()
-        except FileNotFoundError:
-            pass
 
 
 def input_dir(client_dir: str, task_id: str) -> Path:
@@ -378,10 +376,8 @@ def write_task(task: dict[str, Any]) -> dict[str, Any]:
             temp_path.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
             temp_path.replace(path)
         finally:
-            try:
+            with suppress(FileNotFoundError):
                 temp_path.unlink()
-            except FileNotFoundError:
-                pass
     return task
 
 

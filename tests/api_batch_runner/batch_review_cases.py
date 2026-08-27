@@ -170,7 +170,6 @@ async def submit_job(client: httpx.AsyncClient, settings: Settings, input_path: 
 
 async def poll_status(client: httpx.AsyncClient, settings: Settings, task_id: str) -> dict[str, Any]:
     deadline = monotonic() + settings.task_timeout_seconds
-    last_status: dict[str, Any] | None = None
     while True:
         response = await client.post(
             f"{settings.base_url}/api/review/jobs/status",
@@ -179,7 +178,6 @@ async def poll_status(client: httpx.AsyncClient, settings: Settings, task_id: st
         )
         data = parse_json_response(response)
         response.raise_for_status()
-        last_status = data
         status = data.get("status")
         if status in TERMINAL_STATUSES:
             return data

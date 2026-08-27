@@ -163,7 +163,7 @@ def _store_summary(task: _SummaryTask, summary: str, cache: JsonlCache) -> None:
 def _generate_summary(client: LLMClient, node: DocumentNode, content: str) -> dict[str, str]:
     prompt = summary_prompt(node.title, node.node_type, content, max_tokens=SUMMARY_OUTPUT_MAX_TOKENS)
     last_summary = ""
-    for attempt in range(3):
+    for _attempt in range(3):
         response = client.complete_model(prompt, SummaryResponse)
         summary = response.summary.strip()
         last_summary = summary

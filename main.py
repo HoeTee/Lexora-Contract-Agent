@@ -1,4 +1,4 @@
-﻿"""
+"""
 Local CLI entry point for the contract review workflow.
 """
 from __future__ import annotations

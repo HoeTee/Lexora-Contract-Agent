@@ -128,7 +128,7 @@ def build_attachments(
             inferred_results = list(executor.map(infer, attachment_ranges))
 
     nodes: list[DocumentNode] = []
-    for (node, attach_start, attach_end), inferred_children in zip(attachment_ranges, inferred_results):
+    for (node, attach_start, attach_end), inferred_children in zip(attachment_ranges, inferred_results, strict=True):
         if inferred_children is not None:
             node.children = inferred_children
             node.confidence_evidence.append("llm_attachment_hierarchy_applied")

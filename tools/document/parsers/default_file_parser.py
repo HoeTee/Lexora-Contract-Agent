@@ -38,7 +38,6 @@ class DefaultFileParser:
         preamble = []   # Content before the first heading
         full_text = []
         found_first_heading = False
-        first_heading_level = 1  # Default if no headings found
         for para in doc.paragraphs:
             text = para.text.strip()
             if not text:
@@ -52,7 +51,6 @@ class DefaultFileParser:
                 except (ValueError, IndexError):
                     level = 1
                 if not found_first_heading:
-                    first_heading_level = level
                     if preamble:
                         # Use same level as first heading so preamble is a sibling
                         full_text.append(f"{'#' * level} 合同首部信息")

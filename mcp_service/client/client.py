@@ -12,7 +12,6 @@ from loggers.trace_helpers import mcp_inputs, mcp_outputs
 from loggers.trace_logger import get_current_trace
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-from mcp.client.sse import sse_client
 from mcp.client.streamable_http import streamable_http_client
 
 

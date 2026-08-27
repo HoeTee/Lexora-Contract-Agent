@@ -2,11 +2,10 @@ import os
 import re
 import sys
 import copy
-import json
 import shutil
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from docx import Document
 from docx.document import Document as DocxDocument
 from docx.oxml.ns import qn
@@ -801,14 +800,12 @@ class DocxReportGenerator:
 
             fallback_anchor = DocxReportGenerator._get_document_start_anchor(doc)
             summary_comment_text = DocxReportGenerator._build_summary_comment_text(summary_sections)
-            summary_added = False
             if fallback_anchor and summary_comment_text:
                 comments_data.insert(0, {
                     'anchor': fallback_anchor,
                     'comment_text': summary_comment_text,
                     'author': SUMMARY_COMMENT_AUTHOR,
                 })
-                summary_added = True
 
             fallback_count = 0
             skipped_count = len(unmatched_comments)
@@ -830,10 +827,8 @@ class DocxReportGenerator:
             import traceback
             traceback.print_exc(file=sys.stderr)
             if os.path.exists(output_path):
-                try:
+                with suppress(OSError):
                     os.unlink(output_path)
-                except OSError:
-                    pass
             return None
 
     # ==================== Markdown HTML Helper ====================

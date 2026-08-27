@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import shutil
 from pathlib import Path
@@ -8,7 +8,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from config import DATA_DIR, DEFAULT_CRITERIA_PATH, PROJECT_ROOT, USERS_FILE
+from config import DATA_DIR, DEFAULT_CRITERIA_PATH, PROJECT_ROOT
 from endpoints.web.admin_services import (
     admin_summary,
     get_admin_user,

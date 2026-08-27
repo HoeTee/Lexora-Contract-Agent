@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import json
@@ -7,7 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 
 from config import (
@@ -216,7 +216,7 @@ async def _json_body(
     try:
         payload = json.loads(body)
     except JSONDecodeError:
-        raise HTTPException(status_code=400, detail=f"{context} JSON body must be valid.")
+        raise HTTPException(status_code=400, detail=f"{context} JSON body must be valid.") from None
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail=f"{context} JSON body must be an object.")
     return payload
@@ -233,7 +233,7 @@ def _read_api_task_or_404(client_dir: str, task_id: str) -> dict:
     try:
         task = read_task(client_dir, task_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Task not found.")
+        raise HTTPException(status_code=404, detail="Task not found.") from None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found.")
     return task
@@ -732,7 +732,7 @@ async def cancel_review_job(request: Request, task_id: str):
     try:
         task = read_task(client.client_dir, task_id)
     except ValueError:
-        raise HTTPException(status_code=404, detail="Task not found.")
+        raise HTTPException(status_code=404, detail="Task not found.") from None
     if task is None:
         raise HTTPException(status_code=404, detail="Task not found.")
 

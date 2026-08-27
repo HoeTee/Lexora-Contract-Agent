@@ -27,7 +27,7 @@ def build_vector_index(
         embedded_batches = list(executor.map(client.embed_batch, batches))
     embeddings = [embedding for batch in embedded_batches for embedding in batch]
     items = []
-    for entry, embedding in zip(entries, embeddings):
+    for entry, embedding in zip(entries, embeddings, strict=True):
         node = entry["node"]
         items.append(
             VectorItem(

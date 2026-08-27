@@ -1,4 +1,4 @@
-﻿"""
+"""
 Central configuration for the contract review workflow.
 """
 
