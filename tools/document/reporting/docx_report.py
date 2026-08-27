@@ -800,14 +800,15 @@ class DocxReportGenerator:
 
             fallback_anchor = DocxReportGenerator._get_document_start_anchor(doc)
             summary_comment_text = DocxReportGenerator._build_summary_comment_text(summary_sections)
+            fallback_count = 0
             if fallback_anchor and summary_comment_text:
                 comments_data.insert(0, {
                     'anchor': fallback_anchor,
                     'comment_text': summary_comment_text,
                     'author': SUMMARY_COMMENT_AUTHOR,
                 })
+                fallback_count = 1
 
-            fallback_count = 0
             skipped_count = len(unmatched_comments)
 
             if comments_data:

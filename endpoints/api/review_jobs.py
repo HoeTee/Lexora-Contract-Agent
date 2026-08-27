@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 import json
 from json import JSONDecodeError
 from pathlib import Path
@@ -21,7 +22,7 @@ from config import (
     QUEUE_ENABLED,
     infer_rerank_provider,
 )
-from endpoints.api.client_mapping import resolve_api_client
+from endpoints.api.client_mapping import ApiClient, resolve_api_client
 from endpoints.review.job_worker import run_async_review_job
 from endpoints.review.meta import (
     MetaFieldsValidationError,
@@ -59,6 +60,18 @@ MODEL_CONFIG_FIELDS = (
     "reranker_api_key",
     "reranker_model_name",
 )
+
+
+@dataclass(frozen=True)
+class PreparedReviewSubmission:
+    task_id: str
+    filename: str
+    contract_path: Path
+    criteria_source: str
+    criteria_filename: str | None
+    criteria_path: Path
+    request_model_config: dict[str, str] | None
+    meta_fields: dict[str, str]
 
 
 def _is_upload_file(value: object) -> bool:
@@ -313,7 +326,10 @@ async def _export_review_job_result(
 @api_jobs_router.post("/api/review/jobs", status_code=202)
 async def submit_review_job(request: Request):
     client = await resolve_api_client(request)
+    return await _prepare_and_dispatch_submission(request, client)
 
+
+async def _prepare_and_dispatch_submission(request: Request, client: ApiClient):
     content_type = request.headers.get("content-type", "").lower()
 
     criteria_source = "default"
@@ -603,82 +619,95 @@ async def submit_review_job(request: Request):
             message="Unsupported Content-Type.",
         )
 
-    result_filename = build_report_display_name(filename)
-    result_path = output_dir(client.client_dir, task_id) / result_filename
-    task = create_task(
-        client_id=client.client_id,
-        client_dir=client.client_dir,
+    submission = PreparedReviewSubmission(
         task_id=task_id,
-        contract_filename=filename,
+        filename=filename,
         contract_path=contract_path,
         criteria_source=criteria_source,
         criteria_filename=criteria_filename,
-        criteria_path=selected_criteria_path,
-        result_filename=result_filename,
-        result_path=result_path,
-        model_config_meta=_model_config_meta(request_model_config),
+        criteria_path=Path(selected_criteria_path),
+        request_model_config=request_model_config,
         meta_fields=meta_fields,
     )
-    if request_model_config:
-        save_task_model_config(client.client_dir, task_id, request_model_config)
+    task = _create_submission_task(client, submission)
+    dispatch_error = _dispatch_review_job(client.client_dir, task_id)
+    if dispatch_error is not None:
+        return dispatch_error
+    return pretty_json_response(present_submit_response(task), status_code=202)
+
+
+def _create_submission_task(client: ApiClient, submission: PreparedReviewSubmission) -> dict:
+    result_filename = build_report_display_name(submission.filename)
+    result_path = output_dir(client.client_dir, submission.task_id) / result_filename
+    task = create_task(
+        client_id=client.client_id,
+        client_dir=client.client_dir,
+        task_id=submission.task_id,
+        contract_filename=submission.filename,
+        contract_path=submission.contract_path,
+        criteria_source=submission.criteria_source,
+        criteria_filename=submission.criteria_filename,
+        criteria_path=submission.criteria_path,
+        result_filename=result_filename,
+        result_path=result_path,
+        model_config_meta=_model_config_meta(submission.request_model_config),
+        meta_fields=submission.meta_fields,
+    )
+    if submission.request_model_config:
+        config = submission.request_model_config
+        save_task_model_config(client.client_dir, submission.task_id, config)
         write_task_log_event(
             client.client_dir,
-            task_id,
+            submission.task_id,
             "request_model_config_received",
             llm=True,
             embedding=True,
             reranker=True,
-            llm_model_name=request_model_config["llm_model_name"],
-            embedding_model_name=request_model_config["embedding_model_name"],
-            reranker_model_name=request_model_config["reranker_model_name"],
-            reranker_provider=request_model_config["reranker_provider"],
+            llm_model_name=config["llm_model_name"],
+            embedding_model_name=config["embedding_model_name"],
+            reranker_model_name=config["reranker_model_name"],
+            reranker_provider=config["reranker_provider"],
         )
     write_task_log_event(
         client.client_dir,
-        task_id,
+        submission.task_id,
         "api_review_job_received",
-        filename=filename,
+        filename=submission.filename,
         client_id=client.client_id,
         source_ip=client.source_ip,
     )
-    if QUEUE_ENABLED:
-        try:
-            from task_queue.review_queue import enqueue_review_job
+    return task
 
-            queue_task_id = enqueue_review_job(client.client_dir, task_id)
-        except Exception as exc:
-            write_task_log_event(
-                client.client_dir,
-                task_id,
-                "review_queue_submit_failed",
-                error=repr(exc),
-            )
-            mark_failed(
-                client.client_dir,
-                task_id,
-                code="QUEUE_SUBMIT_FAILED",
-                message="Review job queue submission failed.",
-                error={
-                    "code": "QUEUE_SUBMIT_FAILED",
-                    "message": "Review job queue submission failed.",
-                    "detail": repr(exc),
-                },
-            )
-            return _submit_error_response(
-                task_id=task_id,
-                status_code=503,
-                code="QUEUE_SUBMIT_FAILED",
-                message="Review job queue submission failed.",
-            )
-        write_task_log_event(
-            client.client_dir,
+
+def _dispatch_review_job(client_dir: str, task_id: str):
+    if not QUEUE_ENABLED:
+        asyncio.create_task(run_async_review_job(client_dir, task_id))
+        return None
+    try:
+        from task_queue.review_queue import enqueue_review_job
+
+        queue_task_id = enqueue_review_job(client_dir, task_id)
+    except Exception as exc:
+        write_task_log_event(client_dir, task_id, "review_queue_submit_failed", error=repr(exc))
+        mark_failed(
+            client_dir,
             task_id,
-            "review_queued",
-            queue_task_id=queue_task_id,
+            code="QUEUE_SUBMIT_FAILED",
+            message="Review job queue submission failed.",
+            error={
+                "code": "QUEUE_SUBMIT_FAILED",
+                "message": "Review job queue submission failed.",
+                "detail": repr(exc),
+            },
         )
-    else:
-        asyncio.create_task(run_async_review_job(client.client_dir, task_id))
-    return pretty_json_response(present_submit_response(task), status_code=202)
+        return _submit_error_response(
+            task_id=task_id,
+            status_code=503,
+            code="QUEUE_SUBMIT_FAILED",
+            message="Review job queue submission failed.",
+        )
+    write_task_log_event(client_dir, task_id, "review_queued", queue_task_id=queue_task_id)
+    return None
 
 
 @api_jobs_router.get("/api/review/jobs/{task_id}")

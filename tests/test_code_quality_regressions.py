@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import redirect_stderr
+from io import StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from docx import Document
+
 from endpoints.review import job_worker
+from tools.document.reporting.docx_report import DocxReportGenerator
 from tools.docxindex.retrieval.content import build_content_context
 
 
@@ -82,6 +89,28 @@ class CompatibilityImportTests(unittest.TestCase):
 
         self.assertIs(legacy_logger.log_conversation, canonical_logger.log_conversation)
         self.assertIs(legacy_mapping.render_table_markdown, canonical_mapping.render_table_markdown)
+
+
+class DocxReportLoggingRegressionTests(unittest.TestCase):
+    def test_summary_fallback_comment_is_counted_in_report_log(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "contract.docx"
+            output_path = Path(temp_dir) / "reviewed.docx"
+            document = Document()
+            document.add_paragraph("合同正文")
+            document.save(contract_path)
+            stderr = StringIO()
+
+            with redirect_stderr(stderr):
+                result = DocxReportGenerator.generate_annotated_docx(
+                    str(contract_path),
+                    [{"criterion_id": "TEST", "criterion": "测试", "issues": []}],
+                    str(output_path),
+                    summary_sections={"overall_comment": "测试摘要"},
+                )
+
+            self.assertEqual(result, str(output_path))
+            self.assertIn("1 document-start fallback comments", stderr.getvalue())
 
 
 if __name__ == "__main__":

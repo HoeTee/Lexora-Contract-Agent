@@ -1,43 +1,15 @@
 from __future__ import annotations
 
-from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
-from tools.docxindex.detection import (
-    find_attachment_parent,
-    find_first_body_start,
-    find_standalone_attachment_start,
-    find_tail_start,
-)
-from tools.docxindex.detection.heading_profiles import (
-    CompiledHeadingProfile,
-    default_heading_profiles,
-    select_heading_profile,
-)
-from tools.docxindex.llm import LLMClient, LLMSettings
-from tools.docxindex.parser import read_docx_items
-from tools.docxindex.schema import DocumentIndex, DocumentNode
+from tools.docxindex.detection.heading_profiles import CompiledHeadingProfile
+from tools.docxindex.llm import LLMSettings
+from tools.docxindex.schema import DocumentIndex
 
-from .anchors import build_anchor_map
-from .attachments import build_attachments
-from .hierarchy import build_hierarchy_for_range, flatten_nodes
-from .llm_expand import expand_large_leaves
-from .llm_summary import summarize_nodes
-from .node_factory import make_node
-from .splitter import split_long_leaves
-from .tables import (
-    TABLE_CHUNK_TARGET_TOKENS,
-    TABLE_SPLIT_THRESHOLD_TOKENS,
-    attach_table_nodes,
-    collect_table_map,
-)
-from .token_budget import (
-    PARAGRAPH_CHUNK_TARGET_TOKENS,
-    PARAGRAPH_SPLIT_THRESHOLD_TOKENS,
-    STRUCTURE_INLINE_BUDGET_TOKENS,
-    STRUCTURE_PAGED_BUDGET_TOKENS,
-)
+from .build_pipeline import IndexBuildOptions, run_build_pipeline
+from .tables import TABLE_CHUNK_TARGET_TOKENS, TABLE_SPLIT_THRESHOLD_TOKENS
+from .token_budget import PARAGRAPH_CHUNK_TARGET_TOKENS, PARAGRAPH_SPLIT_THRESHOLD_TOKENS
 
 
 def build_document_index(
@@ -63,217 +35,27 @@ def build_document_index(
     summary_batch_max_nodes: int = 10,
     summary_batch_max_tokens: int = 20000,
 ) -> DocumentIndex:
-    with _stage(timer, "build.read_docx_items"):
-        items = read_docx_items(docx_path)
-    if not items:
-        raise ValueError(f"No readable word/document.xml body found: {docx_path}")
-
-    with _stage(timer, "build.detect_regions"):
-        compiled_profiles = heading_profiles or default_heading_profiles()
-        provisional_attachment_parent = find_attachment_parent(items, 0)
-        provisional_attachment_start = provisional_attachment_parent
-        if provisional_attachment_start is None:
-            provisional_attachment_start = find_standalone_attachment_start(items, 0)
-        profile_scan_end = provisional_attachment_start if provisional_attachment_start is not None else len(items)
-        profile_match = select_heading_profile(items[:profile_scan_end], compiled_profiles)
-        heading_profile = profile_match.profile
-        body_start = find_first_body_start(items, heading_profile)
-        attachment_parent = find_attachment_parent(items, body_start)
-        standalone_attachment_start = None
-        if attachment_parent is None:
-            standalone_attachment_start = find_standalone_attachment_start(items, body_start)
-        attachment_region_start = attachment_parent if attachment_parent is not None else standalone_attachment_start
-        body_end = attachment_region_start if attachment_region_start is not None else len(items)
-        tail_start = find_tail_start(items, body_start, body_end)
-        body_content_end = tail_start if tail_start is not None else body_end
-
-    llm_client = None
-    if llm_expand or llm_summary or llm_attachment_hierarchy:
-        with _stage(timer, "build.init_llm_client"):
-            if llm_settings is None:
-                llm_settings = LLMSettings.from_sources()
-            llm_client = LLMClient(llm_settings, max_concurrency=llm_concurrency)
-
-    split_during_deterministic_build = not llm_expand
-    roots: list[DocumentNode] = []
-
-    with _stage(timer, "build.build_body_hierarchy"):
-        frontmatter = make_node("frontmatter", "frontmatter", "合同首部", items, 0, max(body_start, 1), 0, None)
-        body = make_node("body", "body", "正文", items, body_start, max(body_content_end, body_start + 1), 0, None)
-        body.children = build_hierarchy_for_range(
-            items,
-            body_start,
-            body_content_end,
-            "body",
-            "body",
-            heading_profile,
-            split_long_nodes=split_during_deterministic_build,
-            paragraph_split_threshold_tokens=paragraph_split_threshold_tokens,
-            paragraph_chunk_target_tokens=paragraph_chunk_target_tokens,
-        )
-        if body_start > 0:
-            attach_table_nodes(
-                frontmatter,
-                items,
-                0,
-                body_start,
-                split_threshold_tokens=table_split_threshold_tokens,
-                chunk_target_tokens=table_chunk_target_tokens,
-            )
-        attach_table_nodes(
-            body,
-            items,
-            body_start,
-            body_content_end,
-            split_threshold_tokens=table_split_threshold_tokens,
-            chunk_target_tokens=table_chunk_target_tokens,
-        )
-        roots.extend([frontmatter, body])
-
-    with _stage(timer, "build.build_tail"):
-        if tail_start is not None and tail_start < body_end:
-            tail = make_node("tail", "tail", "合同末尾", items, tail_start, body_end, 0, None)
-            attach_table_nodes(
-                tail,
-                items,
-                tail_start,
-                body_end,
-                split_threshold_tokens=table_split_threshold_tokens,
-                chunk_target_tokens=table_chunk_target_tokens,
-            )
-            roots.append(tail)
-        else:
-            roots.append(DocumentNode(node_id="tail", node_type="tail", title="合同末尾", start_anchor="", end_anchor="", level=0))
-
-    with _stage(timer, "build.build_attachments"):
-        attachments = DocumentNode(node_id="attachments", node_type="attachments", title="附件", start_anchor="", end_anchor="", level=0)
-        if attachment_region_start is not None:
-            parent_title = items[attachment_parent].text if attachment_parent is not None else "附件"
-            child_start = attachment_parent + 1 if attachment_parent is not None else attachment_region_start
-            attachment_parent_node = make_node(
-                "attachments/parent",
-                "attachment_parent",
-                parent_title,
-                items,
-                attachment_region_start,
-                len(items),
-                1,
-                "attachments",
-            )
-            attachment_parent_node.children = build_attachments(
-                items,
-                child_start,
-                len(items),
-                attachment_parent_node.node_id,
-                split_long_nodes=split_during_deterministic_build,
-                paragraph_split_threshold_tokens=paragraph_split_threshold_tokens,
-                paragraph_chunk_target_tokens=paragraph_chunk_target_tokens,
-                table_split_threshold_tokens=table_split_threshold_tokens,
-                table_chunk_target_tokens=table_chunk_target_tokens,
-                llm_client=llm_client if llm_attachment_hierarchy else None,
-                cache_dir=cache_dir,
-                hierarchy_input_max_tokens=hierarchy_input_max_tokens,
-                hierarchy_batch_target_tokens=hierarchy_batch_target_tokens,
-                hierarchy_batch_overlap_tokens=hierarchy_batch_overlap_tokens,
-                hierarchy_retry_count=hierarchy_retry_count,
-                attachment_max_levels=attachment_max_levels,
-                llm_concurrency=llm_concurrency,
-            )
-            attachments.children.append(attachment_parent_node)
-        roots.append(attachments)
-
-    if llm_expand or llm_summary:
-        if llm_client is None:
-            raise RuntimeError("LLM client was not initialized")
-        if llm_expand:
-            with _stage(timer, "build.llm_expand"):
-                expand_large_leaves(
-                    roots,
-                    items,
-                    llm_client,
-                    cache_dir,
-                    concurrency=llm_concurrency,
-                    split_threshold_tokens=paragraph_split_threshold_tokens,
-                    chunk_target_tokens=paragraph_chunk_target_tokens,
-                    input_max_tokens=hierarchy_input_max_tokens,
-                    batch_target_tokens=hierarchy_batch_target_tokens,
-                    batch_overlap_tokens=hierarchy_batch_overlap_tokens,
-                    max_levels=hierarchy_max_levels,
-                    retry_count=hierarchy_retry_count,
-                )
-            with _stage(timer, "build.split_long_leaves_after_llm_expand"):
-                split_long_leaves(
-                    roots,
-                    items,
-                    paragraph_split_threshold_tokens,
-                    paragraph_chunk_target_tokens,
-                )
-        if llm_summary:
-            with _stage(timer, "build.llm_summary"):
-                summary_stats = summarize_nodes(
-                    roots,
-                    llm_client,
-                    cache_dir,
-                    concurrency=llm_concurrency,
-                    batch_max_nodes=summary_batch_max_nodes,
-                    batch_max_tokens=summary_batch_max_tokens,
-                )
-                if timer is not None:
-                    timer.note("build.llm_summary.eligible_nodes", summary_stats["eligible_nodes"])
-                    timer.note("build.llm_summary.batches", summary_stats["batches"])
-                    timer.note("build.llm_summary.fallback_nodes", summary_stats["fallback_nodes"])
-
-    with _stage(timer, "build.finalize_index"):
-        _fill_key_items(roots)
-        flat_nodes = flatten_nodes(roots)
-        return DocumentIndex(
-            source_file=str(docx_path),
-            top_regions={
-                "frontmatter": "frontmatter",
-                "body": "body",
-                "tail": "tail",
-                "attachments": "attachments",
-            },
-            settings={
-                "paragraph_split_threshold_tokens": paragraph_split_threshold_tokens,
-                "paragraph_chunk_target_tokens": paragraph_chunk_target_tokens,
-                "heading_profile": heading_profile.name,
-                "heading_profile_score": profile_match.score,
-                "heading_level_matches": profile_match.level_counts,
-                "heading_orphan_matches": profile_match.orphan_count,
-                "summary_tree_inline_budget_tokens": STRUCTURE_INLINE_BUDGET_TOKENS,
-                "summary_tree_paged_budget_tokens": STRUCTURE_PAGED_BUDGET_TOKENS,
-                "llm_expand_enabled": llm_expand,
-                "llm_summary_enabled": llm_summary,
-                "llm_attachment_hierarchy_enabled": llm_attachment_hierarchy,
-                "hierarchy_input_max_tokens": hierarchy_input_max_tokens,
-                "hierarchy_batch_target_tokens": hierarchy_batch_target_tokens,
-                "hierarchy_batch_overlap_tokens": hierarchy_batch_overlap_tokens,
-                "hierarchy_max_levels": hierarchy_max_levels,
-                "hierarchy_retry_count": hierarchy_retry_count,
-                "attachment_max_levels": attachment_max_levels,
-                "llm_model": llm_settings.model if llm_settings else None,
-                "llm_concurrency": llm_concurrency,
-                "table_markdown_enabled": True,
-                "table_split_threshold_tokens": table_split_threshold_tokens,
-                "table_chunk_target_tokens": table_chunk_target_tokens,
-            },
-            nodes=[node.storage_view() for node in flat_nodes],
-            root_nodes=[node.node_id for node in roots],
-            structure_tree=[node.structure_view() for node in roots],
-            anchor_map=build_anchor_map(items, flat_nodes),
-            table_map=collect_table_map(items),
-        )
-
-
-def _fill_key_items(nodes: list[DocumentNode]) -> None:
-    for node in nodes:
-        if node.children:
-            node.key_items = [child.title for child in node.children[:8] if child.title]
-            _fill_key_items(node.children)
-
-
-def _stage(timer: Any | None, name: str):
-    if timer is None:
-        return nullcontext()
-    return timer.stage(name)
+    """Build a source-addressable DOCX index using deterministic and optional LLM stages."""
+    options = IndexBuildOptions(
+        llm_expand=llm_expand,
+        llm_summary=llm_summary,
+        llm_settings=llm_settings,
+        cache_dir=cache_dir,
+        timer=timer,
+        llm_concurrency=llm_concurrency,
+        paragraph_split_threshold_tokens=paragraph_split_threshold_tokens,
+        paragraph_chunk_target_tokens=paragraph_chunk_target_tokens,
+        table_split_threshold_tokens=table_split_threshold_tokens,
+        table_chunk_target_tokens=table_chunk_target_tokens,
+        heading_profiles=heading_profiles,
+        llm_attachment_hierarchy=llm_attachment_hierarchy,
+        hierarchy_input_max_tokens=hierarchy_input_max_tokens,
+        hierarchy_batch_target_tokens=hierarchy_batch_target_tokens,
+        hierarchy_batch_overlap_tokens=hierarchy_batch_overlap_tokens,
+        hierarchy_max_levels=hierarchy_max_levels,
+        hierarchy_retry_count=hierarchy_retry_count,
+        attachment_max_levels=attachment_max_levels,
+        summary_batch_max_nodes=summary_batch_max_nodes,
+        summary_batch_max_tokens=summary_batch_max_tokens,
+    )
+    return run_build_pipeline(Path(docx_path), options)
