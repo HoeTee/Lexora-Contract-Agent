@@ -8,7 +8,7 @@ import uuid
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from config import LOGGING_ENABLED
 from loggers.trace_helpers import error_info
@@ -127,7 +127,7 @@ class TraceSpan:
         self._token = _CURRENT_RUN_ID.set(self.run["id"])
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
+    async def __aexit__(self, exc_type, exc, tb) -> Literal[False]:
         if exc is not None and self.run["error"] is None:
             self.set_error(error_info(exc))
         self.run["status"] = "failed" if self.run["error"] else "succeeded"
@@ -160,7 +160,7 @@ class NoopTraceSpan:
     async def __aenter__(self) -> "NoopTraceSpan":
         return self
 
-    async def __aexit__(self, exc_type, exc, tb) -> bool:
+    async def __aexit__(self, exc_type, exc, tb) -> Literal[False]:
         return False
 
     def set_outputs(self, outputs: dict[str, Any] | None) -> None:
