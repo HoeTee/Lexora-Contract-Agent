@@ -50,7 +50,9 @@ env/
 
 # Local tool and editor state
 .claude/
-.codex/
+.codex/*
+!.codex/agents/
+!.codex/agents/*.toml
 .vscode/
 .idea/
 .cache/
@@ -71,7 +73,6 @@ image.tar
 /pageindex/
 
 # Local notes and development-only files
-/AGENTS.md
 /DEPLOYMENT.md
 /PLAN.md
 /tests/scripts
