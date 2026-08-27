@@ -1,0 +1,7 @@
+{
+  "typeCheckingMode": "standard",
+  "reportUnknownMemberType": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownArgumentType": "none"
+}
