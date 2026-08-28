@@ -75,3 +75,9 @@ image.tar
 /.dockerignore/
 /deploy/
 检索算法设计文档.txt
+
+# Others
+/pageindex/
+.ruff_cache
+/scripts/
+/tests/

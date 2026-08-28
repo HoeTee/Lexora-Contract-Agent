@@ -87,3 +87,9 @@ image.tar
 /protect/vmp/tools/
 /protect/vmp/tmp_test/
 检索算法设计文档.txt
+
+# Others
+/pageindex/
+.ruff_cache
+/scripts/
+/tests/
