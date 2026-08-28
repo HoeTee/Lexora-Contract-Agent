@@ -63,7 +63,8 @@ build/
 .idea/
 
 # Entire local-only trees
-/tests/
+/tests/*
+!/tests/criteria_formal_recall/
 /scripts/
 /packages/
 /pageindex/
