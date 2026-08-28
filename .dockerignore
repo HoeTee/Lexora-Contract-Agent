@@ -1,32 +1,46 @@
-﻿.git
+.git/
 .gitignore
 .dockerignore
+.github/
+.agents/
+.codex/
 
 # Local secrets and deployment overrides
 .env
 .env.local
 .env.*.local
-docker-compose.yaml
+/config.yaml
+/docker-compose.yaml
 
-# Runtime data and tenant/user identity files are mounted, not baked into images
-data
-profiles
-logs
-uploads
+# Runtime data is mounted by the host
+/data/
+/profiles/
+/logs/
+/uploads/
 
-# Python caches and local environments
-__pycache__
+# Real run outputs and generated indexes
+logs/
+outputs/
+results/
+reports/
+RAG_persist/
+*.log
+
+# Python environments, caches, and build artifacts
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
-*.egg-info
-dist
-build
-.venv
-venv
-env
+*.egg-info/
+.venv/
+venv/
+env/
+.ruff_cache/
+.cache/
+dist/
+build/
 
-# Office documents, user uploads, and temporary lock files
+# Office documents and temporary files
 *.doc
 *.docx
 *.docm
@@ -37,47 +51,40 @@ env
 !resources/criteria/
 !resources/criteria/criteria.docx
 ~$*
-~$*.doc*
 .~lock.*#
 *.tmp
 *.bak
-*.log
 
-# Local tool/editor state
-.claude
-.codex
-.vscode
-.idea
-.cache
-
-# Development-only files
+# Development-only trees and files
 /tests/
 /scripts/
+/pageindex/
+/deploy/
+/docs/
+/AGENTS.md
+/DEPLOYMENT.md
+/PLAN.md
+/README.md
+/Dockerfile
+/docker-compose.example.yaml
+/config.example.yaml
+/requirements-dev.txt
+/ruff.toml
+/pyrightconfig.json
+
+# Local dependency archives; /packages remains in the build context
+*.tar
+*.tar.gz
+*.zip
+*.rar
+/image.tar
+
+# Source-protection build artifacts
 /protect/*.key
 /protect/out/
 /protect/tmp/
 /protect/vmp/tools/
 /protect/vmp/tmp_test/
-/AGENTS.md
-/DEPLOYMENT.md
-/PLAN.md
-/Dockerfile
-/docker-compose.example.yaml
-/README.md
-/docs/
 
-# Local archives/images
-*.tar
-*.tar.gz
-*.zip
-*.rar
-image.tar
-/.dockerignore/
-/deploy/
-检索算法设计文档.txt
-
-# Others
-/pageindex/
-.ruff_cache
-/scripts/
-/tests/
+# Local notes
+/检索算法设计文档.txt

@@ -1,22 +1,27 @@
-﻿# Local secrets and deployment overrides
+# Local secrets and deployment overrides
 .env
 .env.local
 .env.*.local
-config.yaml
-docker-compose.yaml
-.gitignore
+/config.yaml
+/docker-compose.yaml
 
-# Runtime data, tenant profiles, and generated logs
-data/*
-!data/.gitkeep
-!data/api/.gitkeep
-!data/web/.gitkeep
+# Runtime data and tenant identity
+/data/*
+!/data/.gitkeep
+/profiles/*
+!/profiles/.gitkeep
+/logs/
+/uploads/
+
+# Real run outputs and generated indexes
 logs/
-uploads/
-profiles/*
-!profiles/.gitkeep
+outputs/
+results/
+reports/
+RAG_persist/
+*.log
 
-# Office documents, user uploads, and temporary lock files
+# Office documents and temporary files
 *.doc
 *.docx
 *.docm
@@ -25,28 +30,29 @@ profiles/*
 *.dotm
 *.pdf
 ~$*
-~$*.doc*
 .~lock.*#
 *.tmp
 *.bak
 
 # Keep the committed fallback review criteria
-resources/criteria/*
-!resources/criteria/.gitkeep
-!resources/criteria/criteria.docx
+/resources/criteria/*
+!/resources/criteria/.gitkeep
+!/resources/criteria/criteria.docx
 
-# Python caches, virtual environments, and build output
+# Python environments, caches, and build artifacts
 __pycache__/
 *.py[cod]
 *.pyo
 *.pyd
 *.egg-info/
-dist/
-build/
 *.egg
 .venv/
 venv/
 env/
+.ruff_cache/
+.cache/
+dist/
+build/
 
 # Local tool and editor state
 .claude/
@@ -55,41 +61,32 @@ env/
 !.codex/agents/*.toml
 .vscode/
 .idea/
-.cache/
 
-# Runtime indexes and generated results
-RAG_persist/
-results/
-outputs/
-scripts/docx_retrieval_cli/outputs/
-
-# Local dependency cache and large archives
+# Entire local-only trees
+/tests/
+/scripts/
 /packages/
+/pageindex/
+/deploy/
+
+# Local dependency archives
 *.tar
 *.tar.gz
 *.zip
 *.rar
-image.tar
-/pageindex/
+/image.tar
 
-# Local notes and development-only files
-/DEPLOYMENT.md
-/PLAN.md
-/tests/scripts
-/deploy
-/docs/.$BUSINESS_USER_JOURNEY.drawio.bkp
-/docs/portal
-/docs/superpowers
-/scripts/
+# Source-protection build artifacts
 /protect/*.key
 /protect/out/
 /protect/tmp/
 /protect/vmp/tools/
 /protect/vmp/tmp_test/
-检索算法设计文档.txt
 
-# Others
-/pageindex/
-.ruff_cache
-/scripts/
-/tests/
+# Local notes and generated documentation artifacts
+/DEPLOYMENT.md
+/PLAN.md
+/docs/.$BUSINESS_USER_JOURNEY.drawio.bkp
+/docs/portal/
+/docs/superpowers/
+/检索算法设计文档.txt
