@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SUITE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES_DIR = SUITE_ROOT / "cases"
-DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases_D01.csv"
+DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases_10.csv"
 DEFAULT_CRITERIA = PROJECT_ROOT / "resources" / "criteria" / "criteria-formal.docx"
 DEFAULT_RESULTS_DIR = SUITE_ROOT / "results"
 DEFAULT_API_TASK_ROOT = PROJECT_ROOT / "data" / "api"
@@ -43,6 +43,7 @@ class Settings:
     task_timeout: float
     http_timeout: float
     model_fields: dict[str, str]
+    contract_ids: tuple[str, ...]
 
 
 def parse_args() -> argparse.Namespace:
@@ -57,6 +58,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-interval", type=float, default=5.0)
     parser.add_argument("--task-timeout", type=float, default=3600.0)
     parser.add_argument("--http-timeout", type=float, default=300.0)
+    parser.add_argument(
+        "--contract-id",
+        action="append",
+        dest="contract_ids",
+        help="只运行指定合同编号，可重复传入，例如 --contract-id D03。",
+    )
     return parser.parse_args()
 
 
@@ -96,6 +103,7 @@ def load_settings(args: argparse.Namespace) -> Settings:
         task_timeout=args.task_timeout,
         http_timeout=args.http_timeout,
         model_fields=optional_model_fields(),
+        contract_ids=tuple(args.contract_ids or ()),
     )
 
 
@@ -317,6 +325,13 @@ async def run_all(settings: Settings) -> int:
     if not settings.criteria_path.is_file():
         raise FileNotFoundError(f"criteria file was not found: {settings.criteria_path}")
     expected = read_expected_rows(settings.expected_csv)
+    if settings.contract_ids:
+        requested = set(settings.contract_ids)
+        expected = [row for row in expected if row["contract_id"] in requested]
+        found = {row["contract_id"] for row in expected}
+        missing = sorted(requested - found)
+        if missing:
+            raise ValueError(f"requested contract IDs were not found in expected CSV: {missing}")
     contract_ids = sorted({row["contract_id"] for row in expected})
     contracts = [settings.cases_dir / f"{contract_id}.docx" for contract_id in contract_ids]
     missing = [str(path) for path in contracts if not path.is_file()]

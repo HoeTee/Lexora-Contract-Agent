@@ -13,15 +13,55 @@ from pathlib import Path
 from xml.sax.saxutils import escape
 
 
-DEFAULT_SOURCE = Path(r"C:\Users\lenovo\Downloads\合同样例") / (
-    "【已审核】（262号）产品单次销售合同-卡券、实物、定点配送（东福、东乐通用型模版）.docx"
-)
+SOURCE_ROOT = Path(r"C:\Users\lenovo\Downloads\合同样例")
 SUITE_ROOT = Path(__file__).resolve().parent
-DEFAULT_OUTPUT = SUITE_ROOT / "cases" / "D01.docx"
-DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases_D01.csv"
-DEFAULT_CHANGES_CSV = SUITE_ROOT / "xml_changes_D01.csv"
+DEFAULT_OUTPUT_DIR = SUITE_ROOT / "cases"
+DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases_10.csv"
+DEFAULT_CHANGES_CSV = SUITE_ROOT / "xml_changes_10.csv"
 DOCUMENT_XML = "word/document.xml"
 TEXT_NODE = re.compile(rb"(<w:t(?:\s[^>]*)?>)(.*?)(</w:t>)", re.DOTALL)
+
+
+CASE_SOURCES = (
+    (
+        "D01",
+        "【已审核】（262号）产品单次销售合同-卡券、实物、定点配送（东福、东乐通用型模版）.docx",
+    ),
+    ("D02", "【已审查】（433号）ZRUBXC软件开发类采购合同-人行支付系统重构项目-20251110.docx"),
+    (
+        "D03",
+        "【已审查】（404号）【ZRUB】北京仁聚汇通信息科技有限责任公司通用类资源池外包服务封闭式框架协议采购协议书-金融科技领域.docx",
+    ),
+    ("D04", "【已审查】（525号）客服外呼系统专用话务平台采购-HT-ZRUB-2025-12-22-09-E106.docx"),
+    ("D05", "【20251224已审查】2025年度算力资源服务租赁项目（算力资源一）采购合同1223.docx"),
+    ("D06", "【已审查】（524号）IPv6 上网行为管理设备采购合同.docx"),
+    ("D07", "【已审查】（362号）2025年浙江农商联合银行零售金融业务运营服务合同.docx"),
+    ("D08", "【已审查】（2026年058号）2026年度GPU算力服务租赁采购合同-20260617_批注版.docx"),
+    ("D09", "【已审查】采购合同-财富大厦项目室内空气.docx"),
+    ("D10", "【已审查】（466号）百度地图平台（GIS）地图数据采购项目合作协议.docx"),
+)
+
+
+EXPECTED_CASES = (
+    (1, "合同主体基本信息不完整", "合同首部", "地址：【未填写】"),
+    (2, "缺少合同框架要求的必备标题", "全文标题", "至少一个必备标题不存在"),
+    (3, "缺少项目负责人及姓名、身份证号、电话号码", "全文", "全文不存在项目负责人信息"),
+    (4, "采购合同首部缺少采购内容提示语", "合同首部", "合同名称含采购但没有指定提示语"),
+    (5, "金额标题触发后合同首部缺少金额提示语", "合同首部", "标题包含合同金额"),
+    (6, "付款计划只有一期且节点、尾款和发票类型不明确", "支付方式", "甲方一次性支付全部合同价款"),
+    (7, "合同整体履行期限约定不明确", "合同期限", "具体起止日期由双方另行协商"),
+    (8, "违约责任标题触发后合同首部缺少指定提示语", "合同首部", "标题包含违约责任"),
+    (9, "争议解决未约定甲方住所地人民法院", "争议解决", "乙方所在地人民法院"),
+    (10, "合同首部与签署栏甲方名称不一致", "签署栏", "浙江农商联合银行股份有限公司"),
+    (11, "正文与附件期限约定不一致", "正文及附件", "2028年08月31日 / 2027年08月31日"),
+    (12, "存在错别字", "交付约定", "向甲方发贷"),
+    (13, "标题编号和顺序混乱", "正文标题", "二、不可抗力"),
+    (14, "合同金额大小写不一致", "金额", "88,000.00元 / 人民币捌万玖仟元整"),
+    (15, "存在重复词语病", "正文", "一致一致"),
+    (16, "存在招投标流程敏感词", "合同前言", "采购人、中标单位"),
+    (17, "正文结尾缺少规范结束语", "正文结尾", "不存在以下无正文或以下为合同签署栏"),
+    (18, "正文引用附件名称与实际附件名称不一致", "正文及附件", "产品清单 / 服务清单"),
+)
 
 
 @dataclass(frozen=True)
@@ -33,7 +73,7 @@ class TextReplacement:
     reason: str
 
 
-REPLACEMENTS = (
+D01_REPLACEMENTS = (
     TextReplacement((4,), 1, "销售合同", "采购销售合同", "使合同名称出现采购二字"),
     TextReplacement((1,), 5, "浙江省杭州市上城区秋涛路660号", "【未填写】", "删除甲方联系地址"),
     TextReplacement((1,), 9, "上海市长宁区武夷路656-658号2幢2层2180室", "【未填写】", "删除乙方联系地址"),
@@ -44,14 +84,8 @@ REPLACEMENTS = (
         "甲方作为采购人向乙方采购本合同产品向员工发放，乙方作为中标单位履行本合同，双方共同信守。",
         "植入采购人和中标单位敏感词",
     ),
-    TextReplacement((5, 6), 12, "合同价款及结算方式", "合同金额及支付方式", "使标题出现金额和支付方式"),
-    TextReplacement(
-        (14,),
-        25,
-        "88,000.00元",
-        "88,000.00元（大写：人民币捌万玖仟元整）",
-        "制造数字金额与大写金额不一致",
-    ),
+    TextReplacement((5, 6), 12, "合同价款及结算方式", "合同金额及支付方式", "触发金额和支付方式检查"),
+    TextReplacement((14,), 25, "88,000.00元", "88,000.00元（大写：人民币捌万玖仟元整）", "制造金额大小写不一致"),
     TextReplacement(
         (6,),
         30,
@@ -71,7 +105,7 @@ REPLACEMENTS = (
         48,
         "产品兑换范围以官方平台显示为准，本合同采购产品以实际兑换为准，如遇缺货乙方可使用同等价值品类产品替换",
         "产品兑换范围应保持一致一致，如遇缺货，及时使用同等价值产品替换",
-        "植入重复词和主语缺失语病",
+        "植入重复词语病",
     ),
     TextReplacement(
         (12,),
@@ -92,101 +126,266 @@ REPLACEMENTS = (
         83,
         "1.任何一方不履行合同义务或者履行合同义务不符合约定的，应当继续履行或采取补救措施，给对方造成经济损失的，应承担赔偿责任。",
         "1.任何一方发生违约时，由双方根据实际情况另行协商处理。",
-        "删除具体违约责任和兜底责任",
+        "弱化违约责任内容",
     ),
     TextReplacement((13,), 87, "五、不可抗力", "二、不可抗力", "制造标题编号和顺序混乱"),
-    TextReplacement((18,), 104, "七、其他", "附件一《服务清单》", "使实际附件名称与正文引用名称不一致"),
-    TextReplacement((11,), 107, "本合同自各方盖章之日起生效，", "附件约定产品兑换有效期截止日为", "将现有文字改为附件期限"),
-    TextReplacement((11,), 108, "双方权利义务履行完毕合同自然终止", "2027年08月31日", "使附件期限与正文期限不一致"),
+    TextReplacement((18,), 104, "七、其他", "附件一《服务清单》", "制造附件名称不一致"),
+    TextReplacement((11,), 107, "本合同自各方盖章之日起生效，", "附件约定产品兑换有效期截止日为", "建立附件期限"),
+    TextReplacement((11,), 108, "双方权利义务履行完毕合同自然终止", "2027年08月31日", "制造附件期限不一致"),
     TextReplacement(
         (10,),
         132,
         "甲方（盖章）：" + "\u3000" * 17 + "             " + "乙方（盖章）：" + "\u3000" * 10,
         "甲方（浙江农商联合银行股份有限公司盖章）：　　　　　　乙方（上海票师付网络科技有限公司盖章）：",
-        "使甲方签署名称与合同首部甲方名称不一致",
+        "制造甲方签署名称不一致",
     ),
 )
 
 
-EXPECTED_CASES = (
-    (1, "合同主体基本信息不完整", "合同首部", "地  址: 【未填写】", "xml_text_replace"),
-    (2, "缺少合同框架要求的必备标题", "全文标题", "原合同缺少知识产权、验收等必备标题", "existing_issue"),
-    (3, "缺少项目负责人及姓名、身份证号、电话号码", "全文", "全文不存在项目负责人信息", "existing_issue"),
-    (4, "采购合同应提示采购内容需明确", "合同标题", "采购销售合同", "xml_text_replace"),
-    (5, "金额条款需要明确数量、价款、单位、单价、总价和币种", "合同金额及支付方式", "合同金额及支付方式", "xml_text_replace"),
-    (6, "支付方式只有一期且付款节点和发票类型不明确", "合同金额及支付方式", "甲方一次性支付全部合同价款", "xml_text_replace"),
-    (7, "缺少明确的合同整体履行期限", "全文", "原合同没有明确整体履行起止日期", "existing_issue"),
-    (8, "违约责任缺少具体责任和兜底条款", "违约责任", "由双方根据实际情况另行协商处理", "xml_text_replace"),
-    (9, "缺少甲方住所地人民法院约定", "争议解决", "乙方所在地人民法院", "existing_issue"),
-    (10, "合同首部与签署栏甲方名称不一致", "签署栏", "浙江农商联合银行股份有限公司", "xml_text_replace"),
-    (11, "正文与附件对产品兑换有效期约定不一致", "正文及附件", "2028年08月31日 / 2027年08月31日", "xml_text_replace"),
-    (12, "存在错别字", "交付约定", "向甲方发贷", "xml_text_replace"),
-    (13, "标题编号和顺序混乱", "正文标题", "二、不可抗力", "xml_text_replace"),
-    (14, "合同金额大小写不一致", "金额", "88,000.00元 / 人民币捌万玖仟元整", "xml_text_replace"),
-    (15, "存在重复词和主语缺失语病", "产品说明", "一致一致", "xml_text_replace"),
-    (16, "存在招投标流程敏感词", "合同前言", "采购人、中标单位", "xml_text_replace"),
-    (17, "正文结尾缺少以下无正文或以下为合同签署栏", "正文结尾", "全文不存在两种规范结尾", "existing_issue"),
-    (18, "正文引用附件名称与实际附件名称不一致", "正文及附件", "产品清单 / 服务清单", "xml_text_replace"),
-)
-
-
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="仅修改 word/document.xml 现有文字节点，生成 D01 测试合同。")
-    parser.add_argument("--source", type=Path, default=DEFAULT_SOURCE)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser = argparse.ArgumentParser(description="生成10份criteria-formal XML-only召回测试合同。")
+    parser.add_argument("--source-root", type=Path, default=SOURCE_ROOT)
+    parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--expected-csv", type=Path, default=DEFAULT_EXPECTED_CSV)
     parser.add_argument("--changes-csv", type=Path, default=DEFAULT_CHANGES_CSV)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
 
 
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
 
 
 def text_nodes(xml_bytes: bytes) -> list[re.Match[bytes]]:
     return list(TEXT_NODE.finditer(xml_bytes))
 
 
-def decoded_text(match: re.Match[bytes]) -> str:
-    return html.unescape(match.group(2).decode("utf-8"))
+def decoded_text_nodes(xml_bytes: bytes) -> list[str]:
+    return [html.unescape(match.group(2).decode("utf-8")) for match in text_nodes(xml_bytes)]
 
 
-def patch_document_xml(xml_bytes: bytes) -> tuple[bytes, list[dict[str, str | int]]]:
-    matches = text_nodes(xml_bytes)
-    replacements_by_index = {item.text_node_index: item for item in REPLACEMENTS}
-    if len(replacements_by_index) != len(REPLACEMENTS):
-        raise ValueError("duplicate text_node_index in replacement table")
+def generic_replacements(contract_id: str, values: list[str]) -> tuple[TextReplacement, ...]:
+    used: set[int] = set()
+    replacements: dict[int, TextReplacement] = {}
+    size = len(values)
 
+    def choose(
+        label: str,
+        patterns: tuple[str, ...] = (),
+        *,
+        start: float = 0.0,
+        end: float = 1.0,
+        min_len: int = 1,
+        max_len: int | None = None,
+        prefer_short: bool = False,
+    ) -> int:
+        lower = int(size * start)
+        upper = max(lower + 1, int(size * end))
+        candidates = []
+        for index in range(lower, min(size, upper)):
+            if index in used:
+                continue
+            value = values[index].strip()
+            if len(value) < min_len or (max_len is not None and len(value) > max_len):
+                continue
+            if patterns and not any(re.search(pattern, value) for pattern in patterns):
+                continue
+            candidates.append(index)
+        if not candidates and patterns and (start > 0.0 or end < 1.0):
+            return choose(
+                label,
+                patterns,
+                start=0.0,
+                end=1.0,
+                min_len=min_len,
+                max_len=max_len,
+                prefer_short=prefer_short,
+            )
+        if not candidates and patterns:
+            return choose(
+                label,
+                (),
+                start=start,
+                end=end,
+                min_len=min_len,
+                max_len=max_len,
+                prefer_short=prefer_short,
+            )
+        if not candidates:
+            raise ValueError(f"{contract_id}: no XML text node available for {label}")
+        candidates.sort(key=lambda index: (len(values[index]), index) if prefer_short else (-len(values[index]), index))
+        selected = candidates[0]
+        used.add(selected)
+        return selected
+
+    def add(index: int, criteria: tuple[int, ...], after: str, reason: str) -> None:
+        if contract_id in {"D03", "D10"}:
+            after = {
+                "制造主体基本信息缺失": "地址：【未填写】，联系电话及联系人信息亦未补充。",
+                "植入流程敏感词": "采购人甲方向中标单位乙方采购服务，本合同依据招标采购结果订立并由双方共同履行。",
+                "制造金额大小写不一致": "合同总金额88,000.00元（大写：人民币捌万玖仟元整），双方据此办理结算。",
+                "制造单期付款和节点不明": "甲方一次性支付全部合同价款，付款节点另行通知；不设置其他付款批次，不预留维保尾款，开票和付款时间均由乙方另行确定。",
+                "制造整体履行期限不明确": "合同履行期限由双方另行协商，具体起止日期及计算方式均不明确。",
+                "制造争议管辖不利于甲方": "本协议争议应先协商；协商不成，任何一方仅可向乙方所在地人民法院起诉，双方排除其他法院管辖。",
+            }.get(reason, after)
+        if values[index] == after:
+            return
+        replacements[index] = TextReplacement(criteria, index, values[index], after, reason)
+
+    title = choose("title", (r"合同", r"协议"), end=0.15, max_len=80, prefer_short=True)
+    address = choose("address", (r"地址", r"住所"), end=0.25, min_len=8, max_len=120, prefer_short=True)
+    intro = choose(
+        "intro", (r"甲方.*乙方", r"乙方.*甲方", r"双方"), end=0.3, min_len=20, prefer_short=True
+    )
+    amount_heading = choose(
+        "amount heading",
+        (r"合同金额", r"合同价款", r"价款", r"支付", r"付款"),
+        end=0.75,
+        min_len=11,
+        max_len=80,
+        prefer_short=True,
+    )
+    amount_zone_start = max(0.0, amount_heading / size - 0.02)
+    amount_zone_end = min(1.0, amount_heading / size + 0.18)
+    amount_value = choose(
+        "amount value",
+        (),
+        start=amount_zone_start,
+        end=amount_zone_end,
+        min_len=29,
+        max_len=100,
+        prefer_short=True,
+    )
+    payment = choose(
+        "payment",
+        (r"支付", r"付款"),
+        start=amount_zone_start,
+        end=amount_zone_end,
+        min_len=23,
+        prefer_short=True,
+    )
+    invoice = choose(
+        "invoice", (r"发票",), start=amount_zone_start, end=amount_zone_end, min_len=12, prefer_short=True
+    )
+    term = choose(
+        "term",
+        (r"合同期限", r"履行期限", r"有效期", r"服务期", r"期限"),
+        start=0.05,
+        end=0.9,
+        min_len=23,
+        prefer_short=True,
+    )
+    grammar = choose("grammar", (), start=0.15, end=0.65, min_len=11, prefer_short=True)
+    typo = choose("typo", (), start=0.15, end=0.7, min_len=8, prefer_short=True)
+    body_attachment = choose(
+        "body attachment", (r"附件",), start=0.05, end=0.8, min_len=32, prefer_short=True
+    )
+    breach_heading = choose("breach heading", (r"违约责任",), start=0.2, end=0.9, max_len=80, prefer_short=True)
+    breach_body = choose(
+        "breach body",
+        (),
+        start=breach_heading / size,
+        end=min(1.0, breach_heading / size + 0.18),
+        min_len=12,
+        prefer_short=True,
+    )
+    disorder_heading = choose(
+        "disordered heading", (r"不可抗力", r"争议", r"保密", r"知识产权"), start=0.25, end=0.95, max_len=100, prefer_short=True
+    )
+    dispute = choose(
+        "dispute", (r"人民法院", r"管辖", r"争议"), start=0.35, end=0.98, min_len=19, prefer_short=True
+    )
+    attachment_name = choose(
+        "attachment name", (r"附件",), start=0.45, end=1.0, min_len=9, max_len=160, prefer_short=True
+    )
+    attachment_date = choose(
+        "attachment date", (), start=max(0.5, attachment_name / size), end=1.0, min_len=20, prefer_short=True
+    )
+    signature = choose(
+        "signature",
+        (r"^甲方[：:]$", r"甲方.*盖章", r"甲方.*签章", r"甲方名称.*公章", r"甲方.*签字"),
+        start=0.55,
+        end=1.0,
+        max_len=180,
+        prefer_short=True,
+    )
+
+    add(title, (4,), "采购合同", "触发采购合同首部提示检查")
+    add(address, (1,), "地址：【未填写】", "制造主体基本信息缺失")
+    add(intro, (16,), "采购人甲方向中标单位乙方采购服务。", "植入流程敏感词")
+    add(amount_heading, (5, 6), "一、合同金额及支付方式", "触发金额和支付方式检查")
+    add(amount_value, (14,), "88,000.00元（大写：人民币捌万玖仟元整）", "制造金额大小写不一致")
+    add(payment, (6,), "甲方一次性支付全部合同价款，付款节点另行通知。", "制造单期付款和节点不明")
+    add(invoice, (6,), "发票类型由乙方另行确定。", "删除明确发票类型")
+    add(term, (7,), "合同履行期限由双方另行协商，起止日期不明确。", "制造整体履行期限不明确")
+    add(grammar, (15,), "产品范围保持一致一致。", "植入重复词语病")
+    add(typo, (12,), "乙方向甲方发贷。", "植入发贷错别字")
+    add(body_attachment, (11, 18), "正文有效期至2028年08月31日，见附件一《产品清单》。", "建立正文期限和附件名称")
+    add(breach_heading, (8,), "四、违约责任", "触发违约责任首部提示检查")
+    add(breach_body, (8,), "违约责任由双方另行协商。", "弱化违约责任内容")
+    add(disorder_heading, (13,), "二、不可抗力", "制造标题编号和顺序混乱")
+    add(dispute, (9,), "协商不成，向乙方所在地人民法院起诉。", "制造争议管辖不利于甲方")
+    add(attachment_name, (18,), "附件一《服务清单》", "制造附件名称不一致")
+    add(attachment_date, (11,), "附件有效期至2027年08月31日。", "制造正文附件期限不一致")
+    add(signature, (10,), "甲方（浙农商盖章）：", "制造甲方签署名称不一致")
+
+    forbidden_rewrites = (
+        ("项目负责人", "项目联系人", (3,), "移除项目负责人字段"),
+        ("以下无正文", "正文结束", (17,), "移除规范正文结束语"),
+        ("以下为合同签署栏", "合同签署栏", (17,), "移除规范正文结束语"),
+    )
+    for index, value in enumerate(values):
+        if index in replacements:
+            continue
+        after = value
+        criteria: set[int] = set()
+        reasons = []
+        for before_text, after_text, criterion_ids, reason in forbidden_rewrites:
+            if before_text in after:
+                after = after.replace(before_text, after_text)
+                criteria.update(criterion_ids)
+                reasons.append(reason)
+        if after != value:
+            replacements[index] = TextReplacement(
+                tuple(sorted(criteria)), index, value, after, "; ".join(sorted(set(reasons)))
+            )
+
+    return tuple(replacements[index] for index in sorted(replacements))
+
+
+def patch_document_xml(
+    xml_bytes: bytes, replacements: tuple[TextReplacement, ...]
+) -> tuple[bytes, list[dict[str, str | int]]]:
+    replacements_by_index = {item.text_node_index: item for item in replacements}
     chunks: list[bytes] = []
     cursor = 0
     audit_rows: list[dict[str, str | int]] = []
-    for index, match in enumerate(matches):
+    for index, match in enumerate(text_nodes(xml_bytes)):
+        chunks.append(xml_bytes[cursor : match.start()])
         replacement = replacements_by_index.get(index)
         if replacement is None:
-            continue
-        before = decoded_text(match)
-        if before != replacement.expected_before:
-            raise ValueError(
-                f"text node T{index} changed in source; expected {replacement.expected_before!r}, got {before!r}"
+            chunks.append(match.group(0))
+        else:
+            before = html.unescape(match.group(2).decode("utf-8"))
+            if before != replacement.expected_before:
+                raise ValueError(
+                    f"text node {index} mismatch: expected={replacement.expected_before!r}, actual={before!r}"
+                )
+            replacement_text = escape(replacement.after, {'"': "&quot;"}).encode("utf-8")
+            chunks.extend((match.group(1), replacement_text, match.group(3)))
+            audit_rows.append(
+                {
+                    "criterion_ids": ";".join(str(value) for value in replacement.criterion_ids),
+                    "xml_part": DOCUMENT_XML,
+                    "text_node_index": index,
+                    "before_text": before,
+                    "after_text": replacement.after,
+                    "reason": replacement.reason,
+                }
             )
-        escaped_after = escape(replacement.after).encode("utf-8")
-        chunks.append(xml_bytes[cursor : match.start(2)])
-        chunks.append(escaped_after)
-        cursor = match.end(2)
-        audit_rows.append(
-            {
-                "contract_id": "D01",
-                "criterion_ids": ",".join(str(value) for value in replacement.criterion_ids),
-                "xml_part": DOCUMENT_XML,
-                "text_node_index": index,
-                "before_text": before,
-                "after_text": replacement.after,
-                "reason": replacement.reason,
-            }
-        )
+        cursor = match.end()
     chunks.append(xml_bytes[cursor:])
-    if len(audit_rows) != len(REPLACEMENTS):
+    if len(audit_rows) != len(replacements):
         missing = sorted(set(replacements_by_index) - {int(row["text_node_index"]) for row in audit_rows})
         raise ValueError(f"replacement text nodes were not found: {missing}")
     return b"".join(chunks), audit_rows
@@ -215,15 +414,20 @@ def clone_with_document_xml(source: Path, target: Path, patched_xml: bytes) -> N
         temporary.unlink(missing_ok=True)
 
 
-def validate_package(source: Path, output: Path, original_xml: bytes, patched_xml: bytes) -> None:
+def validate_package(
+    source: Path,
+    output: Path,
+    original_xml: bytes,
+    patched_xml: bytes,
+    replacements: tuple[TextReplacement, ...],
+) -> None:
     if structure_mask(original_xml) != structure_mask(patched_xml):
         raise ValueError("document.xml structure changed; only w:t text is allowed to differ")
     original_nodes = text_nodes(original_xml)
     patched_nodes = text_nodes(patched_xml)
     if len(original_nodes) != len(patched_nodes):
         raise ValueError("w:t node count changed")
-
-    allowed = {item.text_node_index for item in REPLACEMENTS}
+    allowed = {item.text_node_index for item in replacements}
     actual = {
         index
         for index, (before, after) in enumerate(zip(original_nodes, patched_nodes, strict=True))
@@ -231,99 +435,101 @@ def validate_package(source: Path, output: Path, original_xml: bytes, patched_xm
     }
     if actual != allowed:
         raise ValueError(f"unexpected changed text nodes: expected={sorted(allowed)}, actual={sorted(actual)}")
-
     with zipfile.ZipFile(source, "r") as source_zip, zipfile.ZipFile(output, "r") as output_zip:
-        source_names = source_zip.namelist()
-        output_names = output_zip.namelist()
-        if source_names != output_names:
+        if source_zip.namelist() != output_zip.namelist():
             raise ValueError("DOCX package part list changed")
-        for name in source_names:
+        for name in source_zip.namelist():
             if name == DOCUMENT_XML:
                 continue
-            source_hash = sha256_bytes(source_zip.read(name))
-            output_hash = sha256_bytes(output_zip.read(name))
-            if source_hash != output_hash:
+            if sha256_bytes(source_zip.read(name)) != sha256_bytes(output_zip.read(name)):
                 raise ValueError(f"non-document XML part changed: {name}")
 
 
-def write_changes_csv(path: Path, rows: list[dict[str, str | int]]) -> None:
-    fieldnames = (
-        "contract_id",
-        "criterion_ids",
-        "xml_part",
-        "text_node_index",
-        "before_text",
-        "after_text",
-        "reason",
-    )
+def write_csv(path: Path, fieldnames: tuple[str, ...], rows: list[dict[str, object]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
 
 
-def write_expected_csv(path: Path, source: Path, output: Path) -> None:
-    source_hash = sha256_bytes(source.read_bytes())
-    output_hash = sha256_bytes(output.read_bytes())
-    fieldnames = (
-        "case_id",
-        "contract_id",
-        "contract_file",
-        "source_file",
-        "criterion_id",
-        "expected_problem",
-        "expected_location",
-        "expected_quote",
-        "case_origin",
-        "source_sha256",
-        "modified_sha256",
-    )
-    with path.open("w", encoding="utf-8-sig", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=fieldnames)
-        writer.writeheader()
-        for criterion_id, problem, location, quote, origin in EXPECTED_CASES:
-            writer.writerow(
+def main() -> int:
+    args = parse_args()
+    source_root = args.source_root.resolve()
+    output_dir = args.output_dir.resolve()
+    expected_csv = args.expected_csv.resolve()
+    changes_csv = args.changes_csv.resolve()
+    expected_rows: list[dict[str, object]] = []
+    change_rows: list[dict[str, object]] = []
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    for contract_id, filename in CASE_SOURCES:
+        source = source_root / filename
+        target = output_dir / f"{contract_id}.docx"
+        if not source.is_file():
+            raise FileNotFoundError(f"source DOCX was not found: {source}")
+        if target.exists() and not args.overwrite:
+            raise FileExistsError(f"output already exists; use --overwrite: {target}")
+        with zipfile.ZipFile(source, "r") as package:
+            original_xml = package.read(DOCUMENT_XML)
+        values = decoded_text_nodes(original_xml)
+        replacements = D01_REPLACEMENTS if contract_id == "D01" else generic_replacements(contract_id, values)
+        patched_xml, local_changes = patch_document_xml(original_xml, replacements)
+        clone_with_document_xml(source, target, patched_xml)
+        validate_package(source, target, original_xml, patched_xml, replacements)
+        source_hash = sha256_bytes(source.read_bytes())
+        output_hash = sha256_bytes(target.read_bytes())
+        for row in local_changes:
+            change_rows.append({"contract_id": contract_id, **row})
+        for criterion_id, problem, location, quote in EXPECTED_CASES:
+            expected_rows.append(
                 {
-                    "case_id": f"D01-C{criterion_id:02d}",
-                    "contract_id": "D01",
-                    "contract_file": output.name,
+                    "case_id": f"{contract_id}-C{criterion_id:02d}",
+                    "contract_id": contract_id,
+                    "contract_file": target.name,
                     "source_file": source.name,
                     "criterion_id": criterion_id,
                     "expected_problem": problem,
                     "expected_location": location,
                     "expected_quote": quote,
-                    "case_origin": origin,
                     "source_sha256": source_hash,
                     "modified_sha256": output_hash,
                 }
             )
+        print(f"{contract_id}: nodes={len(values)}, changed={len(local_changes)}, source={source.name}")
 
-
-def main() -> int:
-    args = parse_args()
-    source = args.source.resolve()
-    output = args.output.resolve()
-    expected_csv = args.expected_csv.resolve()
-    changes_csv = args.changes_csv.resolve()
-    if not source.is_file():
-        raise FileNotFoundError(f"source DOCX was not found: {source}")
-    if output.exists() and not args.overwrite:
-        raise FileExistsError(f"output already exists; use --overwrite: {output}")
-
-    with zipfile.ZipFile(source, "r") as package:
-        original_xml = package.read(DOCUMENT_XML)
-    patched_xml, audit_rows = patch_document_xml(original_xml)
-    clone_with_document_xml(source, output, patched_xml)
-    validate_package(source, output, original_xml, patched_xml)
-    write_changes_csv(changes_csv, audit_rows)
-    write_expected_csv(expected_csv, source, output)
-
-    print(f"Source: {source}")
-    print(f"Output: {output}")
-    print(f"Changed w:t nodes: {len(audit_rows)}")
-    print(f"Expected cases: {len(EXPECTED_CASES)}")
-    print("Validation: all non-document.xml parts are byte-identical")
-    print("Validation: document.xml structure is unchanged")
+    write_csv(
+        expected_csv,
+        (
+            "case_id",
+            "contract_id",
+            "contract_file",
+            "source_file",
+            "criterion_id",
+            "expected_problem",
+            "expected_location",
+            "expected_quote",
+            "source_sha256",
+            "modified_sha256",
+        ),
+        expected_rows,
+    )
+    write_csv(
+        changes_csv,
+        (
+            "contract_id",
+            "criterion_ids",
+            "xml_part",
+            "text_node_index",
+            "before_text",
+            "after_text",
+            "reason",
+        ),
+        change_rows,
+    )
+    print(f"Expected cases: {len(expected_rows)}")
+    print(f"Changed text nodes: {len(change_rows)}")
+    print("Validation: only existing word/document.xml w:t text changed")
     return 0
 
 

@@ -1,35 +1,48 @@
 # criteria-formal 人工召回测试
 
-这个目录用于对 `resources/criteria/criteria-formal.docx` 的 18 个审查要点进行人工评测。
-当前只制作 D01 样本，确认 XML 局部修改方式正确后再扩展到 D02-D10。
+该目录使用10份不同合同测试 `resources/criteria/criteria-formal.docx` 的18个审查要点，
+共180个审查用例。
 
-## 第一阶段：制作测试集
-
-在项目根目录执行：
+## 生成测试合同
 
 ```powershell
 python tests/criteria_formal_recall/prepare_cases.py --overwrite
 ```
 
-输入来自 `C:\Users\lenovo\Downloads\合同样例`。脚本不修改源文件，只在 `cases/` 生成
-`D01.docx`，并生成18行 `expected_cases_D01.csv` 和逐文字节点的 `xml_changes_D01.csv`。
+输入来自 `C:\Users\lenovo\Downloads\合同样例`，输出为 `cases/D01.docx` 至
+`cases/D10.docx`。生成器只替换 `word/document.xml` 中已有 `<w:t>` 节点的文字，
+不使用 Word SaveAs 或 `python-docx` 保存，不增删 XML 节点，其他 DOCX 部件必须逐字节一致。
 
-生成器只替换 `word/document.xml` 中现有 `<w:t>` 节点的文字，不使用 Word SaveAs 或
-`python-docx` 保存，不增删 XML 节点，也不修改其他 DOCX 部件。
+生成的审查基准和XML改动审计分别为：
 
-先人工打开 D01，并对照两个 CSV 检查改造和 XML 边界是否正确。D01 确认后再生成其余9份。
+- `expected_cases_10.csv`：10份合同 × 18个审查要点。
+- `xml_changes_10.csv`：每个被修改文字节点的原文、改后文字和修改原因。
 
-## 第二阶段：运行审查
-
-确认测试集后，先启动本地 API，再执行：
+## 运行真实API审查
 
 ```powershell
-python tests/criteria_formal_recall/run_cases.py
+python tests/criteria_formal_recall/run_cases.py --concurrency 1
 ```
 
-脚本明确上传 `criteria-formal.docx`，将带批注 DOCX 写入 `results/<run_id>/annotated/`，
-并生成 `results/<run_id>/recall.csv`。
+需要只补跑某份合同时使用：
 
-`recall.csv` 的自动召回只表示对应合同、对应审查要点是否输出了至少一个问题。
-批注内容是否准确由人工打开输出 DOCX 判断，并可填写 CSV 中的 `manual_correct` 和
-`manual_note`。
+```powershell
+python tests/criteria_formal_recall/run_cases.py --contract-id D03
+```
+
+脚本明确上传 `criteria-formal.docx`，带批注合同和运行数据写入
+`results/<run_id>/`。运行时 `data/api/<task_id>/` 只用于读取正常API任务状态和结构化结果，
+测试集和测试报告不会写入项目 `data/`。
+
+## 评测口径
+
+- 最终召回以带批注DOCX中实际可见的正确批注为准，后端结构化结果只用于定位丢失阶段。
+- 批注准确度先核对对应审查要点，再核对合同事实和批注锚点。
+- 同一问题的重复批注不算识别错误，也不会增加召回数量；需要时单独统计冗余率。
+- 原合同已有批注和 `AI 审查总结` 不进入批注准确度分母。
+
+多个运行批次可通过 `evaluate_results.py` 合并。评估器会先扣除输入合同已有批注，
+再把最终可见的 `AI 条款审查` 批注映射回后端审查要点，并输出：
+
+- `recall_failures.csv`：最终没有准确可见批注的审查用例及失败阶段。
+- `incorrect_comments.csv`：违反“审查要点、合同事实、锚点”任一条件的批注。
