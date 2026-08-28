@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SUITE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES_DIR = SUITE_ROOT / "cases"
-DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases.csv"
+DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases_D01.csv"
 DEFAULT_CRITERIA = PROJECT_ROOT / "resources" / "criteria" / "criteria-formal.docx"
 DEFAULT_RESULTS_DIR = SUITE_ROOT / "results"
 DEFAULT_API_TASK_ROOT = PROJECT_ROOT / "data" / "api"
@@ -46,7 +46,7 @@ class Settings:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="运行 criteria-formal 的10份人工召回测试合同。")
+    parser = argparse.ArgumentParser(description="运行 criteria-formal 人工召回测试合同。")
     parser.add_argument("--base-url", default=os.getenv("BASE_URL", "http://localhost:5000"))
     parser.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)
     parser.add_argument("--expected-csv", type=Path, default=DEFAULT_EXPECTED_CSV)
@@ -246,8 +246,15 @@ async def run_one(
 def read_expected_rows(path: Path) -> list[dict[str, str]]:
     with path.open("r", encoding="utf-8-sig", newline="") as stream:
         rows = list(csv.DictReader(stream))
-    if len(rows) != 180:
-        raise ValueError(f"expected_cases.csv must contain 180 rows, got {len(rows)}")
+    if not rows:
+        raise ValueError(f"expected cases CSV is empty: {path}")
+    counts: dict[str, set[int]] = {}
+    for row in rows:
+        counts.setdefault(row["contract_id"], set()).add(int(row["criterion_id"]))
+    expected_criteria = set(range(1, 19))
+    invalid = {contract_id: sorted(values) for contract_id, values in counts.items() if values != expected_criteria}
+    if invalid:
+        raise ValueError(f"each contract must contain criteria 1..18: {invalid}")
     return rows
 
 
@@ -309,10 +316,12 @@ def write_recall_csv(path: Path, expected: list[dict[str, str]], records: list[d
 async def run_all(settings: Settings) -> int:
     if not settings.criteria_path.is_file():
         raise FileNotFoundError(f"criteria file was not found: {settings.criteria_path}")
-    contracts = sorted(settings.cases_dir.glob("D??.docx"))
-    if len(contracts) != 10:
-        raise ValueError(f"cases directory must contain D01.docx through D10.docx; got {len(contracts)} files")
     expected = read_expected_rows(settings.expected_csv)
+    contract_ids = sorted({row["contract_id"] for row in expected})
+    contracts = [settings.cases_dir / f"{contract_id}.docx" for contract_id in contract_ids]
+    missing = [str(path) for path in contracts if not path.is_file()]
+    if missing:
+        raise FileNotFoundError(f"test contract files were not found: {missing}")
     current_run_id = run_id()
     run_dir = settings.results_root / current_run_id
     run_dir.mkdir(parents=True, exist_ok=False)
