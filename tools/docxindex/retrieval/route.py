@@ -12,12 +12,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tools.docxindex.llm import LLMClient
 from tools.docxindex.llm.cache import JsonlCache, cache_key, text_hash
-from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.llm.config import docxindex_config, load_yaml
+from tools.docxindex.llm.prompts import route_prompt
+from tools.docxindex.llm.schemas import RouteResponse
 
 
 DEFAULT_ROUTE_CONFIG = Path(__file__).resolve().parents[4] / "config.yaml"
-ROUTE_PROMPT_VERSION = "docx_route_v3"
+ROUTE_PROMPT_VERSION = "docx_route_v4"
 ROUTE_TITLE_MAX_DEPTH = 2
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NUMBERED_CRITERION = re.compile(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)(.+)$", re.S)
@@ -64,7 +65,7 @@ def plan_route(
     else:
         criterion = criterion_text
     titles = _titles(index.get("structure_tree") or [])
-    prompt = _prompt(query, criterion, titles, config)
+    prompt = route_prompt(query, criterion, titles, config.methods)
     cache = JsonlCache(cache_dir / "route.jsonl" if cache_dir else None)
     key = cache_key(
         ROUTE_PROMPT_VERSION,
@@ -162,42 +163,3 @@ def _titles(
             )
         )
     return result
-
-
-def _prompt(query: str, criterion: str, titles: list[dict[str, Any]], config: RouteConfig) -> str:
-    methods = "\n".join(f"- {name}: {description}" for name, description in config.methods.items())
-    title_view = [
-        {
-            "title": item["title"],
-            "node_type": item["node_type"],
-            "depth": item["depth"],
-            "region": item["region"],
-        }
-        for item in titles
-    ]
-    return f"""你是 DOCX 合同检索路由器，只规划检索方法，不审查合同，不选择 node_id。
-
-用户查询：
-{query}
-
-审查要点原文：
-{criterion}
-
-当前合同标题目录：
-{json.dumps(title_view, ensure_ascii=False)}
-
-可用方法：
-{methods}
-
-规划规则：
-- 可以组合多个步骤，但避免重复扫描。
-- 标题是否存在、标题顺序、目录检查使用 title；需要完整目录时 all_titles=true。
-- 明确固定区域或明确标题下内容使用 region；region 可取 frontmatter/body/tail/attachments。
-- 精确关键词、金额、存在或不存在判断使用 rule，并在 terms 中列出需要原文匹配的短词。
-- 两个以上区域、首尾、正文与附件或多个证据角色需要联合判断时使用 join，并在 slots 中列出证据角色。
-- 错别字、语病或必须逐段通读全文的问题使用 scan，且不再组合其他步骤。
-- 标题、区域和精确关键词均无法可靠定位时使用 hybrid，并设置 fallback=true。
-- 只有确定性步骤不足以定位语义证据时 fallback=true。
-- 不得把审查结论写进检索计划。
-
-只返回符合 schema 的 JSON object。"""

@@ -7,6 +7,74 @@ SUMMARY_PROMPT_VERSION = "docx_summary_v3"
 SUMMARY_BATCH_PROMPT_VERSION = "docx_summary_batch_v1"
 ATTACHMENT_HIERARCHY_PROMPT_VERSION = "local_hierarchy_v3"
 
+ROUTE_EXPECTED_JSON = """{
+  "steps": [
+    {
+      "method": "rule",
+      "terms": ["合同金额"],
+      "regions": [],
+      "slots": [],
+      "all_titles": false,
+      "context": 0
+    }
+  ],
+  "fallback": false
+}"""
+
+
+def route_prompt(
+    query: str,
+    criterion: str,
+    titles: list[dict[str, object]],
+    methods: dict[str, str],
+) -> str:
+    methods_text = "\n".join(f"- {name}: {description}" for name, description in methods.items())
+    title_view = [
+        {
+            "title": item["title"],
+            "node_type": item["node_type"],
+            "depth": item["depth"],
+            "region": item["region"],
+        }
+        for item in titles
+    ]
+    return f"""你是 DOCX 合同检索路由器，只规划检索方法，不审查合同，不选择 node_id。
+
+用户查询：
+{query}
+
+审查要点原文：
+{criterion}
+
+当前合同标题目录：
+{json.dumps(title_view, ensure_ascii=False)}
+
+可用方法：
+{methods_text}
+
+规划规则：
+- 可以组合多个步骤，但避免重复扫描。
+- 标题是否存在、标题顺序、目录检查使用 title；需要完整目录时 all_titles=true。
+- 明确固定区域或明确标题下内容使用 region；region 可取 frontmatter/body/tail/attachments。
+- 精确关键词、金额、存在或不存在判断使用 rule，并在 terms 中列出需要原文匹配的短词。
+- 两个以上区域、首尾、正文与附件或多个证据角色需要联合判断时使用 join，并在 slots 中列出证据角色。
+- 错别字、语病或必须逐段通读全文的问题使用 scan，且不再组合其他步骤。
+- 标题、区域和精确关键词均无法可靠定位时使用 hybrid，并设置 fallback=true。
+- 只有确定性步骤不足以定位语义证据时 fallback=true。
+- 不得把审查结论写进检索计划。
+
+输出格式要求（JSON）：
+{ROUTE_EXPECTED_JSON}
+
+字段约束：
+1. 顶层只能包含 steps 和 fallback。
+2. steps 必须是数组，包含 1 到 5 个路由步骤。
+3. 每个步骤必须包含 method；method 只能是 title、region、rule、join、scan、hybrid 之一。
+4. terms 和 slots 必须是字符串数组；regions 只能包含 frontmatter、body、tail、attachments。
+5. all_titles 和 fallback 必须是布尔值；context 必须是 0 到 2 的整数。
+6. 不使用的 terms、regions、slots 返回空数组；不需要完整目录时 all_titles=false。
+7. 只返回合法 JSON object，不要返回 Markdown、代码块、解释、纯文本或 schema 外字段。"""
+
 
 def expand_prompt(node_id: str, title: str, start_anchor: str, end_anchor: str, items_text: str) -> str:
     return f"""你正在把一个过长的 DOCX 合同 node 拆成更小的子 node。
