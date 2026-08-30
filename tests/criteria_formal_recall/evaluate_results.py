@@ -4,6 +4,7 @@ import argparse
 import csv
 import json
 import re
+import shutil
 import zipfile
 from collections import Counter
 from dataclasses import dataclass
@@ -56,6 +57,13 @@ class Candidate:
     comment_text: str
 
 
+@dataclass(frozen=True)
+class BackendIssue:
+    criterion_id: int
+    issue_id: str
+    issue_comment: str
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="合并真实API运行并核对最终DOCX可见批注。")
     parser.add_argument("--run-dir", type=Path, action="append", required=True)
@@ -79,9 +87,13 @@ def criterion_id(payload: dict[str, Any]) -> int | None:
     return value if 1 <= value <= 18 else None
 
 
-def load_candidates(task_root: Path, task_id: str) -> tuple[list[Candidate], set[int]]:
+def load_candidates(
+    task_root: Path, task_id: str
+) -> tuple[list[Candidate], list[BackendIssue], set[int], dict[int, int]]:
     candidates: list[Candidate] = []
+    backend_issues: list[BackendIssue] = []
     backend_reported: set[int] = set()
+    backend_issue_counts: dict[int, int] = {}
     criteria_dir = task_root / task_id / "state" / "criteria"
     for path in sorted(criteria_dir.glob("*.output.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -92,9 +104,19 @@ def load_candidates(task_root: Path, task_id: str) -> tuple[list[Candidate], set
         if not isinstance(issues, list) or not issues:
             continue
         backend_reported.add(number)
+        backend_issue_counts[number] = backend_issue_counts.get(number, 0) + len(
+            [issue for issue in issues if isinstance(issue, dict)]
+        )
         for issue in issues:
             if not isinstance(issue, dict):
                 continue
+            backend_issues.append(
+                BackendIssue(
+                    criterion_id=number,
+                    issue_id=str(issue.get("issue_id") or ""),
+                    issue_comment=str(issue.get("issue_comment") or ""),
+                )
+            )
             for anchor in issue.get("anchors") or []:
                 if not isinstance(anchor, dict):
                     continue
@@ -110,7 +132,28 @@ def load_candidates(task_root: Path, task_id: str) -> tuple[list[Candidate], set
                         comment_text=text,
                     )
                 )
-    return candidates, backend_reported
+    return candidates, backend_issues, backend_reported, backend_issue_counts
+
+
+def json_values(values: list[str]) -> str:
+    unique = list(dict.fromkeys(value.strip() for value in values if value.strip()))
+    return json.dumps(unique, ensure_ascii=False)
+
+
+def consolidate_annotated_docs(
+    records: dict[str, dict[str, Any]], output_dir: Path
+) -> list[Path]:
+    annotated_dir = output_dir / "annotated"
+    annotated_dir.mkdir(parents=True, exist_ok=True)
+    outputs: list[Path] = []
+    for contract_id_value in sorted(records):
+        source = Path(str(records[contract_id_value]["output_docx"])).resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"annotated DOCX not found: {source}")
+        target = annotated_dir / f"{contract_id_value}_已审查.docx"
+        shutil.copy2(source, target)
+        outputs.append(target)
+    return outputs
 
 
 def docx_comments(docx_path: Path) -> list[dict[str, str]]:
@@ -206,12 +249,20 @@ def main() -> int:
     inventory: list[dict[str, Any]] = []
     visible_by_contract: dict[str, set[int]] = {}
     backend_by_contract: dict[str, set[int]] = {}
+    backend_candidates_by_contract: dict[str, list[Candidate]] = {}
+    backend_issues_by_contract: dict[str, list[BackendIssue]] = {}
+    backend_issue_counts_by_contract: dict[str, dict[int, int]] = {}
 
     for contract_id_value in sorted(records):
         record = records[contract_id_value]
         task_id_value = str(record["task_id"])
-        candidates, backend_reported = load_candidates(task_root, task_id_value)
+        candidates, backend_issues, backend_reported, backend_issue_counts = (
+            load_candidates(task_root, task_id_value)
+        )
         backend_by_contract[contract_id_value] = backend_reported
+        backend_candidates_by_contract[contract_id_value] = candidates
+        backend_issues_by_contract[contract_id_value] = backend_issues
+        backend_issue_counts_by_contract[contract_id_value] = backend_issue_counts
         docx_path = Path(str(record["output_docx"])).resolve()
         visible_criteria: set[int] = set()
         input_docx = cases_dir / f"{contract_id_value}.docx"
@@ -263,6 +314,21 @@ def main() -> int:
             continue
         backend_reported = number in backend_by_contract.get(contract, set())
         visibly_reported = number in visible_by_contract.get(contract, set())
+        backend_candidates = [
+            candidate
+            for candidate in backend_candidates_by_contract.get(contract, [])
+            if candidate.criterion_id == number
+        ]
+        backend_issues = [
+            issue
+            for issue in backend_issues_by_contract.get(contract, [])
+            if issue.criterion_id == number
+        ]
+        visible_incorrect = [
+            comment
+            for comment in incorrect_rows
+            if comment["contract_id"] == contract and int(comment["criterion_id"]) == number
+        ]
         failures.append(
             {
                 "case_id": row["case_id"],
@@ -272,6 +338,34 @@ def main() -> int:
                 "expected_location": row["expected_location"],
                 "expected_quote": row["expected_quote"],
                 "backend_reported": "yes" if backend_reported else "no",
+                "backend_issue_count": backend_issue_counts_by_contract.get(contract, {}).get(
+                    number, 0
+                ),
+                "backend_issue_comments": json_values(
+                    [issue.issue_comment for issue in backend_issues]
+                ),
+                "backend_quoted_texts": json_values(
+                    [candidate.quoted_text for candidate in backend_candidates]
+                ),
+                "backend_anchor_comments": json_values(
+                    [candidate.comment_text for candidate in backend_candidates]
+                ),
+                "visible_quoted_texts": json_values(
+                    [str(comment["quoted_text"]) for comment in visible_incorrect]
+                ),
+                "visible_comments": json_values(
+                    [str(comment["comment_text"]) for comment in visible_incorrect]
+                ),
+                "error_reasons": json_values(
+                    [str(comment["error_reason"]) for comment in visible_incorrect]
+                ),
+                "backend_evidence_status": (
+                    "not_reported_no_recalled_text"
+                    if not backend_reported
+                    else "reported_with_anchor_text"
+                    if backend_candidates
+                    else "reported_without_anchor_no_recalled_text"
+                ),
                 "failure_stage": (
                     "incorrect_only" if visibly_reported else "docx_write" if backend_reported else "review"
                 ),
@@ -305,6 +399,14 @@ def main() -> int:
             "expected_location",
             "expected_quote",
             "backend_reported",
+            "backend_issue_count",
+            "backend_issue_comments",
+            "backend_quoted_texts",
+            "backend_anchor_comments",
+            "visible_quoted_texts",
+            "visible_comments",
+            "error_reasons",
+            "backend_evidence_status",
             "failure_stage",
         ),
         failures,
@@ -328,11 +430,13 @@ def main() -> int:
         ),
         incorrect_rows,
     )
+    consolidated_docs = consolidate_annotated_docs(records, output_dir)
     print(f"Contracts: {len(records)}")
     print(f"Visible AI comments: {len(inventory)}")
     print(f"Accurate visible criterion recall: {180 - len(failures)}/180 = {(180 - len(failures)) / 180:.2%}")
     print(f"Recall failures: {len(failures)}")
     print(f"Incorrect comments: {len(incorrect_rows)}/{len(inventory)} = {len(incorrect_rows) / len(inventory):.2%}")
+    print(f"Consolidated annotated DOCX files: {len(consolidated_docs)}")
     print(f"Output: {output_dir}")
     return 0
 

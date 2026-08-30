@@ -45,4 +45,8 @@ python tests/criteria_formal_recall/run_cases.py --contract-id D03
 再把最终可见的 `AI 条款审查` 批注映射回后端审查要点，并输出：
 
 - `recall_failures.csv`：最终没有准确可见批注的审查用例及失败阶段。
+  同时保留后端 issue 数量、后端引用原文、后端批注，以及错误可见批注的原文、内容和判断理由；
+  `backend_evidence_status` 区分“未识别无原文”“已识别且有 anchor 原文”和
+  “已识别但无 anchor 原文”；`review` 阶段未识别的用例对应证据字段为空数组。
 - `incorrect_comments.csv`：违反“审查要点、合同事实、锚点”任一条件的批注。
+- `annotated/`：按 `D01_已审查.docx` 至 `D10_已审查.docx` 汇总最终带批注合同。
