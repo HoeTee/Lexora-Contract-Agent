@@ -90,4 +90,9 @@ build/
 /docs/.$BUSINESS_USER_JOURNEY.drawio.bkp
 /docs/portal/
 /docs/superpowers/
-/检索算法设计文档.txt
+/检索算法.txt
+
+# Local development tool configuration
+/requirements-dev.txt
+/ruff.toml
+/pyrightconfig.json
