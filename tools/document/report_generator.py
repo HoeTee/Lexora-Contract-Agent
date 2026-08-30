@@ -111,6 +111,7 @@ class ReportGenerator:
         summary_sections: dict | None = None,
         output_dir: str | Path | None = None,
         output_path: str | Path | None = None,
+        annotation_events_path: str | Path | None = None,
     ) -> str | None:
         """Generate only the annotated original-contract DOCX."""
         if output_path:
@@ -128,6 +129,9 @@ class ReportGenerator:
             results=results,
             output_path=str(output_path),
             summary_sections=summary_sections,
+            annotation_events_path=(
+                str(annotation_events_path) if annotation_events_path is not None else None
+            ),
         )
         return os.path.abspath(docx_path) if docx_path else None
 

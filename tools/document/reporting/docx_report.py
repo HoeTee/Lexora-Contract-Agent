@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import sys
@@ -6,6 +7,7 @@ import shutil
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from docx import Document
 from docx.document import Document as DocxDocument
 from docx.oxml.ns import qn
@@ -107,6 +109,17 @@ class DocxReportGenerator:
     @staticmethod
     def _iter_blocks(parent):
         """Yield Paragraph/Table blocks in document order for a document or cell."""
+        for _, block in DocxReportGenerator._iter_indexed_blocks(parent):
+            yield block
+
+    @staticmethod
+    def _iter_indexed_blocks(parent):
+        """Yield real XML child indexes with commentable blocks.
+
+        Anchor paths are created from the position in ``w:body``/``w:tc``.  The
+        position must not be recomputed after unsupported XML children (for
+        example content controls) have been filtered out.
+        """
         if isinstance(parent, DocxDocument):
             parent_element = parent.element.body
         elif isinstance(parent, _Cell):
@@ -114,11 +127,11 @@ class DocxReportGenerator:
         else:
             raise TypeError(f"Unsupported block parent: {type(parent)!r}")
 
-        for child in parent_element.iterchildren():
+        for child_index, child in enumerate(parent_element.iterchildren(), start=1):
             if isinstance(child, CT_P):
-                yield Paragraph(child, parent)
+                yield child_index, Paragraph(child, parent)
             elif isinstance(child, CT_Tbl):
-                yield Table(child, parent)
+                yield child_index, Table(child, parent)
 
     @staticmethod
     def _collect_paragraph_anchors(parent, path_prefix: str = "body/") -> list[ParagraphAnchor]:
@@ -126,7 +139,7 @@ class DocxReportGenerator:
         anchors: list[ParagraphAnchor] = []
         seen_elements: set[int] = set()
 
-        for block_index, block in enumerate(DocxReportGenerator._iter_blocks(parent), start=1):
+        for block_index, block in DocxReportGenerator._iter_indexed_blocks(parent):
             if isinstance(block, Paragraph):
                 block_text = block.text.strip()
                 normalized_text = DocxReportGenerator._normalize_text(block_text)
@@ -217,7 +230,7 @@ class DocxReportGenerator:
         views: list[ParagraphTextView] = []
         seen_elements: set[int] = set()
 
-        for block_index, block in enumerate(DocxReportGenerator._iter_blocks(parent), start=1):
+        for block_index, block in DocxReportGenerator._iter_indexed_blocks(parent):
             if isinstance(block, Paragraph):
                 element_id = id(block._element)
                 if element_id in seen_elements:
@@ -267,7 +280,7 @@ class DocxReportGenerator:
         if not anchor_type or not anchor_id:
             return []
 
-        for block_index, block in enumerate(DocxReportGenerator._iter_blocks(parent), start=1):
+        for block_index, block in DocxReportGenerator._iter_indexed_blocks(parent):
             if isinstance(block, Paragraph):
                 path = f"{path_prefix}p{block_index}"
                 current_anchor_id = paragraph_anchor_id(block, path)
@@ -382,6 +395,32 @@ class DocxReportGenerator:
             text_anchor = DocxReportGenerator._text_anchor_from_find(view, quoted)
             if text_anchor:
                 return text_anchor
+        normalized_quoted = DocxReportGenerator._normalize_text(quoted)
+        if not normalized_quoted:
+            return None
+        for view in views:
+            normalized_chars: list[str] = []
+            original_indexes: list[int] = []
+            for original_index, char in enumerate(view.text):
+                normalized_char = DocxReportGenerator._normalize_text(char)
+                if not normalized_char:
+                    continue
+                normalized_chars.append(normalized_char)
+                original_indexes.extend([original_index] * len(normalized_char))
+            normalized_text = "".join(normalized_chars)
+            normalized_start = normalized_text.find(normalized_quoted)
+            if normalized_start < 0:
+                continue
+            normalized_end = normalized_start + len(normalized_quoted) - 1
+            if normalized_end >= len(original_indexes):
+                continue
+            text_anchor = DocxReportGenerator._text_anchor_from_indexes(
+                view,
+                original_indexes[normalized_start],
+                original_indexes[normalized_end] + 1,
+            )
+            if text_anchor:
+                return text_anchor
         return None
 
     @staticmethod
@@ -406,6 +445,32 @@ class DocxReportGenerator:
         """Return the first non-empty body paragraph that can host fallback comments."""
         anchors = DocxReportGenerator._collect_paragraph_anchors(doc)
         return anchors[0] if anchors else None
+
+    @staticmethod
+    def _get_document_end_anchor(doc: Document) -> ParagraphAnchor | None:
+        """Return the last non-empty body paragraph for end-of-document issues."""
+        anchors = DocxReportGenerator._collect_paragraph_anchors(doc)
+        return anchors[-1] if anchors else None
+
+    @staticmethod
+    def _select_missing_issue_anchor(
+        doc: Document,
+        criterion: str,
+        issue: dict,
+    ) -> tuple[ParagraphAnchor | None, str]:
+        """Choose a deterministic placement for issues caused by missing text."""
+        placement_text = " ".join(
+            str(value or "")
+            for value in (
+                criterion,
+                issue.get("check_point"),
+                issue.get("issue_comment"),
+            )
+        )
+        end_hints = ("正文最后", "正文结尾", "文末", "签署栏", "签字盖章", "以下无正文")
+        if any(hint in placement_text for hint in end_hints):
+            return DocxReportGenerator._get_document_end_anchor(doc), "document_end_missing_issue"
+        return DocxReportGenerator._get_document_start_anchor(doc), "document_start_missing_issue"
 
     @staticmethod
     def _paragraph_content_start_index(para_element) -> int:
@@ -686,6 +751,7 @@ class DocxReportGenerator:
         results: list,
         output_path: str,
         summary_sections: dict | None = None,
+        annotation_events_path: str | None = None,
     ) -> str:
         """Generate the annotated DOCX report using the original contract as the base."""
 
@@ -714,22 +780,38 @@ class DocxReportGenerator:
                     anchors = issue.get('anchors') or []
 
                     if not anchors:
-                        unmatched_comments.append({
-                            'criterion_id': cid,
-                            'criterion': criterion,
-                            'issue_id': issue_id,
-                            'risk_level': risk_level,
-                            'comment_text': issue.get('issue_comment', ''),
-                            'reference_text': '',
-                            'author': REVIEW_COMMENT_AUTHOR,
-                        })
+                        fallback_anchor, fallback_strategy = (
+                            DocxReportGenerator._select_missing_issue_anchor(doc, criterion, issue)
+                        )
+                        if fallback_anchor:
+                            comments_data.append({
+                                'anchor': fallback_anchor,
+                                'comment_text': DocxReportGenerator._build_issue_comment_text(
+                                    issue.get('issue_comment', ''),
+                                    risk_level,
+                                    criterion=issue.get('criterion') or criterion,
+                                ),
+                                'author': REVIEW_COMMENT_AUTHOR,
+                            })
+                        else:
+                            unmatched_comments.append({
+                                'criterion_id': cid,
+                                'criterion': criterion,
+                                'issue_id': issue_id,
+                                'risk_level': risk_level,
+                                'comment_text': issue.get('issue_comment', ''),
+                                'reference_text': '',
+                                'author': REVIEW_COMMENT_AUTHOR,
+                            })
                         annotation_stats["missing_text_fallback"] += 1
                         annotation_events.append({
                             "event": "annotation_missing_text",
                             "criterion_id": cid,
                             "issue_id": issue_id,
-                            "status": "missing_text_fallback",
+                            "status": "anchored" if fallback_anchor else "unmatched",
                             "reason": "anchors_empty",
+                            "match_strategy": fallback_strategy,
+                            "paragraph_path": fallback_anchor.path if fallback_anchor else None,
                             "risk_level": risk_level,
                             "comment_text": issue.get('issue_comment', ''),
                         })
@@ -815,6 +897,24 @@ class DocxReportGenerator:
                 DocxReportGenerator._add_comments_to_doc(doc, comments_data)
 
             doc.save(output_path)
+            if annotation_events_path:
+                annotation_path = Path(annotation_events_path)
+                annotation_path.parent.mkdir(parents=True, exist_ok=True)
+                annotation_path.write_text(
+                    json.dumps(
+                        {
+                            "contract_path": contract_path,
+                            "output_path": output_path,
+                            "stats": annotation_stats,
+                            "summary_comment_count": fallback_count,
+                            "skipped_count": skipped_count,
+                            "events": annotation_events,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    encoding="utf-8",
+                )
             print(
                 f"  DOCX: {annotation_stats['xml_anchor_matched']} XML-anchored comments, "
                 f"{fallback_count} document-start fallback comments, "
@@ -883,6 +983,7 @@ class DocxReportGenerator:
         results: list,
         output_path: str,
         summary_sections: dict | None = None,
+        annotation_events_path: str | None = None,
     ) -> str | None:
         """Generate only the annotated original-contract DOCX."""
         if not DocxReportGenerator._can_generate_annotated_docx(contract_path, results):
@@ -896,6 +997,7 @@ class DocxReportGenerator:
             results,
             output_path,
             summary_sections=summary_sections,
+            annotation_events_path=annotation_events_path,
         )
 
 

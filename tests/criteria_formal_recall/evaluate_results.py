@@ -52,6 +52,7 @@ MANUAL_ERROR_RULES = (
 class Candidate:
     criterion_id: int
     issue_id: str
+    anchor_type: str
     anchor_id: str
     quoted_text: str
     comment_text: str
@@ -127,6 +128,7 @@ def load_candidates(
                     Candidate(
                         criterion_id=number,
                         issue_id=str(issue.get("issue_id") or ""),
+                        anchor_type=str(anchor.get("xml_anchor_type") or ""),
                         anchor_id=str(anchor.get("xml_anchor_id") or ""),
                         quoted_text=str(anchor.get("quoted_text") or ""),
                         comment_text=text,

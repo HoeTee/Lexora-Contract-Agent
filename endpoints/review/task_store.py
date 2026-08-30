@@ -167,6 +167,10 @@ def review_outputs_path(client_dir: str, task_id: str) -> Path:
     return logs_dir(client_dir, task_id) / "review_outputs.json"
 
 
+def annotation_events_path(client_dir: str, task_id: str) -> Path:
+    return logs_dir(client_dir, task_id) / "annotation_events.json"
+
+
 def mcp_log_path(client_dir: str, task_id: str) -> Path:
     return logs_dir(client_dir, task_id) / "mcp.log"
 
@@ -332,6 +336,12 @@ def task_review_outputs_path(client_dir: str, task_id: str) -> Path | None:
     return review_outputs_path(client_dir, task_id)
 
 
+def task_annotation_events_path(client_dir: str, task_id: str) -> Path | None:
+    if not should_write_task_file("logs"):
+        return None
+    return annotation_events_path(client_dir, task_id)
+
+
 def task_conversation_log_dir(client_dir: str, task_id: str) -> Path | None:
     if not should_write_task_file("logs"):
         return None
@@ -459,6 +469,7 @@ def create_task(
     task_api_log = task_api_events_path(client_dir, task_id)
     task_trace_log = task_trace_path(client_dir, task_id)
     task_review_outputs_log = task_review_outputs_path(client_dir, task_id)
+    task_annotation_events_log = task_annotation_events_path(client_dir, task_id)
     task_conversation_log = task_conversation_log_dir(client_dir, task_id)
     task_mcp_log = task_mcp_log_file(client_dir, task_id)
     task = {
@@ -510,6 +521,7 @@ def create_task(
             "events_log_path": str(task_api_log) if task_api_log else None,
             "trace_path": str(task_trace_log) if task_trace_log else None,
             "review_outputs_path": str(task_review_outputs_log) if task_review_outputs_log else None,
+            "annotation_events_path": str(task_annotation_events_log) if task_annotation_events_log else None,
             "conversation_log_dir": str(task_conversation_log) if task_conversation_log else None,
             "mcp_log_path": str(task_mcp_log) if task_mcp_log else None,
         },

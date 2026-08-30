@@ -48,6 +48,7 @@ class ContractReviewWorkflow:
         api_events_path: str | None = None,
         trace_path: str | None = None,
         review_outputs_path: str | None = None,
+        annotation_events_path: str | None = None,
         state_store: ReviewStateStore | None = None,
         settings: Settings | None = None,
         mcp_env: dict[str, str] | None = None,
@@ -58,6 +59,8 @@ class ContractReviewWorkflow:
         self.conversation_log_dir = conversation_log_dir
         self.api_events_path = api_events_path
         self.review_outputs_path = review_outputs_path
+        self.annotation_events_path = annotation_events_path
+        self.annotation_report_summary: dict[str, Any] = {}
         self.state_store = state_store
         self.settings = settings or Settings()
 
@@ -171,7 +174,10 @@ class ContractReviewWorkflow:
                         output_dir=output_dir,
                         output_path=output_path,
                     )
-                    span.set_outputs({"annotated_docx_path": annotated_docx_path})
+                    span.set_outputs({
+                        "annotated_docx_path": annotated_docx_path,
+                        **self.annotation_report_summary,
+                    })
 
                 start = time.time()
                 async with self.trace.span("mcp.cleanup", run_type="mcp"):
@@ -198,6 +204,7 @@ class ContractReviewWorkflow:
                         "total_tokens": total_tokens,
                         "token_stats": token_stats,
                         "review_outputs_log": review_outputs_path,
+                        "annotation_events_log": self.annotation_events_path,
                         "state_dir": str(self.state_store.root_dir) if self.state_store else None,
                     }
                 )
@@ -217,6 +224,7 @@ class ContractReviewWorkflow:
                     "total_tokens": total_tokens,
                     "retrieval_mode": RETRIEVAL_BACKEND,
                     "review_outputs_log": review_outputs_path,
+                    "annotation_events_log": self.annotation_events_path,
                     "state_dir": str(self.state_store.root_dir) if self.state_store else None,
                 }
 
@@ -487,6 +495,8 @@ class ContractReviewWorkflow:
             tool_args["output_dir"] = output_dir
         if output_path is not None:
             tool_args["output_path"] = output_path
+        if self.annotation_events_path is not None:
+            tool_args["annotation_events_path"] = self.annotation_events_path
 
         result = await self.client.call_tool(
             "generate_docx_report",
@@ -504,6 +514,11 @@ class ContractReviewWorkflow:
         parsed = json.loads(result)
         if parsed.get("error"):
             raise RuntimeError(f"DOCX report generation failed: {parsed['error']}")
+        self.annotation_report_summary = {
+            "annotation_events_path": parsed.get("annotation_events_path"),
+            "annotation_stats": parsed.get("annotation_stats", {}),
+            "annotation_skipped_count": parsed.get("annotation_skipped_count", 0),
+        }
         docx_path = parsed["docx"]
         print(f"  DOCX: {docx_path}")
         return docx_path

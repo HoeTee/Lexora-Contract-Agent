@@ -170,9 +170,10 @@ class DocxIndexRetriever:
             criterion_text=query,
         )
         routed_matches = _execute_route(index, query, route_plan, config.scan_batch_tokens)
-        hybrid_requested = any(step.method == "hybrid" for step in route_plan.steps)
-        fallback_used = hybrid_requested or not routed_matches or (
-            route.fallback_enabled and route_plan.fallback and not _route_is_complete(route_plan)
+        fallback_used = _should_use_fallback(
+            route_plan,
+            routed_matches,
+            fallback_enabled=route.fallback_enabled,
         )
 
         structure_matches: list[dict[str, Any]] = []
@@ -245,6 +246,21 @@ def _execute_route(index: dict[str, Any], query: str, plan: Any, scan_batch_toke
 
 def _route_is_complete(plan: Any) -> bool:
     return any(step.method == "scan" or (step.method == "title" and step.all_titles) for step in plan.steps)
+
+
+def _should_use_fallback(
+    plan: Any,
+    routed_matches: list[dict[str, Any]],
+    *,
+    fallback_enabled: bool,
+) -> bool:
+    """Supplement every incomplete deterministic route when fallback is enabled."""
+    hybrid_requested = any(step.method == "hybrid" for step in plan.steps)
+    return (
+        hybrid_requested
+        or not routed_matches
+        or (fallback_enabled and not _route_is_complete(plan))
+    )
 
 
 def _merge_matches(structure_matches: list[dict[str, Any]], vector_matches: list[dict[str, Any]]) -> list[dict[str, Any]]:

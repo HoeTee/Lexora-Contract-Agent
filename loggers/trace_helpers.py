@@ -83,7 +83,14 @@ def mcp_inputs(tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
         "tool": tool_name,
         "arg_keys": sorted(args.keys()),
     }
-    for key in ("file_path", "docx_path", "contract_path", "output_path", "output_dir"):
+    for key in (
+        "file_path",
+        "docx_path",
+        "contract_path",
+        "output_path",
+        "output_dir",
+        "annotation_events_path",
+    ):
         if key in args and args[key]:
             summary[key] = str(args[key])
             if key.endswith("path") or key.endswith("dir"):
@@ -124,4 +131,5 @@ def criterion_outputs(result: dict[str, Any]) -> dict[str, Any]:
         "issue_count": len(result.get("issues") or []),
         "tokens": result.get("tokens", 0),
         "error_message": result.get("error_message"),
+        "anchor_validation": result.get("anchor_validation", {}),
     }

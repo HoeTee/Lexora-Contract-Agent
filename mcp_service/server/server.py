@@ -116,6 +116,7 @@ async def generate_docx_report(
     summary_sections_json: str | dict | None = None,
     output_dir: str | None = None,
     output_path: str | None = None,
+    annotation_events_path: str | None = None,
 ) -> str:
     """Generate only the annotated original-contract DOCX."""
     try:
@@ -136,10 +137,18 @@ async def generate_docx_report(
                 summary_sections=summary_sections,
                 output_dir=output_dir,
                 output_path=output_path,
+                annotation_events_path=annotation_events_path,
             )
         if not path:
             return json.dumps({"error": "DOCX report generation failed."}, ensure_ascii=False)
-        return json.dumps({"docx": path}, ensure_ascii=False)
+        response = {"docx": path}
+        if annotation_events_path and os.path.exists(annotation_events_path):
+            with open(annotation_events_path, encoding="utf-8") as report_file:
+                annotation_report = json.load(report_file)
+            response["annotation_events_path"] = annotation_events_path
+            response["annotation_stats"] = annotation_report.get("stats", {})
+            response["annotation_skipped_count"] = annotation_report.get("skipped_count", 0)
+        return json.dumps(response, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 

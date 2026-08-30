@@ -24,6 +24,7 @@ from endpoints.review.task_store import (
     read_task,
     read_task_model_config,
     task_api_events_path,
+    task_annotation_events_path,
     task_conversation_log_dir,
     task_mcp_log_file,
     task_review_outputs_path,
@@ -107,6 +108,11 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
             trace_path=str(task_trace_path(client_dir, task_id)) if task_trace_path(client_dir, task_id) else None,
             review_outputs_path=(
                 str(task_review_outputs_path(client_dir, task_id)) if task_review_outputs_path(client_dir, task_id) else None
+            ),
+            annotation_events_path=(
+                str(task_annotation_events_path(client_dir, task_id))
+                if task_annotation_events_path(client_dir, task_id)
+                else None
             ),
             settings=agent_settings,
             mcp_env=mcp_env,

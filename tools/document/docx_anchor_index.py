@@ -33,6 +33,12 @@ def has_ancestor(element, local_names: set[str]) -> bool:
 
 def iter_blocks(parent):
     """Yield Paragraph/Table blocks in document order for a document or table cell."""
+    for _, block in iter_indexed_blocks(parent):
+        yield block
+
+
+def iter_indexed_blocks(parent):
+    """Yield the real XML child index together with each paragraph/table block."""
     if isinstance(parent, DocxDocument):
         parent_element = parent.element.body
     elif isinstance(parent, _Cell):
@@ -40,11 +46,11 @@ def iter_blocks(parent):
     else:
         raise TypeError(f"Unsupported block parent: {type(parent)!r}")
 
-    for child in parent_element.iterchildren():
+    for child_index, child in enumerate(parent_element.iterchildren(), start=1):
         if isinstance(child, CT_P):
-            yield Paragraph(child, parent)
+            yield child_index, Paragraph(child, parent)
         elif isinstance(child, CT_Tbl):
-            yield Table(child, parent)
+            yield child_index, Table(child, parent)
 
 
 def paragraph_visible_text(paragraph: Paragraph) -> str:
@@ -79,7 +85,7 @@ def build_docx_anchor_nodes(docx_path: str) -> list[DocxAnchorNode]:
     seen_paragraphs: set[int] = set()
 
     def walk(parent, path_prefix: str) -> None:
-        for block_index, block in enumerate(iter_blocks(parent), start=1): # iter_blocks() contains yield, so calling iter_blocks(parent) returns a generator object, and generator objects are iterable.
+        for block_index, block in iter_indexed_blocks(parent):
             if isinstance(block, Paragraph):
                 element_id = id(block._element)
                 if element_id in seen_paragraphs:

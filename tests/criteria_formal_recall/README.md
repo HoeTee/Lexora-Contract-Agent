@@ -50,3 +50,21 @@ python tests/criteria_formal_recall/run_cases.py --contract-id D03
   “已识别但无 anchor 原文”；`review` 阶段未识别的用例对应证据字段为空数组。
 - `incorrect_comments.csv`：违反“审查要点、合同事实、锚点”任一条件的批注。
 - `annotated/`：按 `D01_已审查.docx` 至 `D10_已审查.docx` 汇总最终带批注合同。
+
+## 按日志诊断失败
+
+`diagnose_failures.py` 联合读取每个任务的 `trace.json`、SubAgent 完整 conversation、
+`review_outputs.json` 和输入 DOCX，区分“模型首轮漏判”“Reflector 覆盖问题”以及
+“锚点为空、锚点范围内原文不匹配、写回后不可见”等原因。例如：
+
+```powershell
+python tests/criteria_formal_recall/diagnose_failures.py `
+  --run-dir tests/criteria_formal_recall/results/<run_1> `
+  --run-dir tests/criteria_formal_recall/results/<run_2> `
+  --output-dir tests/criteria_formal_recall/results/<evaluation>
+```
+
+输出为 `review_failure_diagnosis.csv` 和 `docx_write_failure_diagnosis.csv`。
+新任务的逐条写回详情另存于任务自己的日志目录：API 为
+`data/api/<task_id>/logs/annotation_events.json`，Web 租户为
+`data/web/<tenant_id>/<task_id>/logs/annotation_events.json`。测试脚本只读取，不向 `data/` 写测试报告。

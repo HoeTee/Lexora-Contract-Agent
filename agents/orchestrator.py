@@ -165,6 +165,120 @@ class OrchestratorAgent:
         )
         return f"{guidance}\n{anchor_guidance}\n\n{normalized_context}"
 
+    @staticmethod
+    def _normalize_anchor_text(text: str) -> str:
+        normalized = re.sub(r"[\s\u3000]+", "", str(text or ""))
+        return (
+            normalized.replace("（", "(")
+            .replace("）", ")")
+            .replace("：", ":")
+            .replace("，", ",")
+            .replace("。", ".")
+            .replace("；", ";")
+        )
+
+    @staticmethod
+    def _retrieval_anchor_evidence(context: str) -> list[dict[str, str]]:
+        """Parse the anchor-scoped contract text included in retrieval context."""
+        pattern = re.compile(
+            r"xml_anchor_type:\s*(paragraph|table)\s*\n"
+            r"xml_anchor_id:\s*([^\n]+)\s*\n"
+            r"内容：\s*\n(.*?)(?=\n\n---\n\n|\Z)",
+            flags=re.DOTALL,
+        )
+        return [
+            {
+                "xml_anchor_type": match.group(1).strip(),
+                "xml_anchor_id": match.group(2).strip(),
+                "content": match.group(3).strip(),
+            }
+            for match in pattern.finditer(context or "")
+            if match.group(3).strip()
+        ]
+
+    @staticmethod
+    def _normalized_span(text: str, quote: str) -> str | None:
+        """Return the exact source substring for a normalized in-source match."""
+        normalized_quote = OrchestratorAgent._normalize_anchor_text(quote)
+        if not normalized_quote:
+            return None
+        normalized_chars: list[str] = []
+        source_indexes: list[int] = []
+        for source_index, char in enumerate(text):
+            normalized_char = OrchestratorAgent._normalize_anchor_text(char)
+            if not normalized_char:
+                continue
+            normalized_chars.append(normalized_char)
+            source_indexes.extend([source_index] * len(normalized_char))
+        normalized_text = "".join(normalized_chars)
+        match_start = normalized_text.find(normalized_quote)
+        if match_start < 0:
+            return None
+        match_end = match_start + len(normalized_quote) - 1
+        return text[source_indexes[match_start]:source_indexes[match_end] + 1]
+
+    def _validate_and_repair_anchors(
+        self,
+        parsed_opinion: dict,
+        context: str,
+    ) -> dict[str, int]:
+        """Repair provable model anchor mistakes and drop unprovable anchors."""
+        evidence = self._retrieval_anchor_evidence(context)
+        evidence_by_key = {
+            (item["xml_anchor_type"], item["xml_anchor_id"]): item
+            for item in evidence
+        }
+        stats = {"valid": 0, "repaired": 0, "dropped": 0}
+
+        for issue in parsed_opinion.get("issues", []):
+            repaired_anchors: list[dict] = []
+            for anchor in issue.get("anchors") or []:
+                key = (anchor.get("xml_anchor_type", ""), anchor.get("xml_anchor_id", ""))
+                quote = str(anchor.get("quoted_text") or "").strip()
+                declared = evidence_by_key.get(key)
+                exact_quote = self._normalized_span(declared["content"], quote) if declared else None
+                if exact_quote:
+                    anchor["quoted_text"] = exact_quote
+                    repaired_anchors.append(anchor)
+                    stats["valid"] += 1
+                    continue
+
+                normalized_quote = self._normalize_anchor_text(quote)
+                if declared:
+                    normalized_content = self._normalize_anchor_text(declared["content"])
+                    if len(normalized_content) >= 4 and normalized_content in normalized_quote:
+                        anchor["quoted_text"] = declared["content"]
+                        repaired_anchors.append(anchor)
+                        stats["repaired"] += 1
+                        continue
+
+                candidates: list[tuple[dict[str, str], str]] = []
+                for item in evidence:
+                    candidate_quote = self._normalized_span(item["content"], quote)
+                    if candidate_quote:
+                        candidates.append((item, candidate_quote))
+                        continue
+                    normalized_content = self._normalize_anchor_text(item["content"])
+                    if len(normalized_content) >= 4 and normalized_content in normalized_quote:
+                        candidates.append((item, item["content"]))
+
+                unique_candidates = {
+                    (item["xml_anchor_type"], item["xml_anchor_id"], candidate_quote): (item, candidate_quote)
+                    for item, candidate_quote in candidates
+                }
+                if len(unique_candidates) == 1:
+                    item, candidate_quote = next(iter(unique_candidates.values()))
+                    anchor["xml_anchor_type"] = item["xml_anchor_type"]
+                    anchor["xml_anchor_id"] = item["xml_anchor_id"]
+                    anchor["quoted_text"] = candidate_quote
+                    repaired_anchors.append(anchor)
+                    stats["repaired"] += 1
+                    continue
+
+                stats["dropped"] += 1
+            issue["anchors"] = repaired_anchors
+        return stats
+
     async def _build_missing_text_review_notes(self, parsed_opinion: dict) -> str:
         """Search again for issues that claim a missing contract provision."""
         notes = []
@@ -271,6 +385,7 @@ class OrchestratorAgent:
             SubAgentOutput,
             SUB_AGENT_EXPECTED_JSON,
         )
+        anchor_validation = self._validate_and_repair_anchors(parsed_opinion, context)
 
         if self.logger:
             self.logger.log(
@@ -294,6 +409,7 @@ class OrchestratorAgent:
                 "applicability_reason": parsed_opinion.get("applicability_reason", ""),
                 "tokens": sub_agent.token_usage.get("total_tokens", 0) + evidence_tokens,
                 "error_message": None,
+                "anchor_validation": anchor_validation,
             }
 
         # Step 3: Reflection loop. Each criterion needs its own reflector state;
@@ -332,6 +448,9 @@ class OrchestratorAgent:
                     SubAgentOutput,
                     SUB_AGENT_EXPECTED_JSON,
                 )
+                round_validation = self._validate_and_repair_anchors(parsed_opinion, context)
+                for key, value in round_validation.items():
+                    anchor_validation[key] += value
         else:
             print(f"[Orchestrator] {cid}: Max {MAX_REFLECTION_ROUNDS} rounds reached")
 
@@ -352,6 +471,7 @@ class OrchestratorAgent:
             "applicability_reason": parsed_opinion.get("applicability_reason", ""),
             "tokens": total_tokens,
             "error_message": None,
+            "anchor_validation": anchor_validation,
         }
 
     async def _execute_criterion_with_recovery(
