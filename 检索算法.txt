@@ -1,0 +1,1767 @@
+DocxIndex 检索算法：字段、结构树、路由与最终输出
+==================================================
+
+文档目的
+--------
+
+本文只描述当前生产检索实现 `tools/docxindex`，回答以下问题：
+
+1. DOCX 从解析到检索结果分别经过哪些对象；
+2. 每个对象和运行时结果包含哪些具体字段；
+3. 结构树、内容库、锚点库、表格库和向量库是什么关系；
+4. 路由 LLM、结构检索 LLM、scan LLM 和 rerank LLM 分别看到什么输入、返回什么输出；
+5. title、rule、region、scan、hybrid 五条路线如何执行；
+6. hybrid 在什么条件下触发，结构召回、向量召回各保留多少候选；
+7. 检索器内部最终对象和 MCP 调用方最终看到的字段分别是什么。
+
+当前结论
+--------
+
+- 路由不是按审查要点编号写死。每次查询先由 LLM 生成 `RouteResponse`，确定性代码再执行其中的 `steps`。
+- 当前方法集合固定为 `title`、`rule`、`region`、`scan`、`hybrid`，但每次只执行 RoutePlan 选择的方法。
+- `region` 和 `hybrid` 都会执行“结构树 LLM 召回 + 向量召回 + LLM rerank”；区别是 `region` 先限定区域，`hybrid` 搜索全局。
+- 向量召回不是等结构召回少于某个数量后才补充。只要向量功能开启并且向量索引已经构建，语义检索就同时执行向量召回。
+- 在线 `DocxIndexRetriever` 把 `DocumentIndex` 和 `VectorIndex` 存在当前进程内存中。离线 CLI 才会拆分输出多个 JSON 文件。
+- `docxindex_search()` 最终返回的是带 Word XML 锚点的纯文本，不是 JSON。路由、分数和来源等内部字段不会直接返回给审查 Agent。
+
+
+一、完整调用链
+--------------
+
+```text
+contract.docx
+  |
+  | read_docx_items(docx_path)
+  v
+BodyItem[]
+  |
+  | detect_regions
+  v
+DetectedRegions
+  |
+  | build frontmatter/body/tail/attachments + section/table nodes
+  v
+DocumentNode[]
+  |
+  | storage_view / structure_view / build_anchor_map / collect_table_map
+  v
+DocumentIndex
+  |
+  | build_vector_index（vector.enabled=true 时）
+  v
+VectorIndex
+  |
+  | plan_route(index, query)
+  v
+RouteResponse
+  |
+  +-- title  -> 标题确定性匹配
+  +-- rule   -> anchor 原文关键词确定性匹配
+  +-- region -> 区域内结构 LLM + 向量 + rerank LLM
+  +-- scan   -> 全部非空 anchor 分批交给 scan LLM
+  +-- hybrid -> 全局结构 LLM + 向量 + rerank LLM
+  |
+  | interleave + node_id 去重 + 数量截断
+  v
+route candidate[]
+  |
+  | build_content_context
+  v
+content_context[] + pagination + budget
+  |
+  | _format_anchor_context
+  v
+带 xml_anchor_type/xml_anchor_id 的纯文本
+```
+
+生产入口：
+
+- `tools/docxindex/retriever.py:74`：`build_index()`。
+- `tools/docxindex/retriever.py:91`：`search()`。
+- `tools/docxindex/retriever.py:106`：`_build_index_sync()`。
+- `tools/docxindex/retriever.py:156`：`_search_sync()`。
+- `mcp_service/server/server.py:229`：`contract_build_index()`。
+- `mcp_service/server/server.py:236`：`contract_search()`。
+
+
+二、索引构建阶段的 class 和字段
+-------------------------------
+
+2.1 `BodyItem`
+~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/schema/items.py:8`
+
+作用：表示 Word `w:body` 下的一个直接子元素。段落和表格先统一转换为 `BodyItem`，后续区域识别、标题识别、节点构建、锚点构建都基于它。
+
+| 字段 | 类型 | 可空 | 内容和例子 |
+|---|---|---:|---|
+| `kind` | `str` | 否 | OOXML 元素类型，例如 `p` 或 `tbl` |
+| `anchor` | `str` | 否 | 内部锚点，例如 `p_0007`、`tbl_0002` |
+| `body_child_index` | `int` | 否 | 该元素在 `w:body` 直接子元素中的顺序，例如 `23` |
+| `text` | `str` | 否 | 规范化后的检索文本 |
+| `raw_text` | `str | None` | 是 | 尽量保持原貌的文本；最终证据优先使用它 |
+| `xml_path` | `str` | 否 | 元素在 DOCX XML 中的位置 |
+| `direct_outline` | `int | None` | 是 | 段落直接设置的 outline level |
+| `style_outline` | `int | None` | 是 | 从段落样式继承的 outline level |
+| `style_id` | `str | None` | 是 | Word 段落样式 ID |
+| `style_name` | `str | None` | 是 | Word 段落样式名称 |
+| `num_id` | `str | None` | 是 | Word 编号定义 ID |
+| `num_ilvl` | `int | None` | 是 | 多级编号层级 |
+| `numbering_prefix` | `str | None` | 是 | 解析后的编号前缀，例如 `第一条`、`1.1` |
+| `alignment` | `str | None` | 是 | 对齐方式，例如 `center` |
+| `bold_fraction` | `float` | 否 | 加粗字符比例，默认 `0.0` |
+| `max_font_size` | `int | None` | 是 | 最大字号 |
+| `page_start` | `int | None` | 是 | 可推断时的起始页 |
+| `page_end` | `int | None` | 是 | 可推断时的结束页 |
+| `page_breaks` | `int` | 否 | 元素中页面断点数量，默认 `0` |
+| `table_mapping` | `dict | None` | 是 | 表格 Markdown 与原始单元格 XML 的映射；段落为 `None` |
+
+派生属性 `effective_outline`：优先返回 `direct_outline`；没有直接设置时返回 `style_outline`。
+
+简化示例：
+
+```json
+{
+  "kind": "p",
+  "anchor": "p_0007",
+  "body_child_index": 7,
+  "text": "第四条 合同金额",
+  "raw_text": "第四条 合同金额",
+  "xml_path": "/w:document/w:body/w:p[8]",
+  "direct_outline": null,
+  "style_outline": 0,
+  "style_id": "Heading1",
+  "style_name": "标题 1",
+  "num_id": null,
+  "num_ilvl": null,
+  "numbering_prefix": "第四条",
+  "alignment": "left",
+  "bold_fraction": 1.0,
+  "max_font_size": 32,
+  "page_start": 2,
+  "page_end": 2,
+  "page_breaks": 0,
+  "table_mapping": null
+}
+```
+
+2.2 `IndexBuildOptions`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/indexing/build_pipeline.py:34`
+
+| 字段 | 类型 | 当前配置值/含义 |
+|---|---|---|
+| `llm_expand` | `bool` | `false`，在线构建不让 LLM 拆超长段落节点 |
+| `llm_summary` | `bool` | `false`，在线构建使用本地摘要 |
+| `llm_settings` | `LLMSettings | None` | LLM 配置 |
+| `cache_dir` | `Path | None` | 在线调用传 `None` |
+| `timer` | `Any | None` | 构建阶段计时器 |
+| `llm_concurrency` | `int` | 当前 `10` |
+| `paragraph_split_threshold_tokens` | `int` | 当前 `1000` |
+| `paragraph_chunk_target_tokens` | `int` | 当前 `700` |
+| `table_split_threshold_tokens` | `int` | 当前 `20000` |
+| `table_chunk_target_tokens` | `int` | 当前 `18000` |
+| `heading_profiles` | `tuple[CompiledHeadingProfile, ...] | None` | 标题格式配置 |
+| `llm_attachment_hierarchy` | `bool` | 当前 `false` |
+| `hierarchy_input_max_tokens` | `int` | 当前 `20000` |
+| `hierarchy_batch_target_tokens` | `int` | 当前 `16000` |
+| `hierarchy_batch_overlap_tokens` | `int` | 当前 `800` |
+| `hierarchy_max_levels` | `int` | 当前 `6` |
+| `hierarchy_retry_count` | `int` | 当前 `3` |
+| `attachment_max_levels` | `int` | 当前 `6` |
+| `summary_batch_max_nodes` | `int` | 当前 `10` |
+| `summary_batch_max_tokens` | `int` | 当前 `20000` |
+
+2.3 `DetectedRegions`
+~~~~~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/indexing/build_pipeline.py:58`
+
+它是 `detect_regions` 阶段的内部输出，不直接写入最终 JSON。
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `heading_profile` | `CompiledHeadingProfile` | 最终选择的标题识别规则 |
+| `profile_match` | `Any` | 标题规则匹配结果；后续读取 `score`、`level_counts`、`orphan_count` |
+| `body_start` | `int` | 正文区域在 `items[]` 中的起点 |
+| `body_end` | `int` | 正文区域在 `items[]` 中的终点，不含附件区域 |
+| `body_content_end` | `int` | 正文业务内容终点，不含尾部 |
+| `tail_start` | `int | None` | 签署区/尾部起点 |
+| `attachment_parent` | `int | None` | 检测到“附件”父标题时的位置 |
+| `attachment_region_start` | `int | None` | 附件区域实际起点；可能来自父标题或独立附件起点 |
+
+这些位置随后用于构造四个顶层区域：
+
+```json
+{
+  "frontmatter": "frontmatter",
+  "body": "body",
+  "tail": "tail",
+  "attachments": "attachments"
+}
+```
+
+2.4 `DocumentNode`
+~~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/schema/nodes.py:8`
+
+| 字段 | 类型 | 可空 | 含义和例子 |
+|---|---|---:|---|
+| `node_id` | `str` | 否 | 全局节点 ID，例如 `body/sec_004` |
+| `parent_id` | `str | None` | 是 | 父节点 ID，例如 `body` |
+| `node_type` | `str` | 否 | `body`、`section`、`table`、`tail`、`attachment_section` 等 |
+| `level` | `int | None` | 是 | 标题层级 |
+| `title` | `str` | 否 | 节点标题 |
+| `text` | `str` | 否 | 节点覆盖范围内的正文 |
+| `summary` | `str` | 否 | 本地或 LLM 摘要；当前在线默认本地生成 |
+| `start_anchor` | `str` | 否 | 节点首个 `BodyItem.anchor` |
+| `end_anchor` | `str` | 否 | 节点最后一个 `BodyItem.anchor` |
+| `page_start` | `int | None` | 是 | 起始页 |
+| `page_end` | `int | None` | 是 | 结束页 |
+| `page_source` | `str` | 否 | 页码来源，默认 `unavailable`，可为 `lastRenderedPageBreak` |
+| `page_confidence_score` | `int` | 否 | 页码置信分，默认 `0` |
+| `token_estimate` | `int` | 否 | `text` 的估算 token 数 |
+| `confidence_score` | `int` | 否 | 节点结构判断置信分 |
+| `confidence_evidence` | `list[str]` | 否 | 结构识别证据，例如 `ooxml_table` |
+| `children` | `list[DocumentNode]` | 否 | 内存中的子节点对象 |
+| `source_start` | `int | None` | 是 | 内部 `items[]` 起点，构建时使用 |
+| `source_end` | `int | None` | 是 | 内部 `items[]` 终点，Python 切片语义为右开 |
+| `start_index` | `int | None` | 是 | 首个元素的 `body_child_index` |
+| `end_index` | `int | None` | 是 | 最后一个元素的 `body_child_index`，最终范围判断为闭区间 |
+| `key_items` | `list[str]` | 否 | 最多前 8 个子节点标题 |
+| `table_id` | `str | None` | 是 | 表格锚点 ID |
+| `mapping_ref` | `str | None` | 是 | 例如 `table_store.json#tbl_0001` |
+| `row_start` | `int | None` | 是 | 表格分块起始行 |
+| `row_end` | `int | None` | 是 | 表格分块结束行 |
+
+2.5 `AnchorRecord`
+~~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/schema/index.py:8`
+
+| 字段 | 类型 | 可空 | 含义 |
+|---|---|---:|---|
+| `body_child_index` | `int` | 否 | `w:body` 直接子元素位置 |
+| `type` | `str` | 否 | `p` 或 `tbl` |
+| `text` | `str` | 否 | 规范化文本；rule 默认检索这个字段 |
+| `raw_text` | `str | None` | 是 | 原始文本；scan 和最终输出优先使用 |
+| `node_id` | `str | None` | 是 | 包含该 anchor 的最深层节点 |
+| `page_start` | `int | None` | 是 | 起始页 |
+| `page_end` | `int | None` | 是 | 结束页 |
+| `xml_path` | `str` | 否 | 原始 OOXML 路径 |
+
+`anchor_map` 的键才是 `anchor_id`，例如：
+
+```json
+{
+  "p_0007": {
+    "body_child_index": 7,
+    "type": "p",
+    "text": "第四条 合同金额",
+    "raw_text": "第四条 合同金额",
+    "node_id": "body/sec_004",
+    "page_start": 2,
+    "page_end": 2,
+    "xml_path": "/w:document/w:body/w:p[8]"
+  }
+}
+```
+
+2.6 `DocumentIndex`
+~~~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/schema/index.py:21`
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `schema_version` | `str` | 固定默认值 `docx-index-v3` |
+| `source_file` | `str` | 原始 DOCX 路径 |
+| `top_regions` | `dict[str,str]` | 四个逻辑区域到根 `node_id` 的映射 |
+| `settings` | `dict[str,Any]` | 本次索引实际采用的构建参数 |
+| `nodes` | `list[dict]` | 所有节点的平铺 `storage_view` |
+| `root_nodes` | `list[str]` | 顶层节点 ID |
+| `structure_tree` | `list[dict]` | 嵌套 `structure_view` |
+| `anchor_map` | `dict[str,AnchorRecord]` | anchor ID 到原文/XML 位置的映射 |
+| `table_map` | `dict[str,dict]` | 表格 ID 到 Markdown/单元格来源的映射 |
+
+`settings` 实际包含：
+
+```text
+paragraph_split_threshold_tokens
+paragraph_chunk_target_tokens
+heading_profile
+heading_profile_score
+heading_level_matches
+heading_orphan_matches
+summary_tree_inline_budget_tokens
+summary_tree_paged_budget_tokens
+llm_expand_enabled
+llm_summary_enabled
+llm_attachment_hierarchy_enabled
+hierarchy_input_max_tokens
+hierarchy_batch_target_tokens
+hierarchy_batch_overlap_tokens
+hierarchy_max_levels
+hierarchy_retry_count
+attachment_max_levels
+llm_model
+llm_concurrency
+table_markdown_enabled
+table_split_threshold_tokens
+table_chunk_target_tokens
+```
+
+2.7 向量索引 class
+~~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/vector/schema.py:6`
+
+`VectorMetadata`：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `title` | `str` | 原节点标题 |
+| `node_type` | `str` | 原节点类型 |
+| `start_index` | `int | None` | 原节点起始 body index |
+| `end_index` | `int | None` | 原节点结束 body index |
+| `start_anchor` | `str | None` | 原节点起始 anchor |
+| `end_anchor` | `str | None` | 原节点结束 anchor |
+| `token_estimate` | `int` | 原节点 token 数 |
+
+`VectorItem`：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `vector_id` | `str` | 当前等于 `node_id` |
+| `node_id` | `str` | 关联 `DocumentNode` |
+| `text_hash` | `str` | 未截断 `vector_text` 的 SHA-256 |
+| `text` | `str` | `标题 + 摘要 + 正文` 拼接后的向量文本 |
+| `embedding` | `list[float]` | Embedding 服务返回的向量 |
+| `metadata` | `VectorMetadata` | 回填检索候选所需的节点位置字段 |
+
+`VectorIndex`：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `source_index` | `str` | 在线构建时为 DOCX 文件名；离线默认 `document_index.json` |
+| `embedding_model` | `str` | 实际使用的 embedding 模型 |
+| `items` | `list[VectorItem]` | 可检索的向量项 |
+
+节点进入向量索引的具体条件：
+
+1. `node_type` 不是 `body` 或 `attachments`；
+2. `table` 节点必须有非空 `text`；
+3. 有子节点但自身没有 `text` 的容器节点不进入；
+4. 其他节点必须有非空 `text`。
+
+
+三、同一节点的五种结构视图
+--------------------------
+
+项目不是维护五棵互不相关的树，而是从同一批 `DocumentNode` 生成不同字段投影。
+
+3.1 `storage_view()`：平铺节点
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+来源：`DocumentNode.storage_view()`。
+
+字段：除 `source_start`、`source_end` 外的全部 `DocumentNode` 字段；`children` 从对象数组变成子节点 ID 数组，同时增加同值字段 `nodes`。
+
+```json
+{
+  "node_id": "body/sec_004",
+  "parent_id": "body",
+  "node_type": "section",
+  "level": 1,
+  "title": "第四条 合同金额",
+  "text": "第四条 合同金额……",
+  "summary": "约定合同价款及税率。",
+  "start_anchor": "p_0007",
+  "end_anchor": "p_0012",
+  "start_index": 7,
+  "end_index": 12,
+  "token_estimate": 326,
+  "children": ["body/sec_004/table_001"],
+  "nodes": ["body/sec_004/table_001"],
+  "key_items": ["合同总价", "税率"]
+}
+```
+
+使用位置：`DocumentIndex.nodes`、节点 ID 查找、内容读取、向量元数据回填。
+
+3.2 `structure_view()`：完整结构树
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+固定字段：
+
+```text
+title
+node_id
+start_index
+end_index
+summary
+key_items
+node_type
+token_estimate
+nodes
+```
+
+条件字段：
+
+```text
+table_id：仅表格节点存在
+page_start/page_end：至少一个页码存在时加入
+```
+
+其中 `nodes` 是嵌套子节点对象，不是 ID 数组。
+
+```json
+{
+  "title": "正文",
+  "node_id": "body",
+  "start_index": 3,
+  "end_index": 118,
+  "summary": "合同正文",
+  "key_items": ["合同标的", "合同金额", "付款方式"],
+  "node_type": "body",
+  "token_estimate": 8200,
+  "nodes": [
+    {
+      "title": "第四条 合同金额",
+      "node_id": "body/sec_004",
+      "start_index": 30,
+      "end_index": 36,
+      "summary": "约定合同价款及税率。",
+      "key_items": [],
+      "node_type": "section",
+      "token_estimate": 326,
+      "nodes": []
+    }
+  ]
+}
+```
+
+使用位置：`DocumentIndex.structure_tree`、标题路由、路由目录生成、结构语义检索。
+
+3.3 `content_view()`：内容读取视图
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+字段固定为：
+
+```text
+node_id, title, node_type, text,
+start_index, end_index, start_anchor, end_anchor,
+token_estimate, nodes,
+table_id, mapping_ref, row_start, row_end
+```
+
+这里的 `nodes` 是子节点 ID 数组。
+
+3.4 路由 LLM 的标题目录视图
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`_titles()` 内部先产生：
+
+```text
+node_id, title, node_type, depth, parent_id, region
+```
+
+但 `route_prompt()` 真正发送给 LLM 的每一项只有：
+
+```json
+{
+  "title": "第四条 合同金额",
+  "node_type": "section",
+  "depth": 2,
+  "region": "body"
+}
+```
+
+重要边界：路由 LLM 不接收 `node_id`，也不负责选择节点；它只选择检索方法。
+
+目录遍历最大深度为 2。`body` 和 `attachments` 人工区域节点本身不加入标题目录，但会把 `region` 传给下级标题。
+
+3.5 结构检索 LLM 的紧凑结构树
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+`_compact_structure()` 只保留：
+
+```text
+node_id
+title
+node_type
+summary
+token_estimate
+nodes（存在子节点时）
+```
+
+```json
+{
+  "node_id": "body/sec_004",
+  "title": "第四条 合同金额",
+  "node_type": "section",
+  "summary": "约定合同价款及税率。",
+  "token_estimate": 326,
+  "nodes": []
+}
+```
+
+`region` 路由会通过 `allowed_node_ids` 删除指定区域之外的节点；`hybrid` 的 `allowed_node_ids=None`，保留全局结构。
+
+
+四、离线索引衍生文件
+--------------------
+
+这些文件由 `scripts/docxindex/cli.py:195` 写出。生产在线审查不会在每次检索时依赖这些文件，而是使用内存中的 `self._index` 和 `self._vector_index`。
+
+4.1 `document_index.json`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+这是离线拆分索引的 manifest，不等于内存中完整的 `DocumentIndex`。
+
+```json
+{
+  "schema_version": "docxindex-v3",
+  "source_file": "C:/contracts/demo.docx",
+  "doc_name": "demo.docx",
+  "doc_title": "采购合同",
+  "top_regions": {
+    "frontmatter": "frontmatter",
+    "body": "body",
+    "tail": "tail",
+    "attachments": "attachments"
+  },
+  "settings": {},
+  "files": {
+    "structure_tree": "structure_tree.json",
+    "content_store": "content_store.json",
+    "anchor_store": "anchor_store.json",
+    "table_store": "table_store.json",
+    "vector_index": "vector_index.json"
+  },
+  "stats": {
+    "node_count": 173,
+    "anchor_count": 356,
+    "table_count": 5,
+    "structure_tokens": 49849
+  }
+}
+```
+
+4.2 `structure_tree.json`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+```json
+{
+  "schema_version": "docxindex-v3",
+  "doc_name": "demo.docx",
+  "doc_title": "采购合同",
+  "structure": [
+    {"node_id": "frontmatter", "title": "合同首部", "node_type": "frontmatter", "nodes": []},
+    {"node_id": "body", "title": "正文", "node_type": "body", "nodes": []},
+    {"node_id": "tail", "title": "合同尾部", "node_type": "tail", "nodes": []},
+    {"node_id": "attachments", "title": "附件", "node_type": "attachments", "nodes": []}
+  ]
+}
+```
+
+`structure` 中每个节点使用前述 `structure_view()` 字段。
+
+4.3 `content_store.json`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+顶层是以 `node_id` 为键的对象，不是数组。
+
+```json
+{
+  "body/sec_004": {
+    "node_id": "body/sec_004",
+    "title": "第四条 合同金额",
+    "node_type": "section",
+    "text": "第四条 合同金额……",
+    "summary": "约定合同价款及税率。",
+    "start_index": 30,
+    "end_index": 36,
+    "start_anchor": "p_0030",
+    "end_anchor": "p_0036",
+    "token_estimate": 326,
+    "nodes": [],
+    "table_id": null,
+    "mapping_ref": null,
+    "row_start": null,
+    "row_end": null
+  }
+}
+```
+
+4.4 `anchor_store.json`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+它等于 `anchor_map`，但把顶层键再次写入值中的 `anchor_id` 字段。
+
+```json
+{
+  "p_0030": {
+    "anchor_id": "p_0030",
+    "body_child_index": 30,
+    "type": "p",
+    "text": "第四条 合同金额",
+    "raw_text": "第四条 合同金额",
+    "node_id": "body/sec_004",
+    "page_start": 3,
+    "page_end": 3,
+    "xml_path": "/w:document/w:body/w:p[31]"
+  }
+}
+```
+
+4.5 `table_store.json`
+~~~~~~~~~~~~~~~~~~~~~~
+
+顶层以 `table_id` 为键。每个表格对象包含原 `TableMarkdownMapping` 字段，以及索引阶段追加的字段。
+
+表格顶层字段：
+
+```text
+table_path, table_anchor_id, markdown,
+sources, spans, cells,
+rows, columns, header_rows,
+row_markdown, row_source_refs, warnings,
+table_id, body_child_index, retrieval_anchor, raw_text
+```
+
+`sources[source_ref]` 字段：
+
+```text
+source_ref, table_anchor_id, paragraph_anchor_id,
+row, column, paragraph, original_text, xml_path
+```
+
+`spans[]` 字段：
+
+```text
+md_start, md_end, source_ref, synthetic
+```
+
+`cells[]` 字段：
+
+```text
+row, column, canonical_row, canonical_column,
+row_start, row_end, column_start, column_end,
+source_refs, display_kind, md_start, md_end
+```
+
+简化示例：
+
+```json
+{
+  "tbl_0001": {
+    "table_path": "/w:document/w:body/w:tbl[1]",
+    "table_anchor_id": "tbl_0001",
+    "markdown": "| 项目 | 金额 |\n|---|---|\n| 软件 | 100万元 [S0001] |",
+    "sources": {
+      "S0001": {
+        "source_ref": "S0001",
+        "table_anchor_id": "tbl_0001",
+        "paragraph_anchor_id": "tbl_0001_r2_c2_p1",
+        "row": 1,
+        "column": 1,
+        "paragraph": 0,
+        "original_text": "100万元",
+        "xml_path": "/w:tbl/w:tr[2]/w:tc[2]/w:p[1]"
+      }
+    },
+    "spans": [],
+    "cells": [],
+    "rows": 2,
+    "columns": 2,
+    "header_rows": [0],
+    "row_markdown": [],
+    "row_source_refs": [[], ["S0001"]],
+    "warnings": [],
+    "table_id": "tbl_0001",
+    "body_child_index": 40,
+    "retrieval_anchor": "tbl_0001",
+    "raw_text": "项目 金额 软件 100万元"
+  }
+}
+```
+
+4.6 `vector_index.json`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+```json
+{
+  "source_index": "document_index.json",
+  "embedding_model": "实际 embedding 模型名",
+  "items": [
+    {
+      "vector_id": "body/sec_004",
+      "node_id": "body/sec_004",
+      "text_hash": "sha256...",
+      "text": "标题：第四条 合同金额\n摘要：约定合同价款及税率。\n正文：……",
+      "embedding": [-0.0131, 0.0248, 0.0084],
+      "metadata": {
+        "title": "第四条 合同金额",
+        "node_type": "section",
+        "start_index": 30,
+        "end_index": 36,
+        "start_anchor": "p_0030",
+        "end_anchor": "p_0036",
+        "token_estimate": 326
+      }
+    }
+  ]
+}
+```
+
+示例只展示前三个浮点数；实际 `embedding` 包含模型返回的完整向量维度。
+
+4.7 `titles.json`
+~~~~~~~~~~~~~~~~~~
+
+```json
+{
+  "titles": [
+    {
+      "node_id": "body/sec_004",
+      "level": 1,
+      "node_type": "section",
+      "title": "第四条 合同金额",
+      "token_estimate": 326,
+      "start_anchor": "p_0030",
+      "end_anchor": "p_0036"
+    }
+  ]
+}
+```
+
+4.8 `attachments.json`
+~~~~~~~~~~~~~~~~~~~~~~
+
+```json
+{
+  "attachments": [
+    {
+      "node_id": "attachments/attachment_001",
+      "node_type": "attachment_section",
+      "title": "附件一：报价清单",
+      "token_estimate": 620,
+      "children": []
+    }
+  ]
+}
+```
+
+4.9 非 JSON 衍生文件
+~~~~~~~~~~~~~~~~~~~~
+
+`node_tokens.csv` 每行字段：
+
+```text
+node_id,node_type,level,token_estimate,title,start_anchor,end_anchor
+```
+
+`report.txt` 包含：
+
+```text
+source_file, output_dir, schema_version,
+nodes, anchors, structure_tokens, document_structure_mode,
+node_type_counts, largest_nodes
+```
+
+
+五、路由规划 `plan_route()`
+-------------------------
+
+定义：`tools/docxindex/retrieval/route.py:54`
+
+5.1 函数输入和输出
+~~~~~~~~~~~~~~~~~~
+
+输入：
+
+| 参数 | 类型 | 当前主流程传值 |
+|---|---|---|
+| `index` | `dict[str,Any]` | 当前内存 `DocumentIndex` |
+| `query` | `str` | 本次审查查询 |
+| `client` | `LLMClient` | 路由 LLM 客户端 |
+| `config` | `RouteConfig` | `config.yaml` 中 `routing` |
+| `cache_dir` | `Path | None` | 在线主流程为 `None` |
+| `criterion_text` | `str | None` | 当前 `_search_sync()` 明确传入 `query` |
+
+输出：经过 Pydantic 校验的 `RouteResponse`。
+
+当前主流程的关键事实：
+
+```python
+plan_route(..., query, ..., criterion_text=query)
+```
+
+因此该次调用不会重新读取 `routing.criteria` 指向的 DOCX；提示词中的“用户查询”和“审查要点原文”当前都是本次 `query`。只有调用方不传 `criterion_text` 时，`plan_route()` 才会读取配置的 criteria 文件，并尝试按 query 开头编号选择要点。
+
+5.2 `RouteConfig`
+~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/retrieval/route.py:27`
+
+| 字段 | 当前值 | 含义 |
+|---|---:|---|
+| `criteria` | `resources/criteria/criteria-formal.docx` | 未显式传 `criterion_text` 时的备用审查要点文件 |
+| `expected_criteria_count` | `18` | 备用文件必须解析出 1..18 |
+| `fallback_enabled` | `true` | 是否允许规划器请求语义 fallback |
+| `methods` | 五种方法说明 | 发送给路由 LLM |
+| `llm_candidates` | `12` | 结构 LLM 结果截断数 |
+| `vector_candidates` | `20` | 向量结果外层截断数 |
+| `vector_threshold` | `0.45` | 主检索实际向量阈值 |
+| `max_nodes` | `5` | 单次语义路线最终节点数 |
+
+5.3 路由 LLM 输入字段
+~~~~~~~~~~~~~~~~~~~~~~
+
+路由提示词输入：
+
+```text
+query: 用户查询
+criterion: 审查要点原文；当前主流程等于 query
+titles[]:
+  title
+  node_type
+  depth
+  region
+methods:
+  title -> 描述
+  region -> 描述
+  rule -> 描述
+  scan -> 描述
+  hybrid -> 描述
+```
+
+路由 LLM 不接收合同正文、完整摘要、anchor、node_id 或向量分数。
+
+5.4 `RouteStep` 输出字段
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+定义：`tools/docxindex/llm/schemas.py:111`
+
+| 字段 | 类型 | 默认值 | 实际约束/用途 |
+|---|---|---|---|
+| `method` | 五选一 Literal | 无 | `title/region/rule/scan/hybrid` |
+| `terms` | `list[str]` | `[]` | rule 必填；region/hybrid 可作为语义提示词 |
+| `regions` | 四选一 Literal 数组 | `[]` | region 必须且只能有一个；其他路线必须为空 |
+| `all_titles` | `bool` | `false` | title 是否返回完整目录 |
+| `context` | `int` | `0` | 允许 0..2；当前执行器没有使用该字段 |
+
+5.5 `RouteResponse` 输出字段
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+```json
+{
+  "steps": [
+    {
+      "method": "region",
+      "terms": ["付款", "发票"],
+      "regions": ["body"],
+      "all_titles": false,
+      "context": 0
+    }
+  ],
+  "fallback": false
+}
+```
+
+| 字段 | 类型 | 数量/约束 |
+|---|---|---|
+| `steps` | `list[RouteStep]` | 至少 1 个、最多 5 个 |
+| `fallback` | `bool` | region、scan、hybrid 存在时必须为 `false` |
+
+其他 schema 约束：
+
+- `scan` 必须是唯一一步；
+- `rule` 至少有一个 `term`；
+- `title` 必须有 `terms` 或 `all_titles=true`；
+- `region` 必须且只能包含一个 region；
+- schema 禁止额外字段。
+
+
+六、路线执行前后的公共候选字段
+------------------------------
+
+候选结果没有统一 Pydantic class，而是运行时 `dict`。不同来源先生成各自字段，随后逐步追加。
+
+6.1 基础候选字段
+~~~~~~~~~~~~~~~~
+
+`title._candidate()` 产生：
+
+```text
+node_id
+title
+summary
+start_index
+end_index
+start_anchor
+end_anchor
+token_estimate
+sources
+```
+
+6.2 结构 LLM 候选字段
+~~~~~~~~~~~~~~~~~~~~~
+
+```text
+query
+match_type = "llm_structure"
+node_id
+title
+summary
+start_index
+end_index
+start_anchor
+end_anchor
+token_estimate
+reason
+```
+
+6.3 向量候选字段
+~~~~~~~~~~~~~~~~
+
+```text
+query
+match_type = "vector"
+score
+node_id
+title
+summary
+start_index
+end_index
+start_anchor
+end_anchor
+node_type
+token_estimate
+```
+
+6.4 结构与向量合并后追加
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+```text
+sources: ["structure"]、["vector"] 或 ["structure", "vector"]
+vector_score: 该 node 的余弦相似度
+structure_reason: 结构检索 LLM 返回的选择原因
+```
+
+合并键为 `node_id`。同一节点同时被两路命中时只保留一个候选，并聚合来源。
+
+6.5 rerank 后追加
+~~~~~~~~~~~~~~~~
+
+```text
+rerank_score: 0..1；LLM 返回该节点时为浮点数
+rerank_reason: LLM 的重排原因
+```
+
+如果候选没有被 rerank LLM 返回，它不会立即被删除，而是追加在已返回节点之后，并设置：
+
+```json
+{"rerank_score": null, "rerank_reason": ""}
+```
+
+6.6 路由步骤标记
+~~~~~~~~~~~~~~~~
+
+每个步骤执行后 `_tag_step()` 追加：
+
+```text
+sources：再加入当前 method
+route_step：从 1 开始的步骤序号；fallback 使用 0
+route_method：title/rule/region/scan/hybrid/fallback
+route_regions：当前 step.regions 的复制
+```
+
+
+七、五种路由的实际工作过程
+--------------------------
+
+7.1 `title`
+~~~~~~~~~~~~
+
+路由规划阶段：调用路由 LLM。
+
+路线执行阶段：不调用结构 LLM、不调用 embedding、不调用 rerank。
+
+输入字段：
+
+```text
+index.structure_tree
+step.terms
+step.all_titles
+```
+
+执行规则：
+
+1. 深度遍历 `structure_tree`；
+2. 跳过无 `node_id`、无标题以及 `body/attachments` 人工容器；
+3. `all_titles=false` 时，只要任一 `term in title` 就命中；这是子串匹配，不是分词检索；
+4. `all_titles=true` 时，只选择目录级标题：`tail`、深度 1 的 `body/sec_*`、`attachment_parent`、`attachment_section`；
+5. 非 `tail` 节点把 `text_override` 设置为标题本身，并把结束位置收缩为标题 anchor，避免返回整个章节。
+
+title 特有候选字段：
+
+```text
+text_override = title
+end_index = start_index
+end_anchor = start_anchor
+sources = ["title"]
+```
+
+`all_titles=true` 的所有标题会在普通候选截断后重新加回，因此不受普通 `max_nodes=5` 限制。
+
+7.2 `rule`
+~~~~~~~~~~~
+
+路由规划阶段：调用路由 LLM，由它填写 `terms`。
+
+路线执行阶段：纯 Python 确定性匹配，不调用结构 LLM、embedding 或 rerank。
+
+输入字段：
+
+```text
+query
+step.terms
+index.anchor_map[anchor_id].text
+index.anchor_map[anchor_id].body_child_index
+index.anchor_map[anchor_id].node_id
+```
+
+最终检索词 `_literal_terms()` 来自：
+
+1. `step.terms` 中长度 2..30 的词；
+2. query 中中文或英文引号里的长度 2..30 文本；
+3. query 第一个冒号后按 `、，,；;。` 拆开的长度 2..20 文本，但排除含“是否/如果/需要/检查”的项；
+4. 以“单位”结尾且长度至少 4 的词，追加去掉“单位”的词根；
+5. 以“人”结尾且长度至少 3 的词，追加去掉“人”的词根；
+6. 最终按词长降序、同长度字典序排序。
+
+对每个 anchor 计算：
+
+```text
+matched_term_count = 当前 anchor.text 中出现过的不同检索词数量
+```
+
+只要 `matched_term_count > 0` 就生成一个 anchor 级候选。
+
+rule 特有候选字段：
+
+```text
+node_id = "{owner_id}/match_{anchor_id}"
+parent_node_id = owner_id
+text_override = anchor.text
+start_index = end_index = body_child_index
+start_anchor = end_anchor = anchor_id
+rule_match_count = matched_term_count
+sources = ["rule"]
+```
+
+排序：先按 `rule_match_count` 降序，再按 `body_child_index` 升序。
+
+如果一个候选都没有，检索器会额外返回确定性说明：所有计划检索词出现次数均为 0。这个说明用于支持“缺少某短语即触发问题”的审查标准。
+
+7.3 `region`
+~~~~~~~~~~~~~
+
+路由规划阶段：调用路由 LLM，并要求 `regions` 恰好一个值。
+
+输入字段：
+
+```text
+step.regions[0]
+step.terms
+query
+index.top_regions
+index.nodes[].node_id
+```
+
+区域限定过程：
+
+1. 用 `index.top_regions[region]` 找区域根 ID；
+2. 保留 `node_id == root` 或 `node_id.startswith(root + "/")` 的节点；
+3. 得到 `allowed_node_ids`；
+4. 如果有 `terms`，实际语义 query 变成：
+
+```text
+{原 query}
+检索提示词：term1、term2
+```
+
+5. 在相同 `allowed_node_ids` 内分别执行结构 LLM 和向量召回；
+6. 合并后执行 rerank；
+7. 返回最多 5 个 node。
+
+多区域比较不是一个 region 步骤填写多个区域，而是多个独立步骤：
+
+```json
+{
+  "steps": [
+    {"method": "region", "regions": ["body"], "terms": [], "all_titles": false, "context": 0},
+    {"method": "region", "regions": ["attachments"], "terms": [], "all_titles": false, "context": 0}
+  ],
+  "fallback": false
+}
+```
+
+每个步骤独立召回并独立取前 5，再通过交错合并至少优先保留各非空步骤的第一项。
+
+7.4 `scan`
+~~~~~~~~~~~
+
+路由规划阶段：调用路由 LLM；scan 必须是唯一 step。
+
+路线执行阶段：调用 scan LLM，但不执行结构 LLM、向量或 rerank。
+
+输入 anchor 的筛选：
+
+1. 将 `anchor_map` 按 `body_child_index` 升序排列；
+2. 用 `record.node_id` 找 owner node；
+3. 文本优先取 `raw_text`，否则取 `text`；
+4. 只有 owner 存在且文本非空的 anchor 才进入 scan。
+
+批次规则：
+
+- 每批累计原文最多 `scan_batch_tokens=12000`；
+- 如果当前批非空且加入下一条后超过 12000，就结束当前批；
+- 单个超长 anchor 不会在这里再次拆分，因此一个批次仍可能超过 12000；
+- 并发 worker 数为 `min(llm_concurrency=10, 批次数)`，至少 1。
+
+发送给每个 scan LLM 批次的字段只有：
+
+```json
+{
+  "query": "通过提示词正文传入",
+  "items": [
+    {"anchor_id": "p_0030", "text": "需要逐项检查的原文"}
+  ]
+}
+```
+
+LLM 输出模型：
+
+```json
+{
+  "findings": [
+    {"anchor_id": "p_0030", "reason": "存在明确错别字"}
+  ]
+}
+```
+
+`ScanFinding` 字段：
+
+| 字段 | 类型 | 约束 |
+|---|---|---|
+| `anchor_id` | `str` | 非空；执行器还要求必须属于当前批次 |
+| `reason` | `str` | 非空 |
+
+scan 候选特有字段：
+
+```text
+node_id = "scan/{anchor_id}"
+parent_node_id = owner.node_id
+text_override = 原 anchor 文本
+start_index = end_index = body_child_index
+start_anchor = end_anchor = anchor_id
+reason = finding.reason
+sources = ["scan"]
+```
+
+同一批次的重复 `anchor_id` 只接受一次；不存在于本批的 `anchor_id` 被丢弃。所有批次完成后才合并 findings。
+
+scan 不受最终 `max_nodes=5` 限制，而且 `build_content_context()` 的所有分页都会被读取并拼接到最终结果。
+
+7.5 `hybrid`
+~~~~~~~~~~~~~
+
+路由规划阶段：调用路由 LLM。
+
+精确触发条件：
+
+```text
+经过 RouteResponse 校验的某个 step.method == "hybrid"
+```
+
+没有以下硬编码条件：
+
+```text
+结构结果少于 N 条 -> 才触发 hybrid
+关键词结果为 0 -> 自动触发 hybrid
+向量分数低于某值 -> 自动触发 hybrid
+某个 criterion 编号 -> 固定触发 hybrid
+```
+
+提示词要求路由 LLM 只在标题、区域和精确关键词都无法可靠限定范围时选择 hybrid，但这是 LLM 的语义判断，不是 Python 数量阈值。
+
+hybrid 调用：
+
+```text
+_semantic_matches(index, _step_query(query, step.terms), allowed_node_ids=None)
+```
+
+因此它对全局节点执行结构 LLM、全局向量和 rerank。详细数量见下一节。
+
+
+八、Hybrid/Region 共用的语义检索算法
+-----------------------------------
+
+定义：`tools/docxindex/retriever.py:269`
+
+8.1 第一阶段：结构树 LLM 召回
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+输入字段：
+
+```text
+query
+compact structure[]:
+  node_id
+  title
+  node_type
+  summary
+  token_estimate
+  nodes
+allowed_node_ids（region 为集合，hybrid 为 None）
+input_tokens = 20000
+concurrency.llm = 10
+```
+
+结构树分批：
+
+1. 整棵紧凑树估算 token 不超过 20000 时只调用一次；
+2. 超过 20000 时按顶层 node 分组；
+3. 单个顶层 node 仍超长时保留父壳字段并继续切分 children；
+4. 每个结构分片分别调用一次 LLM。
+
+LLM 输出 schema：
+
+```json
+{
+  "nodes": [
+    {"node_id": "body/sec_004", "reason": "该章节直接约定合同金额"}
+  ]
+}
+```
+
+`QueryMatch` 字段：
+
+| 字段 | 类型 | 约束 |
+|---|---|---|
+| `node_id` | `str` | 非空；执行器再次验证节点确实存在且位于允许区域 |
+| `reason` | `str` | 可为空 |
+
+跨分片按出现顺序合并，并按 `node_id` 去重。随后：
+
+```text
+structure_matches = 全部合法结果的前 llm_candidates=12 个
+```
+
+注意：schema 没有限制 LLM 每个分片最多返回几项；`12` 是所有分片合并后的 Python 截断。
+
+8.2 第二阶段：向量召回
+~~~~~~~~~~~~~~~~~~~~~~
+
+向量检索执行条件必须同时满足：
+
+```text
+retrieval.vector.enabled == true
+self._vector_index is not None
+```
+
+它与 `structure_matches` 的数量无关。即使结构 LLM 已返回 12 个节点，向量检索仍会执行。
+
+向量输入：
+
+```text
+query
+VectorIndex.items[].embedding
+VectorIndex.items[].node_id
+allowed_node_ids（region 有范围；hybrid 为 None）
+score_threshold = routing.vector_threshold = 0.45
+input_tokens = 20000
+concurrency.embedding = 1
+```
+
+具体过程：
+
+1. 调用 embedding 服务得到一条 `query_embedding`；
+2. 遍历所有允许范围内的 `VectorItem`；
+3. 计算 query 向量与 item 向量的余弦相似度 `score`；
+4. 按 `score` 降序；
+5. 因调用方没有传 `top_k`，内部先只查看前 `VECTOR_INTERNAL_CANDIDATE_LIMIT=30` 个；
+6. 丢弃 `score < 0.45` 的候选；等于 0.45 可以保留；
+7. 用候选的以下字段估算 20000 token 预算：
+
+```text
+node_id, title, summary, node_type,
+start_index, end_index, token_estimate
+```
+
+8. 如果结果已经非空，且加入下一项会超过 20000 token，则停止；第一项即使自身超过预算仍可加入；
+9. 外层再取前 `vector_candidates=20` 个。
+
+当前配置还有 `retrieval.docxindex.vector.score_threshold=0.60`，但 `_semantic_matches()` 显式把 `routing.vector_threshold=0.45` 传给 `vector_search()`，所以生产主调用路线实际阈值是 `0.45`，不是 `0.60`。
+
+8.3 第三阶段：按 `node_id` 合并
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+结构候选先进入有序字典，向量候选随后进入：
+
+```text
+同 node_id：合并为一项
+仅结构命中：sources=["structure"]
+仅向量命中：sources=["vector"]
+两路命中：sources=["structure","vector"]
+```
+
+追加字段：
+
+```text
+vector_score
+structure_reason
+```
+
+此处没有按分数再次截断。
+
+8.4 第四阶段：LLM rerank
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+执行条件：
+
+```text
+retrieval.rerank.enabled == true
+合并候选非空
+```
+
+发送给 rerank LLM 的每个候选字段：
+
+```text
+node_id
+sources
+title
+summary
+node_type
+token_estimate
+vector_score
+```
+
+候选按当前顺序装入，累计 JSON 估算最多 `input_tokens=20000`；如果列表已经非空且下一项会超预算，就停止加入。
+
+LLM 输出：
+
+```json
+{
+  "nodes": [
+    {
+      "node_id": "body/sec_004",
+      "score": 0.95,
+      "reason": "能够直接支持合同金额审查"
+    }
+  ]
+}
+```
+
+`RerankMatch` 字段：
+
+| 字段 | 类型 | 约束 |
+|---|---|---|
+| `node_id` | `str` | 必须属于实际发送给 rerank 的候选 |
+| `score` | `float` | 0..1 |
+| `reason` | `str` | 可为空 |
+
+执行器按 LLM 返回顺序排列合法节点。LLM 未返回的原候选不会删除，而是按原顺序追加到末尾。
+
+8.5 第五阶段：最终节点截断
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+每次 `_semantic_matches()` 最终执行：
+
+```text
+return matches[:max_nodes]
+```
+
+当前 `max_nodes=5`。
+
+所以一条 region 或 hybrid 路线的数量上限是：
+
+```text
+结构 LLM：最多取 12
+向量内部：先看 30
+向量阈值后：外层最多取 20
+合并：最多 32 个不同 node_id
+rerank 输入：还受 20000 token 限制
+语义路线最终返回：最多 5 个 node
+```
+
+
+九、多步骤合并和 fallback
+-------------------------
+
+9.1 多步骤交错合并
+~~~~~~~~~~~~~~~~~~
+
+`_interleave_groups()` 不会把第一个步骤全部放完再放第二个，而是轮询：
+
+```text
+step1[0], step2[0], step3[0],
+step1[1], step2[1], step3[1], ...
+```
+
+全程按 `node_id` 去重。
+
+非 scan 最终限制：
+
+```text
+limit = max(route.max_nodes, 非空 step_groups 数量)
+```
+
+当前 `route.max_nodes=5`。例如两个非空 region 步骤仍最多返回 5 个，但交错策略会先放入两个区域各自的第一项。
+
+只要包含 scan：
+
+```text
+limit = None
+```
+
+9.2 fallback 的精确条件
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+`_should_use_fallback()` 虽然接收 `routed_matches`，但当前函数立即 `del routed_matches`，因此不会根据候选数量判断是否 fallback。
+
+只有以下条件同时满足才执行一次全局 `_semantic_matches()`：
+
+```text
+fallback_enabled == true
+RouteResponse.fallback == true
+steps 中不包含 region、scan、hybrid
+```
+
+也就是说：
+
+- title/rule 即使命中很多结果，只要规划器请求 fallback，仍会执行；
+- title/rule 即使 0 命中，只要规划器没有请求 fallback，也不会自动执行；
+- region 0 命中不会越过区域全局搜索；
+- hybrid 自身已经全局语义检索，不重复 fallback；
+- scan 已经扫描全文，不重复 fallback。
+
+fallback 候选使用 `route_step=0`、`route_method="fallback"`、`route_regions=[]`。
+
+
+十、内容组装阶段字段
+--------------------
+
+定义：`tools/docxindex/retrieval/content.py:37`
+
+输入：
+
+```text
+index: DocumentIndex dict
+matches: 路由候选数组
+input_tokens: 普通路线 12000；包含 scan 时每页 12000
+part: 从 1 开始的页号
+```
+
+输出运行时对象：
+
+```json
+{
+  "content_context": [],
+  "pagination": {
+    "part": 1,
+    "has_more": false,
+    "next_part": null
+  },
+  "budget": {
+    "input_tokens": 12000,
+    "used_tokens": 0
+  }
+}
+```
+
+10.1 `content_context[]` 字段
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+| 字段 | 类型 | 来源/含义 |
+|---|---|---|
+| `node_id` | `str` | 候选节点；切块时追加 `/chunk_NNN` |
+| `title` | `str` | owner node 标题 |
+| `text` | `str` | 优先 `candidate.text_override`，否则 `node.text` |
+| `start_index` | `int | None` | 候选覆盖范围起点 |
+| `end_index` | `int | None` | 候选覆盖范围终点 |
+| `start_anchor` | `str | None` | 起始内部 anchor |
+| `end_anchor` | `str | None` | 结束内部 anchor |
+| `source` | `list` | 来自候选 `sources`；字段名在这里变为单数 `source` |
+| `truncated` | `bool` | 是否由超长节点切块产生 |
+| `table_id` | `str | None` | 表格 ID |
+| `mapping_ref` | `str | None` | 表格映射引用 |
+| `row_start` | `int | None` | 表格块起始行 |
+| `row_end` | `int | None` | 表格块结束行 |
+| `parent_node_id` | `str | None` | 只有切块/scan 等场景可能出现 |
+
+内容去重和切块规则：
+
+1. 若父节点和后代都被选中，普通语义来源优先保留更具体的后代；title/region 来源的父节点不使用这项过滤；
+2. 空文本的 table 父节点展开为 table child；
+3. 非表格节点超过 token 预算时优先按 anchor 切块；
+4. 没有 anchor 时最后才按约 `input_tokens * 2` 个字符切块；
+5. 分页按每个 `content_context.text` 的 token 数累计。
+
+普通路线只读取第 1 页，可能留下 `has_more=true`；scan 会循环读取所有分页，最终日志固定记录 `has_more=false`。
+
+
+十一、最终公开输出
+------------------
+
+11.1 `build_index()` 返回
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+成功时返回 JSON 字符串，不是 Python dict：
+
+```json
+{
+  "status": "built_temporary_index",
+  "backend": "docxindex",
+  "num_nodes": 173,
+  "num_anchors": 356,
+  "vector_items": 170,
+  "elapsed_seconds": 4.27
+}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `status` | 固定 `built_temporary_index` |
+| `backend` | 固定 `docxindex` |
+| `num_nodes` | `DocumentIndex.nodes` 数量 |
+| `num_anchors` | `DocumentIndex.anchor_map` 数量 |
+| `vector_items` | 向量项数量；未构建时为 0 |
+| `elapsed_seconds` | 异步外层统计的耗时秒数 |
+
+失败时返回：
+
+```json
+{"error": "错误信息"}
+```
+
+11.2 `search()` 返回
+~~~~~~~~~~~~~~~~~~~~
+
+`search()` 最终返回纯文本：
+
+```text
+## 合同检索结果 1
+检索片段标题：第四条 合同金额
+xml_anchor_type: paragraph
+xml_anchor_id: path:body/p30
+内容：
+第四条 合同金额……
+
+---
+
+## 合同检索结果 2
+xml_anchor_type: table
+xml_anchor_id: path:body/tbl40
+内容：
+| 项目 | 金额 |
+……
+```
+
+公开字段：
+
+| 输出字段 | 产生规则 |
+|---|---|
+| `合同检索结果 N` | 最终去重后的 anchor 序号 |
+| `检索片段标题` | `content_context.title` 非空时输出 |
+| `xml_anchor_type` | `AnchorRecord.type == "tbl"` 时为 `table`，否则为 `paragraph` |
+| `xml_anchor_id` | 根据 `body_child_index` 生成 `path:body/pN` 或 `path:body/tblN` |
+| `内容` | 优先 `AnchorRecord.raw_text`，否则 `AnchorRecord.text` |
+
+相同 `xml_anchor_id` 只输出一次。节点范围使用闭区间：
+
+```text
+start_index <= anchor.body_child_index <= end_index
+```
+
+无结果时返回：
+
+```text
+未找到相关合同内容。
+```
+
+rule 全部未命中时，会在上述文本前追加确定性 0 次说明。
+
+异常时返回：
+
+```text
+Error in contract DocxIndex search: {错误信息}
+```
+
+11.3 不会公开返回的内部字段
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+以下字段会影响候选选择或写入日志，但不会出现在 `contract_search` 最终文本中：
+
+```text
+query
+match_type
+reason
+score
+rule_match_count
+sources
+vector_score
+structure_reason
+rerank_score
+rerank_reason
+route_step
+route_method
+route_regions
+pagination
+budget
+truncated
+mapping_ref
+```
+
+因此，如果要分析“为什么召回该 node、为什么向量候选被截断、为什么执行 fallback”，应查看 route/model event 日志，不能只看最终返回文本。
+
+
+十二、路由日志字段
+------------------
+
+日志事件名：`docxindex_route`。日志不记录合同原文。
+
+12.1 `plan`
+~~~~~~~~~~~~
+
+```json
+{
+  "route_event": "plan",
+  "plan": {
+    "steps": [],
+    "fallback": false
+  }
+}
+```
+
+12.2 `step`
+~~~~~~~~~~~~
+
+```json
+{
+  "route_event": "step",
+  "step": 1,
+  "method": "hybrid",
+  "regions": [],
+  "match_count": 5,
+  "node_ids": ["body/sec_004"]
+}
+```
+
+12.3 `fallback`
+~~~~~~~~~~~~~~~~
+
+```json
+{
+  "route_event": "fallback",
+  "requested": false,
+  "used": false,
+  "match_count": 0
+}
+```
+
+12.4 `result`
+~~~~~~~~~~~~~~
+
+```json
+{
+  "route_event": "result",
+  "candidate_count": 5,
+  "source_counts": {
+    "hybrid": 5,
+    "structure": 4,
+    "vector": 3
+  },
+  "content_parts": 1,
+  "has_more": false
+}
+```
+
+
+十三、18 个审查要点的预期验收路线
+---------------------------------
+
+以下是测试时的预期路线，不是代码中按编号写死的路由表。实际 RoutePlan 仍由 LLM 根据 query 和当前合同标题目录生成。
+
+```text
+ 1  基本信息完整性                  region(frontmatter)
+ 2  必备标题                        title(all_titles=true)
+ 3  项目负责人信息                  rule
+ 4  合同名称含“采购”                title("采购") + region(frontmatter)
+ 5  目录含“金额”                    title("金额") + region(frontmatter)
+ 6  支付方式、付款、发票、金额计算  title("支付方式") + region(body) + rule
+ 7  合同期限                        rule + region(frontmatter)
+ 8  目录含“违约责任”                title("违约责任") + region(frontmatter)
+ 9  缺少“甲方住所地人民法院”        rule + region(frontmatter)
+10  主体名称首尾一致                region(frontmatter) + region(tail)
+11  正文与附件约定一致              region(body) + region(attachments)
+12  错别字                          scan
+13  标题顺序                        title(all_titles=true)
+14  金额大小写一致                  rule
+15  语病、词语重复                  scan
+16  招投标敏感词                    rule
+17  正文结束语                      rule + region(tail)
+18  附件存在及名称一致              region(body) + region(attachments)
+```
+
+
+十四、关键配置和代码位置
+------------------------
+
+当前有效配置：`config.yaml:72-146`。
+
+```text
+input_tokens = 20000
+output_tokens = 12000
+scan_batch_tokens = 12000
+vector.enabled = true
+vector.score_threshold = 0.60（主语义路线未采用）
+rerank.enabled = true
+llm_expand = false
+llm_summary = false
+llm_attachment_hierarchy = false
+llm_candidates = 12
+vector_candidates = 20
+routing.vector_threshold = 0.45（主语义路线实际采用）
+max_nodes = 5
+concurrency.llm = 10
+concurrency.embedding = 1
+concurrency.reranker = 10
+```
+
+核心定义：
+
+- `tools/docxindex/schema/items.py:8`：`BodyItem`。
+- `tools/docxindex/schema/nodes.py:8`：`DocumentNode` 及三种 view。
+- `tools/docxindex/schema/index.py:8`：`AnchorRecord`、`DocumentIndex`。
+- `tools/docxindex/vector/schema.py:6`：向量索引 class。
+- `tools/docxindex/indexing/build_pipeline.py:70`：索引构建阶段。
+- `tools/docxindex/retrieval/route.py:54`：`plan_route()`。
+- `tools/docxindex/llm/prompts.py:33`：路由 LLM 提示词字段。
+- `tools/docxindex/llm/schemas.py:84`：query/rerank/route/scan 输出 schema。
+- `tools/docxindex/retrieval/title.py:8`：title 路线。
+- `tools/docxindex/retrieval/rule.py:11`：rule 路线。
+- `tools/docxindex/retrieval/scan.py:16`：scan 路线。
+- `tools/docxindex/retrieval/llm_query.py:18`：结构树 LLM 召回。
+- `tools/docxindex/vector/search.py:15`：向量召回。
+- `tools/docxindex/retrieval/rerank.py:16`：rerank。
+- `tools/docxindex/retrieval/content.py:37`：内容组装和分页。
+- `tools/docxindex/retriever.py:156`：五路由主执行链。
+- `tools/docxindex/retriever.py:460`：最终锚点文本格式化。
+- `scripts/docxindex/cli.py:61`：离线 JSON 衍生文件结构。
