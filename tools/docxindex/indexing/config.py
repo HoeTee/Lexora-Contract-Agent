@@ -58,9 +58,9 @@ class SummaryIndexConfig(BaseModel):
 class EnrichmentIndexConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    llm_expand: bool = False
-    llm_summary: bool = False
-    llm_attachment_hierarchy: bool = False
+    llm_expand: bool = True
+    llm_summary: bool = True
+    llm_attachment_hierarchy: bool = True
 
 
 class HierarchyIndexConfig(BaseModel):

@@ -35,8 +35,6 @@ def vector_search(
         node = nodes.get(item.node_id) or {}
         scored.append(
             {
-                "query": query,
-                "match_type": "vector",
                 "score": score,
                 "node_id": item.node_id,
                 "title": node.get("title") or item.metadata.title,

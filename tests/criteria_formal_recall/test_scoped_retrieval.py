@@ -17,12 +17,12 @@ from tools.docxindex.retriever import _interleave_groups, _region_node_ids, _rou
 
 
 class ScopedRegionTests(unittest.TestCase):
-    def test_online_index_enrichment_is_disabled_by_default(self) -> None:
+    def test_online_index_enrichment_is_enabled_by_default(self) -> None:
         enrichment = IndexingConfig().enrichment
 
-        self.assertFalse(enrichment.llm_expand)
-        self.assertFalse(enrichment.llm_summary)
-        self.assertFalse(enrichment.llm_attachment_hierarchy)
+        self.assertTrue(enrichment.llm_expand)
+        self.assertTrue(enrichment.llm_summary)
+        self.assertTrue(enrichment.llm_attachment_hierarchy)
 
     def test_region_ids_include_only_selected_region_descendants(self) -> None:
         index = {

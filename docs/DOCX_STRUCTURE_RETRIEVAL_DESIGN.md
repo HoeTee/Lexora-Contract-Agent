@@ -7,7 +7,7 @@
 ```text
 持久化 DOCX 结构树索引是主索引。
 规则审查只是少数审查要点的执行方式，不单独设计“规则索引”。
-向量检索不产生新 node；它参与 region 范围内检索、全局 hybrid 和显式 fallback。
+向量检索不产生新 node；只有结构结果少于 10 个时，它才在 region、hybrid 或显式 fallback 中补齐缺口。
 最终审查必须展开结构树中的原文 node。
 ```
 
@@ -60,18 +60,17 @@ DocumentIndex
 
 ## 3. DocumentIndex 持久化索引
 
-每个任务解析 DOCX 后生成一个持久化索引，建议写入：
+在线 API 为每个任务生成临时内存索引，不把索引写入 `/data`。离线 CLI 需要持久化时写入：
 
 ```text
-data/{client_dir}/tasks/{task_id}/index/document_index.json
+scripts/docxindex/outputs/index/{合同目录名}/document_index.json
 ```
 
 索引主结构：
 
 ```json
 {
-  "schema_version": "docx-index-v1",
-  "task_id": "20260818-xxxx",
+  "schema_version": "docx-index-v4",
   "source_file": "contract.docx",
   "top_regions": {
     "frontmatter": "frontmatter",
@@ -79,8 +78,11 @@ data/{client_dir}/tasks/{task_id}/index/document_index.json
     "tail": "tail",
     "attachments": "attachments"
   },
+  "settings": {},
   "nodes": [],
-  "anchor_map": {}
+  "structure_tree": [],
+  "anchor_map": {},
+  "table_map": {}
 }
 ```
 
@@ -106,9 +108,11 @@ data/{client_dir}/tasks/{task_id}/index/document_index.json
   "token_estimate": 720,
   "confidence_score": 9,
   "confidence_evidence": ["number_pattern", "sequence", "style_outline"],
-  "children": []
+  "nodes": []
 }
 ```
+
+`nodes` 在平铺存储中是子节点 ID 数组；v4 不再同时保存内容相同的 `children`，也不再保存可由 `structure_tree` 或 `parent_id` 推导的 `root_nodes`。
 
 ## 4. 数据来源
 
@@ -717,16 +721,16 @@ structure_tree > input_tokens
 
 ## 16. 向量补召回与 rerank
 
-向量检索不用于构建结构树。当前有三个调用位置：
+向量检索不用于构建结构树，也不是与结构树并列执行的独立检索。当前有三个受控调用位置：
 
-- `region`：先用 `allowed_node_ids` 限定区域，再与区域内结构语义结果合并并 rerank；
-- `hybrid`：对全局结构树执行结构语义和向量召回并 rerank；
-- `fallback`：仅当 `RoutePlan.fallback=true` 且路线只有可安全扩大的 `title/rule` 时补充全局语义结果。
+- `region`：先用 `allowed_node_ids` 限定区域并执行结构语义；结构结果少于 10 个时，向量仅在同一区域补齐缺口；
+- `hybrid`：先对全局结构树执行结构语义；结构结果少于 10 个时，向量补齐缺口；
+- `fallback`：仅当 `RoutePlan.fallback=true` 且路线只有可安全扩大的 `title/rule` 时执行同一套全局语义检索。
 
-`region`、`scan`、`hybrid` 不进入全局 fallback。跨区域比较使用多个独立 `region` 步骤，结果按步骤交错合并，避免后一个区域在 `max_nodes` 截断前完全丢失。
+`region`、`scan`、`hybrid` 不进入全局 fallback。跨区域比较使用多个独立 `region` 步骤，结果按步骤交错合并，避免后一个区域在 `semantic.max_selected_nodes` 截断前完全丢失。
 
 `title(all_titles=true)` 是完整目录查询：所有顶层正文标题、tail 和附件标题都必须以紧凑标题证据返回，
-不受普通 `max_nodes` 候选上限截断。`rule` 的精确关键词全部未命中时，执行器必须同时返回
+不受普通 `semantic.max_selected_nodes` 候选上限截断。`rule` 的精确关键词全部未命中时，执行器必须同时返回
 “确定性全文精确检索未出现这些词”的结果，供审查模型判断缺失型问题。
 
 向量索引对象来自 DocumentIndex 中已有 node 或 chunk：
@@ -755,31 +759,37 @@ metadata.end_anchor = node.end_anchor
 ```yaml
 retrieval:
   docxindex:
-    input_tokens: 6000
+    input_tokens: 20000
     vector:
       enabled: true
-      score_threshold: 0.60
+      score_threshold: 0.45
+      probe_limit: 20
       auto_build: true
+    semantic:
+      structure_candidate_limit: 12
+      max_selected_nodes: 10
     rerank:
       enabled: true
 ```
 
-向量召回以 token 预算控制，不以固定 node 数作为主要控制：
+语义召回同时使用固定数量边界和 token 输入预算。固定数量决定检索行为：
 
 ```text
-1. 对 query 做 embedding。
-2. 对 vector_index.json 中的 node embedding 计算相似度。
-3. 过滤 score < vector.score_threshold 的候选。
-4. 按相似度从高到低累计候选轻量字段。
-5. 累计到 retrieval.docxindex.input_tokens 后停止。
+1. 结构树 LLM 最多选择 semantic.structure_candidate_limit=12 个候选。
+2. 按 node_id 去重；如果结构候选已经达到 semantic.max_selected_nodes=10，不调用向量检索。
+3. 如果结构候选少于 10，才对 query 做 embedding，并读取最多 vector.probe_limit=20 个向量候选。
+4. 过滤 score < vector.score_threshold=0.45 的候选，再过滤与结构候选重复的 node_id。
+5. 向量候选只填补到总数 10，不能挤掉已经由结构树选中的候选。
+6. 对合并候选统一 rerank，最终仍截断为最多 10 个 node。
 ```
 
 合并不是合并原文，也不是合并索引。合并只做：
 
 ```text
-structure_matches + vector_matches
+structure_matches + vector_supplements
 -> 按 node_id 去重
 -> 保留 sources、vector_score、structure_reason
+-> 只填补到 semantic.max_selected_nodes
 -> 得到 candidate_nodes
 ```
 

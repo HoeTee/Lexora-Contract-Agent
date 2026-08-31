@@ -189,7 +189,12 @@ class DocxIndexRetriever:
             elif step.method == "region":
                 allowed_node_ids = _region_node_ids(index, step.regions)
                 scoped_query = _step_query(query, step.terms)
-                current = self._semantic_matches(index, scoped_query, allowed_node_ids)
+                current = self._semantic_matches(
+                    index,
+                    scoped_query,
+                    allowed_node_ids,
+                    scope=step.regions[0],
+                )
             elif step.method == "scan":
                 current = scan_matches(
                     index,
@@ -199,10 +204,15 @@ class DocxIndexRetriever:
                     config.concurrency.llm,
                 )
             elif step.method == "hybrid":
-                current = self._semantic_matches(index, _step_query(query, step.terms), None)
+                current = self._semantic_matches(
+                    index,
+                    _step_query(query, step.terms),
+                    None,
+                    scope="global",
+                )
             else:
                 raise ValueError(f"Unsupported docxindex route method: {step.method}")
-            current = _tag_step(current, step_index, step.method, step.regions)
+            current = _add_route_source(current, step.method)
             step_groups.append(current)
             _route_event(
                 "step",
@@ -213,15 +223,17 @@ class DocxIndexRetriever:
                 node_ids=[item.get("node_id") for item in current],
             )
 
-        routed_matches = _interleave_groups(step_groups)
         fallback_used = _should_use_fallback(
             route_plan,
-            routed_matches,
             fallback_enabled=route.fallback_enabled,
         )
-        fallback_matches = self._semantic_matches(index, query, None) if fallback_used else []
+        fallback_matches = (
+            self._semantic_matches(index, query, None, scope="global")
+            if fallback_used
+            else []
+        )
         if fallback_matches:
-            step_groups.append(_tag_step(fallback_matches, 0, "fallback", []))
+            step_groups.append(_add_route_source(fallback_matches, "fallback"))
         _route_event(
             "fallback",
             requested=route_plan.fallback,
@@ -230,7 +242,8 @@ class DocxIndexRetriever:
         )
 
         has_scan = any(step.method == "scan" for step in route_plan.steps)
-        limit = None if has_scan else max(route.max_nodes, sum(bool(group) for group in step_groups))
+        selected_node_limit = config.semantic.max_selected_nodes
+        limit = None if has_scan else max(selected_node_limit, sum(bool(group) for group in step_groups))
         ranked_matches = _interleave_groups(step_groups, limit=limit)
         if complete_title_matches:
             ranked_matches = _deduplicate_matches(complete_title_matches + ranked_matches)
@@ -271,9 +284,10 @@ class DocxIndexRetriever:
         index: dict[str, Any],
         query: str,
         allowed_node_ids: set[str] | None,
+        *,
+        scope: str,
     ) -> list[dict[str, Any]]:
         config = self.retrieval_config
-        route = self.route_config
         structure_matches = llm_query(
             index,
             [query],
@@ -282,20 +296,34 @@ class DocxIndexRetriever:
             input_tokens=config.input_tokens,
             concurrency=config.concurrency.llm,
             allowed_node_ids=allowed_node_ids,
-        )[: route.llm_candidates]
+        )[: config.semantic.structure_candidate_limit]
         vector_matches: list[dict[str, Any]] = []
-        if config.vector.enabled and self._vector_index is not None:
+        max_selected_nodes = config.semantic.max_selected_nodes
+        if not config.vector.enabled:
+            vector_trigger_reason = "disabled"
+        elif self._vector_index is None:
+            vector_trigger_reason = "index_unavailable"
+        elif len(structure_matches) >= max_selected_nodes:
+            vector_trigger_reason = "structure_sufficient"
+        else:
+            vector_trigger_reason = "structure_below_limit"
             vector_matches = vector_search(
                 index,
                 self._vector_index,
                 query,
                 self.embedding_client,
-                score_threshold=route.vector_threshold,
+                top_k=config.vector.probe_limit,
+                score_threshold=config.vector.score_threshold,
                 input_tokens=config.input_tokens,
                 concurrency=config.concurrency.embedding,
                 allowed_node_ids=allowed_node_ids,
-            )[: route.vector_candidates]
-        matches = _merge_matches(structure_matches, vector_matches)
+            )
+        matches, vector_duplicate_count, vector_added_count = _merge_semantic_matches(
+            structure_matches,
+            vector_matches,
+            max_unique_nodes=max_selected_nodes if vector_matches else None,
+        )
+        candidate_count_before_rerank = len(matches)
         if config.rerank.enabled and matches:
             matches = rerank_matches(
                 index,
@@ -306,17 +334,31 @@ class DocxIndexRetriever:
                 cache_dir=None,
                 concurrency=config.concurrency.reranker,
             )
-        return matches[: route.max_nodes]
+        selected = matches[:max_selected_nodes]
+        _route_event(
+            "semantic_retrieval",
+            scope=scope,
+            structure_candidate_count=len(structure_matches),
+            vector_enabled=config.vector.enabled,
+            vector_triggered=vector_trigger_reason == "structure_below_limit",
+            vector_trigger_reason=vector_trigger_reason,
+            vector_probe_limit=config.vector.probe_limit,
+            vector_probe_count=len(vector_matches),
+            vector_duplicate_count=vector_duplicate_count,
+            vector_added_count=vector_added_count,
+            candidate_count_before_rerank=candidate_count_before_rerank,
+            selected_node_count=len(selected),
+            selected_node_ids=[item.get("node_id") for item in selected],
+        )
+        return selected
 
 
 def _should_use_fallback(
     plan: Any,
-    routed_matches: list[dict[str, Any]],
     *,
     fallback_enabled: bool,
 ) -> bool:
     """Honor explicit fallback only for deterministic routes that may safely widen scope."""
-    del routed_matches
     methods = {step.method for step in plan.steps}
     scoped_or_complete = methods.intersection({"region", "scan", "hybrid"})
     return bool(fallback_enabled and plan.fallback and not scoped_or_complete)
@@ -347,25 +389,16 @@ def _step_query(query: str, terms: list[str]) -> str:
     return f"{query}\n检索提示词：{'、'.join(clean_terms)}"
 
 
-def _tag_step(
+def _add_route_source(
     matches: list[dict[str, Any]],
-    step_index: int,
     method: str,
-    regions: list[str],
 ) -> list[dict[str, Any]]:
     result = []
     for match in matches:
         item = dict(match)
         sources = set(item.get("sources") or [])
         sources.add(method)
-        item.update(
-            {
-                "sources": sorted(sources),
-                "route_step": step_index,
-                "route_method": method,
-                "route_regions": list(regions),
-            }
-        )
+        item["sources"] = sorted(sources)
         result.append(item)
     return result
 
@@ -416,45 +449,45 @@ def _route_event(event: str, **payload: Any) -> None:
     )
 
 
-def _merge_matches(structure_matches: list[dict[str, Any]], vector_matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    merged: dict[str, dict[str, Any]] = {}
-    for source, matches in (("structure", structure_matches), ("vector", vector_matches)):
-        for match in matches:
-            node_id = match.get("node_id")
-            if not node_id:
-                continue
-            item = merged.setdefault(node_id, dict(match))
-            sources = set(item.get("sources") or [])
-            sources.add(source)
-            item["sources"] = sorted(sources)
-            if source == "vector":
-                item["vector_score"] = match.get("score")
-            if source == "structure":
-                item["structure_reason"] = match.get("reason")
-    return list(merged.values())
+def _merge_semantic_matches(
+    structure_matches: list[dict[str, Any]],
+    vector_matches: list[dict[str, Any]],
+    *,
+    max_unique_nodes: int | None,
+) -> tuple[list[dict[str, Any]], int, int]:
+    result: list[dict[str, Any]] = []
+    by_id: dict[str, dict[str, Any]] = {}
+    for match in structure_matches:
+        node_id = str(match.get("node_id") or "")
+        if not node_id or node_id in by_id:
+            continue
+        item = dict(match)
+        item["sources"] = ["structure"]
+        item["structure_reason"] = match.get("reason")
+        by_id[node_id] = item
+        result.append(item)
 
-
-def _merge_routed_matches(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    merged: dict[str, dict[str, Any]] = {}
-    order: list[str] = []
-    for matches in groups:
-        for match in matches:
-            node_id = match.get("node_id")
-            if not node_id:
-                continue
-            if node_id not in merged:
-                merged[node_id] = dict(match)
-                order.append(node_id)
-            item = merged[node_id]
-            sources = set(item.get("sources") or [])
-            sources.update(match.get("sources") or [])
-            item["sources"] = sorted(source for source in sources if source)
-            if "region" in (match.get("sources") or []):
-                item.pop("text_override", None)
-            for key in ("vector_score", "structure_reason", "reason", "rerank_score", "rerank_reason"):
-                if match.get(key) is not None:
-                    item[key] = match[key]
-    return [merged[node_id] for node_id in order]
+    duplicate_count = 0
+    added_count = 0
+    for match in vector_matches:
+        node_id = str(match.get("node_id") or "")
+        if not node_id:
+            continue
+        existing = by_id.get(node_id)
+        if existing is not None:
+            duplicate_count += 1
+            existing["sources"] = sorted({*(existing.get("sources") or []), "vector"})
+            existing["vector_score"] = match.get("score")
+            continue
+        if max_unique_nodes is not None and len(result) >= max_unique_nodes:
+            continue
+        item = dict(match)
+        item["sources"] = ["vector"]
+        item["vector_score"] = match.get("score")
+        by_id[node_id] = item
+        result.append(item)
+        added_count += 1
+    return result, duplicate_count, added_count
 
 
 def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -> str:

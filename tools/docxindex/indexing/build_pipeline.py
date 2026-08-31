@@ -349,7 +349,6 @@ def _finalize_index(
             "table_chunk_target_tokens": options.table_chunk_target_tokens,
         },
         nodes=[node.storage_view() for node in flat_nodes],
-        root_nodes=[node.node_id for node in roots],
         structure_tree=[node.structure_view() for node in roots],
         anchor_map=build_anchor_map(items, flat_nodes),
         table_map=collect_table_map(items),

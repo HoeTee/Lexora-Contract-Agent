@@ -38,8 +38,9 @@ class RoutePromptContractTests(unittest.TestCase):
         )
 
         self.assertIn(ROUTE_EXPECTED_JSON, prompt)
-        for field in ("steps", "method", "terms", "regions", "all_titles", "context", "fallback"):
+        for field in ("steps", "method", "terms", "regions", "all_titles", "fallback"):
             self.assertIn(field, prompt)
+        self.assertNotIn('"context"', ROUTE_EXPECTED_JSON)
         for method in METHODS:
             self.assertIn(method, prompt)
         self.assertIn("1 到 5 个路由步骤", prompt)
@@ -61,7 +62,7 @@ class RoutePromptContractTests(unittest.TestCase):
         self.assertEqual(result.steps[0].method, "rule")
         self.assertEqual(len(client.prompts), 1)
         self.assertIn(ROUTE_EXPECTED_JSON, client.prompts[0])
-        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v5")
+        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v6")
 
     def test_schema_rejects_removed_join_route_and_slots_field(self) -> None:
         with self.assertRaises(ValidationError):
@@ -93,6 +94,13 @@ class RoutePromptContractTests(unittest.TestCase):
     def test_schema_rejects_contract_fields_outside_expected_json(self) -> None:
         invalid = json.loads(ROUTE_EXPECTED_JSON)
         invalid["steps"][0]["reason"] = "不属于执行契约"
+
+        with self.assertRaises(ValidationError):
+            RouteResponse.model_validate(invalid)
+
+    def test_schema_rejects_removed_context_field(self) -> None:
+        invalid = json.loads(ROUTE_EXPECTED_JSON)
+        invalid["steps"][0]["context"] = 1
 
         with self.assertRaises(ValidationError):
             RouteResponse.model_validate(invalid)

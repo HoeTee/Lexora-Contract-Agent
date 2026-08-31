@@ -115,7 +115,6 @@ class RouteStep(BaseModel):
     terms: list[str] = Field(default_factory=list)
     regions: list[Literal["frontmatter", "body", "tail", "attachments"]] = Field(default_factory=list)
     all_titles: bool = False
-    context: int = Field(default=0, ge=0, le=2)
 
     @model_validator(mode="after")
     def validate_method_fields(self) -> "RouteStep":

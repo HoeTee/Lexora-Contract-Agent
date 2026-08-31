@@ -52,8 +52,6 @@ def llm_query(
                 seen.add(node_id)
                 results.append(
                     {
-                        "query": query,
-                        "match_type": "llm_structure",
                         "node_id": node_id,
                         "title": node.get("title"),
                         "summary": node.get("summary"),

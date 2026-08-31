@@ -67,7 +67,8 @@ def _content_units(index: dict[str, Any], candidates: list[dict[str, Any]], inpu
         if not node_id:
             continue
         node = get_node(index, candidate.get("parent_node_id") or node_id)
-        if node.get("node_type") == "table" and not (node.get("text") or "").strip() and node.get("children"):
+        child_ids = node.get("nodes") or node.get("children") or []
+        if node.get("node_type") == "table" and not (node.get("text") or "").strip() and child_ids:
             units.extend(_table_child_units(index, node, candidate, input_tokens))
             continue
         item = _content_item(node, candidate)
@@ -89,7 +90,7 @@ def _table_child_units(
     input_tokens: int,
 ) -> list[dict[str, Any]]:
     units: list[dict[str, Any]] = []
-    for child_id in table_node.get("children") or []:
+    for child_id in table_node.get("nodes") or table_node.get("children") or []:
         child = get_node(index, child_id)
         child_candidate = {
             **candidate,

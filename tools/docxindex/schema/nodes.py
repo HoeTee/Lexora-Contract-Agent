@@ -37,8 +37,7 @@ class DocumentNode(BaseModel):
 
     def storage_view(self) -> dict[str, Any]:
         data = self.model_dump(exclude={"children", "source_start", "source_end"})
-        data["children"] = [child.node_id for child in self.children]
-        data["nodes"] = data["children"]
+        data["nodes"] = [child.node_id for child in self.children]
         return data
 
     def structure_view(self) -> dict[str, Any]:
@@ -62,21 +61,3 @@ class DocumentNode(BaseModel):
         else:
             data["nodes"] = []
         return data
-
-    def content_view(self) -> dict[str, Any]:
-        return {
-            "node_id": self.node_id,
-            "title": self.title,
-            "node_type": self.node_type,
-            "text": self.text,
-            "start_index": self.start_index,
-            "end_index": self.end_index,
-            "start_anchor": self.start_anchor,
-            "end_anchor": self.end_anchor,
-            "token_estimate": self.token_estimate,
-            "nodes": [child.node_id for child in self.children],
-            "table_id": self.table_id,
-            "mapping_ref": self.mapping_ref,
-            "row_start": self.row_start,
-            "row_end": self.row_end,
-        }

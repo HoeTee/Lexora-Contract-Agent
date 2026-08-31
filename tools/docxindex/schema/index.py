@@ -21,12 +21,11 @@ class AnchorRecord(BaseModel):
 class DocumentIndex(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "docx-index-v3"
+    schema_version: str = "docx-index-v4"
     source_file: str
     top_regions: dict[str, str]
     settings: dict[str, Any]
     nodes: list[dict[str, Any]]
-    root_nodes: list[str]
     structure_tree: list[dict[str, Any]]
     anchor_map: dict[str, AnchorRecord]
     table_map: dict[str, dict[str, Any]] = Field(default_factory=dict)

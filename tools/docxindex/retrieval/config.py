@@ -15,8 +15,16 @@ class VectorRetrievalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = True
-    score_threshold: float = Field(default=0.60, ge=0.0, le=1.0)
+    score_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
+    probe_limit: int = Field(default=20, ge=1)
     auto_build: bool = True
+
+
+class SemanticRetrievalConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    structure_candidate_limit: int = Field(default=12, ge=1)
+    max_selected_nodes: int = Field(default=10, ge=1)
 
 
 class RerankConfig(BaseModel):
@@ -40,6 +48,7 @@ class RetrievalConfig(BaseModel):
     output_tokens: int = Field(default=12000, ge=500)
     scan_batch_tokens: int = Field(default=12000, ge=500)
     vector: VectorRetrievalConfig = Field(default_factory=VectorRetrievalConfig)
+    semantic: SemanticRetrievalConfig = Field(default_factory=SemanticRetrievalConfig)
     rerank: RerankConfig = Field(default_factory=RerankConfig)
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
 
@@ -49,8 +58,6 @@ class RetrievalConfig(BaseModel):
         config_path: Path | None = None,
         input_tokens: int | None = None,
         vector_enabled: bool | None = None,
-        vector_score_threshold: float | None = None,
-        vector_auto_build: bool | None = None,
         rerank_enabled: bool | None = None,
     ) -> "RetrievalConfig":
         raw = load_yaml(config_path or DEFAULT_RETRIEVAL_CONFIG)
@@ -58,24 +65,45 @@ class RetrievalConfig(BaseModel):
         data: dict[str, Any] = {
             key: value
             for key, value in section.items()
-            if key in {"input_tokens", "output_tokens", "scan_batch_tokens", "vector", "rerank"}
+            if key in {"input_tokens", "output_tokens", "scan_batch_tokens", "vector", "semantic", "rerank"}
         }
         vector = dict(data.get("vector") or {})
+        semantic = dict(data.get("semantic") or {})
         rerank = dict(data.get("rerank") or {})
         concurrency = dict(section.get("concurrency") or {})
+        routing = dict(section.get("routing") or {})
+
+        _migrate_legacy_value(routing, "llm_candidates", semantic, "structure_candidate_limit")
+        _migrate_legacy_value(routing, "max_nodes", semantic, "max_selected_nodes")
+        _migrate_legacy_value(routing, "vector_candidates", vector, "probe_limit")
+        _migrate_legacy_value(routing, "vector_threshold", vector, "score_threshold")
 
         if input_tokens is not None:
             data["input_tokens"] = input_tokens
         if vector_enabled is not None:
             vector["enabled"] = vector_enabled
-        if vector_score_threshold is not None:
-            vector["score_threshold"] = vector_score_threshold
-        if vector_auto_build is not None:
-            vector["auto_build"] = vector_auto_build
         if rerank_enabled is not None:
             rerank["enabled"] = rerank_enabled
 
         data["vector"] = vector
+        data["semantic"] = semantic
         data["rerank"] = rerank
         data["concurrency"] = concurrency
         return cls.model_validate(data)
+
+
+def _migrate_legacy_value(
+    legacy: dict[str, Any],
+    legacy_key: str,
+    target: dict[str, Any],
+    target_key: str,
+) -> None:
+    if legacy_key not in legacy:
+        return
+    legacy_value = legacy[legacy_key]
+    if target_key in target and target[target_key] != legacy_value:
+        raise ValueError(
+            f"conflicting retrieval settings: routing.{legacy_key}={legacy_value!r} "
+            f"and {target_key}={target[target_key]!r}"
+        )
+    target.setdefault(target_key, legacy_value)

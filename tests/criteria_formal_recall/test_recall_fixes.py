@@ -203,7 +203,7 @@ class RetrievalFallbackTests(unittest.TestCase):
         })
 
         self.assertTrue(
-            _should_use_fallback(plan, [{"node_id": "body/dispute"}], fallback_enabled=True)
+            _should_use_fallback(plan, fallback_enabled=True)
         )
 
     def test_region_cannot_request_global_fallback(self) -> None:
@@ -220,7 +220,7 @@ class RetrievalFallbackTests(unittest.TestCase):
         })
 
         self.assertFalse(
-            _should_use_fallback(plan, [{"node_id": "scan/batch_001"}], fallback_enabled=True)
+            _should_use_fallback(plan, fallback_enabled=True)
         )
 
 

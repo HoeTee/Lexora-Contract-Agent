@@ -18,7 +18,7 @@ from tools.docxindex.llm.schemas import RouteResponse
 
 
 DEFAULT_ROUTE_CONFIG = Path(__file__).resolve().parents[4] / "config.yaml"
-ROUTE_PROMPT_VERSION = "docx_route_v5"
+ROUTE_PROMPT_VERSION = "docx_route_v6"
 ROUTE_TITLE_MAX_DEPTH = 2
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NUMBERED_CRITERION = re.compile(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)(.+)$", re.S)
@@ -31,16 +31,14 @@ class RouteConfig(BaseModel):
     expected_criteria_count: int = Field(default=18, ge=1)
     fallback_enabled: bool = True
     methods: dict[str, str]
-    llm_candidates: int = Field(default=12, ge=1)
-    vector_candidates: int = Field(default=20, ge=1)
-    vector_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
-    max_nodes: int = Field(default=5, ge=1)
 
     @classmethod
     def load(cls, path: Path | None = None) -> "RouteConfig":
         config_path = (path or DEFAULT_ROUTE_CONFIG).resolve()
         raw = load_yaml(config_path)
         data = dict(docxindex_config(raw).get("routing") or {})
+        for legacy_key in ("llm_candidates", "vector_candidates", "vector_threshold", "max_nodes"):
+            data.pop(legacy_key, None)
         source = Path(str(data.get("criteria") or ""))
         if not source.is_absolute():
             source = (config_path.parent / source).resolve()

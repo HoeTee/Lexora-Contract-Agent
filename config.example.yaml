@@ -79,15 +79,19 @@ retrieval:
     scan_batch_tokens: 12000
     vector:
       enabled: true
-      score_threshold: 0.60
+      score_threshold: 0.45
+      probe_limit: 20
       auto_build: true
+    semantic:
+      structure_candidate_limit: 12
+      max_selected_nodes: 10
     rerank:
       enabled: true
     indexing:
       enrichment:
-        llm_expand: false
-        llm_summary: false
-        llm_attachment_hierarchy: false
+        llm_expand: true
+        llm_summary: true
+        llm_attachment_hierarchy: true
       heading:
         profiles:
           primary:
@@ -121,14 +125,10 @@ retrieval:
       fallback_enabled: true
       methods:
         title: "检查目录、标题、章节名称、必备标题和标题顺序。"
-        region: "限定合同首部、正文、尾部或附件后，在区域内执行结构语义、向量召回和重排。"
+        region: "限定合同首部、正文、尾部或附件后，先执行区域内结构树语义检索；结果不足时才使用向量补充，随后重排。"
         rule: "执行全文精确关键词、正则、金额和存在性定位。"
         scan: "按 token 预算把全部 anchor 分批交给 LLM 逐项检查。"
-        hybrid: "无法限定标题、区域或精确关键词时，执行全局结构语义、向量召回和重排。"
-      llm_candidates: 12
-      vector_candidates: 20
-      vector_threshold: 0.45
-      max_nodes: 5
+        hybrid: "无法限定标题、区域或精确关键词时，先执行全局结构树语义检索；结果不足时才使用向量补充，随后重排。"
     concurrency:
       llm: 10
       embedding: 1
