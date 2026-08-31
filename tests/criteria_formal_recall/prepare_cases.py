@@ -15,11 +15,15 @@ from xml.etree import ElementTree
 
 
 SOURCE_ROOT = Path(r"C:\Users\lenovo\Downloads\合同样例")
+TEMPLATE_ROOT = Path(r"C:\Users\lenovo\Downloads\模板合同")
 SUITE_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = SUITE_ROOT.parents[1]
 DEFAULT_OUTPUT_DIR = SUITE_ROOT / "cases"
 DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases_10.csv"
 DEFAULT_CHANGES_CSV = SUITE_ROOT / "xml_changes_10.csv"
+FULL_OUTPUT_DIR = SUITE_ROOT / "cases_32"
+FULL_EXPECTED_CSV = SUITE_ROOT / "expected_cases_32.csv"
+FULL_CHANGES_CSV = SUITE_ROOT / "xml_changes_32.csv"
 DOCUMENT_XML = "word/document.xml"
 TEXT_NODE = re.compile(rb"(<w:t(?:\s[^>]*)?>)(.*?)(</w:t>)", re.DOTALL)
 
@@ -165,12 +169,45 @@ D01_REPLACEMENTS = (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成10份criteria-formal XML-only召回测试合同。")
+    parser.add_argument("--case-set", choices=("10", "32"), default="10")
     parser.add_argument("--source-root", type=Path, default=SOURCE_ROOT)
+    parser.add_argument("--template-root", type=Path, default=TEMPLATE_ROOT)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--expected-csv", type=Path, default=DEFAULT_EXPECTED_CSV)
     parser.add_argument("--changes-csv", type=Path, default=DEFAULT_CHANGES_CSV)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args()
+
+
+def selected_case_sources(args: argparse.Namespace) -> tuple[tuple[str, Path], ...]:
+    source_root = args.source_root.resolve()
+    selected = [(contract_id, source_root / filename) for contract_id, filename in CASE_SOURCES]
+    if args.case_set == "10":
+        return tuple(selected)
+
+    template_root = args.template_root.resolve()
+    available = sorted(
+        (
+            path.resolve()
+            for root in (source_root, template_root)
+            for path in root.glob("*.docx")
+            if not path.name.startswith("~$")
+        ),
+        key=lambda path: (str(path.parent).casefold(), path.name.casefold()),
+    )
+    if len(available) != 32:
+        raise ValueError(
+            "32-contract case set requires exactly 32 DOCX files across "
+            f"{source_root} and {template_root}; found {len(available)}"
+        )
+
+    selected_paths = {path for _, path in selected}
+    missing = [path for _, path in selected if path not in available]
+    if missing:
+        raise FileNotFoundError(f"existing 10-contract source files are missing: {missing}")
+    remaining = [path for path in available if path not in selected_paths]
+    ordered = [path for _, path in selected] + remaining
+    return tuple((f"D{index:02d}", path) for index, path in enumerate(ordered, start=1))
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -205,7 +242,16 @@ def select_contract_title_group(
             continue
         candidates.append(group)
     if not candidates:
-        raise ValueError("no contract title was found in frontmatter")
+        candidates = [
+            group
+            for group in paragraph_groups
+            if group
+            and group[0] < upper
+            and 4 <= len("".join(values[index] for index in group).strip()) <= 80
+            and "合同号" not in "".join(values[index] for index in group)
+        ]
+    if not candidates:
+        raise ValueError("no usable title was found in frontmatter")
     return min(
         candidates,
         key=lambda group: (
@@ -237,7 +283,7 @@ def generic_replacements(
     needs_synthetic_attachment = attachment_start_text_node >= int(size * 0.95)
 
     def add(index: int, criteria: tuple[int, ...], after: str, reason: str) -> None:
-        if contract_id in {"D03", "D10"}:
+        if after and contract_id in {"D03", "D10"}:
             after = {
                 "制造主体基本信息缺失": "地址：【未填写】，联系电话及联系人信息亦未补充。",
                 "植入流程敏感词": "采购人甲方向中标单位乙方采购服务，本合同依据招标采购结果订立并由双方共同履行。",
@@ -252,7 +298,7 @@ def generic_replacements(
                     else after
                 ),
             }.get(reason, after)
-        if needs_synthetic_attachment:
+        if after and needs_synthetic_attachment:
             after = {
                 "制造附件名称不一致": "第二十二条 附件",
                 "制造正文附件期限不一致": "附件一：服务清单；附件一约定同一服务期限截止日为2027年08月31日。",
@@ -297,6 +343,16 @@ def generic_replacements(
                     candidates.append(group)
         if not candidates:
             raise ValueError(f"{contract_id}: no paragraph available for {label}")
+        body_candidates = [
+            group
+            for group in candidates
+            if not (
+                group in structural_heading_groups
+                and len("".join(values[index] for index in group).strip()) <= 80
+            )
+        ]
+        if body_candidates:
+            candidates = body_candidates
         selected = max(candidates, key=lambda group: group[0]) if prefer_last else min(
             candidates,
             key=lambda group: (len("".join(values[index] for index in group).strip()), group[0]),
@@ -313,15 +369,43 @@ def generic_replacements(
         for position, index in enumerate(group):
             add(index, criteria, after if position == 0 else "", reason)
 
-    def choose_heading(label: str, patterns: tuple[str, ...]) -> tuple[int, ...]:
+    def choose_heading(
+        label: str,
+        patterns: tuple[str, ...],
+        *,
+        after_index: int | None = None,
+        reserve_later: int = 0,
+        require_after: bool = False,
+        prefer_earliest: bool = False,
+        prefer_latest: bool = False,
+        single_run_only: bool = False,
+        top_level_only: bool = False,
+        require_following_paragraph: bool = False,
+    ) -> tuple[int, ...]:
         candidates: list[tuple[int, ...]] = []
         for group in paragraph_groups:
-            if not group or not body_start_text_node <= group[0] < body_end_text_node:
+            if (
+                not group
+                or not body_start_text_node
+                <= group[0]
+                < min(body_end_text_node, attachment_start_text_node)
+            ):
+                continue
+            if single_run_only and len(group) != 1:
                 continue
             if any(index in used for index in group):
                 continue
             value = "".join(values[index] for index in group).strip()
             if not 2 <= len(value) <= 80:
+                continue
+            if (
+                top_level_only
+                and group not in structural_heading_groups
+                and not re.match(
+                    r"^(?:第[一二三四五六七八九十百0-9]+[条章]|[一二三四五六七八九十百]+、)",
+                    value,
+                )
+            ):
                 continue
             has_text_numbering = re.match(
                 r"^(?:第[一二三四五六七八九十百0-9]+[条章节]|[一二三四五六七八九十百0-9]+[、.．])",
@@ -330,6 +414,29 @@ def generic_replacements(
             if group not in structural_heading_groups and not has_text_numbering:
                 continue
             candidates.append(group)
+        if require_following_paragraph:
+            candidates = [
+                group
+                for group in candidates
+                if any(
+                    paragraph[0] > group[-1]
+                    and not any(index in used for index in paragraph)
+                    and 8 <= len("".join(values[index] for index in paragraph).strip()) <= 300
+                    for paragraph in paragraph_groups
+                )
+            ]
+        if after_index is not None:
+            later_candidates = [group for group in candidates if group[0] > after_index]
+            if later_candidates or require_after:
+                candidates = later_candidates
+        if reserve_later:
+            reservable = [
+                group
+                for group in candidates
+                if sum(other[0] > group[0] for other in candidates) >= reserve_later
+            ]
+            if reservable:
+                candidates = reservable
         preferred = [
             group
             for group in candidates
@@ -340,10 +447,23 @@ def generic_replacements(
         ]
         available = preferred or candidates
         if not available:
-            raise ValueError(f"{contract_id}: no structural heading available for {label}")
+            raise ValueError(
+                f"{contract_id}: no structural heading available for {label}; "
+                f"after_index={after_index}, body_end={body_end_text_node}, "
+                f"attachment_start={attachment_start_text_node}"
+            )
         selected = min(
             available,
-            key=lambda group: (len("".join(values[index] for index in group).strip()), group[0]),
+            key=(
+                (lambda group: -group[0])
+                if prefer_latest
+                else (lambda group: group[0])
+                if prefer_earliest
+                else lambda group: (
+                    len("".join(values[index] for index in group).strip()),
+                    group[0],
+                )
+            ),
         )
         used.update(selected)
         return selected
@@ -357,6 +477,7 @@ def generic_replacements(
         end=body_fraction,
         min_len=4,
         max_len=120,
+        fallback_to_any=True,
     )
     intro = choose_paragraph(
         "intro",
@@ -365,13 +486,64 @@ def generic_replacements(
         end=min(1.0, body_fraction + 0.08),
         min_len=12,
         max_len=500,
+        fallback_to_any=True,
     )
     amount_heading = choose_heading(
         "amount heading",
         (r"合同金额", r"合同价款", r"价款", r"支付", r"付款"),
+        reserve_later=3 if needs_synthetic_attachment else 0,
+        prefer_earliest=needs_synthetic_attachment,
+        top_level_only=needs_synthetic_attachment,
     )
-    amount_zone_start = max(0.0, amount_heading[0] / size - 0.02)
-    amount_zone_end = min(1.0, amount_heading[0] / size + 0.18)
+    breach_heading = choose_heading(
+        "breach heading",
+        () if needs_synthetic_attachment else (r"违约责任",),
+        after_index=amount_heading[0],
+        reserve_later=2 if needs_synthetic_attachment else 0,
+        prefer_earliest=needs_synthetic_attachment,
+        top_level_only=needs_synthetic_attachment,
+    )
+    disorder_heading = choose_heading(
+        "disordered heading",
+        () if needs_synthetic_attachment else (r"不可抗力", r"争议", r"保密", r"知识产权"),
+        after_index=breach_heading[0],
+        reserve_later=1 if needs_synthetic_attachment else 0,
+        prefer_earliest=needs_synthetic_attachment,
+        top_level_only=needs_synthetic_attachment,
+    )
+    synthetic_attachment_heading: tuple[int, ...] | None = None
+    if needs_synthetic_attachment:
+        try:
+            synthetic_attachment_heading = choose_heading(
+                "synthetic attachment heading",
+                (),
+                after_index=disorder_heading[0],
+                require_after=True,
+                prefer_latest=True,
+                single_run_only=True,
+                top_level_only=True,
+                require_following_paragraph=True,
+            )
+        except ValueError:
+            synthetic_attachment_heading = choose_heading(
+                "synthetic attachment heading",
+                (),
+                after_index=disorder_heading[0],
+                require_after=True,
+                prefer_latest=True,
+                top_level_only=True,
+                require_following_paragraph=True,
+            )
+    amount_zone_start = (
+        amount_heading[0] / size
+        if needs_synthetic_attachment
+        else max(0.0, amount_heading[0] / size - 0.02)
+    )
+    amount_zone_end = (
+        min(body_end_fraction, attachment_fraction, 0.94, amount_heading[0] / size + 0.35)
+        if needs_synthetic_attachment
+        else min(body_end_fraction, attachment_fraction, amount_heading[0] / size + 0.18)
+    )
     amount_value = choose_paragraph(
         "amount value",
         (r"元", r"￥", r"金额", r"价款"),
@@ -407,7 +579,7 @@ def generic_replacements(
         "term",
         (r"合同期限", r"履行期限", r"有效期", r"服务期", r"期限"),
         start=body_fraction,
-        end=body_end_fraction,
+        end=min(body_end_fraction, 0.8) if needs_synthetic_attachment else body_end_fraction,
         min_len=6,
         max_len=300,
         fallback_to_any=True,
@@ -432,26 +604,22 @@ def generic_replacements(
         "body attachment",
         (r"附件",),
         start=max(0.05, body_fraction),
-        end=min(body_end_fraction, attachment_fraction),
+        end=(
+            min(body_end_fraction, attachment_fraction, 0.8)
+            if needs_synthetic_attachment
+            else min(body_end_fraction, attachment_fraction)
+        ),
         min_len=12,
         max_len=500,
         fallback_to_any=True,
-    )
-    breach_heading = choose_heading(
-        "breach heading",
-        (r"违约责任",),
     )
     breach_body = choose_paragraph(
         "breach body",
         (),
         start=breach_heading[0] / size,
-        end=min(1.0, breach_heading[0] / size + 0.18),
+        end=min(body_end_fraction, attachment_fraction, breach_heading[0] / size + 0.18),
         min_len=12,
         max_len=400,
-    )
-    disorder_heading = choose_heading(
-        "disordered heading",
-        (r"不可抗力", r"争议", r"保密", r"知识产权"),
     )
     dispute = choose_paragraph(
         "dispute",
@@ -462,49 +630,119 @@ def generic_replacements(
         max_len=400,
         fallback_to_any=True,
     )
-    attachment_name = choose_paragraph(
-        "attachment name",
-        (r"附件",),
-        start=attachment_fraction,
-        end=1.0,
-        min_len=4,
-        max_len=180,
-        fallback_to_any=True,
+    if needs_synthetic_attachment:
+        if synthetic_attachment_heading is None:
+            raise AssertionError("synthetic attachment heading was not selected")
+        try:
+            project = choose_paragraph(
+                "project owner",
+                (),
+                start=disorder_heading[0] / size,
+                end=synthetic_attachment_heading[0] / size,
+                min_len=8,
+                max_len=180,
+            )
+        except ValueError:
+            project = choose_paragraph(
+                "project owner",
+                (),
+                start=body_fraction,
+                end=synthetic_attachment_heading[0] / size,
+                min_len=8,
+                max_len=180,
+            )
+    else:
+        try:
+            project = choose_paragraph(
+                "project owner",
+                (),
+                start=max(body_fraction, amount_heading[0] / size),
+                end=min(body_end_fraction, body_fraction + 0.3),
+                min_len=8,
+                max_len=180,
+            )
+        except ValueError:
+            project = choose_paragraph(
+                "project owner",
+                (),
+                start=body_fraction,
+                end=min(body_end_fraction, body_fraction + 0.3),
+                min_len=8,
+                max_len=180,
+            )
+    attachment_name_start = (
+        max(
+            0.65,
+            min(0.90, body_end_fraction - 0.04),
+            disorder_heading[0] / size + 0.001,
+        )
+        if needs_synthetic_attachment
+        else attachment_fraction
     )
-    attachment_date = choose_paragraph(
-        "attachment date",
-        (),
-        start=max(attachment_fraction, attachment_name[0] / size),
-        end=1.0,
-        min_len=8,
-        max_len=300,
+    attachment_name_end = (
+        min(1.0, max(0.97, attachment_name_start + 0.03))
+        if needs_synthetic_attachment
+        else 1.0
     )
-    signature = choose_paragraph(
-        "signature",
-        (
-            r"^甲方[：:].*乙方[：:]",
-            r"^甲方\s*[：:].+",
-            r"^甲方[：:]$",
-            r"甲方.*盖章",
-            r"甲方.*签章",
-            r"甲方名称.*公章",
-            r"甲方.*签字",
-        ),
-        start=body_end_fraction,
-        end=1.0,
-        max_len=180,
-        prefer_last=True,
-        fallback_to_any=True,
+    if needs_synthetic_attachment:
+        if synthetic_attachment_heading is None:
+            raise AssertionError("synthetic attachment heading was not selected")
+        attachment_name = synthetic_attachment_heading
+    else:
+        attachment_name = choose_paragraph(
+            "attachment name",
+            (r"附件",),
+            start=attachment_name_start,
+            end=attachment_name_end,
+            min_len=4,
+            max_len=180,
+            fallback_to_any=True,
+        )
+    try:
+        attachment_date_start = (
+            attachment_name[-1] / size
+            if needs_synthetic_attachment
+            else max(attachment_name_start, attachment_name[0] / size)
+        )
+        attachment_date = choose_paragraph(
+            "attachment date",
+            (),
+            start=attachment_date_start,
+            end=1.0,
+            min_len=8,
+            max_len=300,
+        )
+    except ValueError:
+        attachment_date = attachment_name
+    signature_patterns = (
+        r"^甲方[：:].*乙方[：:]",
+        r"^甲方\s*[：:].+",
+        r"^甲方[：:]$",
+        r"甲方.*盖章",
+        r"甲方.*签章",
+        r"甲方名称.*公章",
+        r"甲方.*签字",
     )
-    project = choose_paragraph(
-        "project owner",
-        (),
-        start=body_fraction,
-        end=min(body_end_fraction, body_fraction + 0.3),
-        min_len=8,
-        max_len=180,
-    )
-
+    try:
+        signature = choose_paragraph(
+            "signature",
+            signature_patterns,
+            start=body_end_fraction,
+            end=1.0,
+            max_len=180,
+            prefer_last=True,
+            fallback_to_any=True,
+        )
+    except ValueError:
+        signature = choose_paragraph(
+            "signature",
+            signature_patterns,
+            start=0.5,
+            end=1.0,
+            max_len=180,
+            prefer_last=True,
+            fallback_to_any=True,
+        )
     add_paragraph(title, (4,), "采购合同", "触发采购合同首部提示检查")
     add_paragraph(
         address,
@@ -535,13 +773,21 @@ def generic_replacements(
     add_paragraph(breach_body, (8,), "违约责任由双方另行协商。", "弱化违约责任内容")
     add_paragraph(disorder_heading, (13,), "二、不可抗力", "制造标题编号和顺序混乱")
     add_paragraph(dispute, (9,), "协商不成，向乙方所在地人民法院起诉。", "制造争议管辖不利于甲方")
-    add_paragraph(attachment_name, (18,), "附件一：服务清单", "制造附件名称不一致")
-    add_paragraph(
-        attachment_date,
-        (11,),
-        "附件一约定同一服务期限截止日为2027年08月31日。",
-        "制造正文附件期限不一致",
-    )
+    if attachment_date == attachment_name:
+        add_paragraph(
+            attachment_name,
+            (11, 18),
+            "第二十二条 附件一：服务清单；附件一约定同一服务期限截止日为2027年08月31日。",
+            "制造附件名称及正文附件期限不一致",
+        )
+    else:
+        add_paragraph(attachment_name, (18,), "附件一：服务清单", "制造附件名称不一致")
+        add_paragraph(
+            attachment_date,
+            (11,),
+            "附件一约定同一服务期限截止日为2027年08月31日。",
+            "制造正文附件期限不一致",
+        )
     add_paragraph(
         signature,
         (10,),
@@ -943,16 +1189,25 @@ def write_csv(path: Path, fieldnames: tuple[str, ...], rows: list[dict[str, obje
 
 def main() -> int:
     args = parse_args()
-    source_root = args.source_root.resolve()
-    output_dir = args.output_dir.resolve()
-    expected_csv = args.expected_csv.resolve()
-    changes_csv = args.changes_csv.resolve()
+    case_sources = selected_case_sources(args)
+    output_dir = (
+        FULL_OUTPUT_DIR if args.case_set == "32" and args.output_dir == DEFAULT_OUTPUT_DIR else args.output_dir
+    ).resolve()
+    expected_csv = (
+        FULL_EXPECTED_CSV
+        if args.case_set == "32" and args.expected_csv == DEFAULT_EXPECTED_CSV
+        else args.expected_csv
+    ).resolve()
+    changes_csv = (
+        FULL_CHANGES_CSV
+        if args.case_set == "32" and args.changes_csv == DEFAULT_CHANGES_CSV
+        else args.changes_csv
+    ).resolve()
     expected_rows: list[dict[str, object]] = []
     change_rows: list[dict[str, object]] = []
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    for contract_id, filename in CASE_SOURCES:
-        source = source_root / filename
+    for contract_id, source in case_sources:
         target = output_dir / f"{contract_id}.docx"
         if not source.is_file():
             raise FileNotFoundError(f"source DOCX was not found: {source}")

@@ -9,6 +9,17 @@
 python tests/criteria_formal_recall/prepare_cases.py --overwrite
 ```
 
+32份合同的完整E2E基准使用“合同样例”25份和“模板合同”7份；保留原有D01-D10映射，
+其余文件按目录和文件名稳定排序为D11-D32：
+
+```powershell
+python tests/criteria_formal_recall/prepare_cases.py --case-set 32 --overwrite
+```
+
+输出为 `cases_32/D01.docx` 至 `cases_32/D32.docx`，审查基准和XML改动审计分别为
+`expected_cases_32.csv`（32×18=576条）与 `xml_changes_32.csv`。生成器要求两个源目录
+合计恰好32份DOCX，数量变化时直接失败，避免样本集合静默漂移。
+
 输入来自 `C:\Users\lenovo\Downloads\合同样例`，输出为 `cases/D01.docx` 至
 `cases/D10.docx`。生成器只替换 `word/document.xml` 中已有 `<w:t>` 节点的文字，
 不使用 Word SaveAs 或 `python-docx` 保存，不增删 XML 节点，其他 DOCX 部件必须逐字节一致。
