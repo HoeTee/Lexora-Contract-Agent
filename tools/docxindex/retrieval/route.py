@@ -18,7 +18,7 @@ from tools.docxindex.llm.schemas import RouteResponse
 
 
 DEFAULT_ROUTE_CONFIG = Path(__file__).resolve().parents[4] / "config.yaml"
-ROUTE_PROMPT_VERSION = "docx_route_v4"
+ROUTE_PROMPT_VERSION = "docx_route_v5"
 ROUTE_TITLE_MAX_DEPTH = 2
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NUMBERED_CRITERION = re.compile(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)(.+)$", re.S)
@@ -46,8 +46,8 @@ class RouteConfig(BaseModel):
             source = (config_path.parent / source).resolve()
         data["criteria"] = source
         config = cls.model_validate(data)
-        if set(config.methods) != {"title", "region", "rule", "join", "scan", "hybrid"}:
-            raise ValueError("route methods must be exactly: title, region, rule, join, scan, hybrid")
+        if set(config.methods) != {"title", "region", "rule", "scan", "hybrid"}:
+            raise ValueError("route methods must be exactly: title, region, rule, scan, hybrid")
         return config
 
 

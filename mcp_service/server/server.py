@@ -1,12 +1,18 @@
 from mcp.server.fastmcp import FastMCP
 from contextlib import redirect_stdout
 import json
+import logging
 import os
 import sys
 
 # Add project root to path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
+
+# Stdio is the MCP protocol channel. Keep HTTP client diagnostics off the
+# child-process streams during repeated model requests.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 from tools.document.file_parser import FileParser
 from tools.document.report_generator import ReportGenerator
@@ -181,7 +187,8 @@ async def llamaindex_build_index(docx_path: str, api_events_path: str | None = N
     """
     token = set_model_event_path(api_events_path)
     try:
-        return await index_retriever.build_contract_llamaindex_index(docx_path)
+        with redirect_stdout(sys.stderr):
+            return await index_retriever.build_contract_llamaindex_index(docx_path)
     finally:
         reset_model_event_path(token)
 
@@ -193,7 +200,8 @@ async def llamaindex_search(query: str, api_events_path: str | None = None) -> s
     """
     token = set_model_event_path(api_events_path)
     try:
-        return await index_retriever.search_contract_llamaindex(query)
+        with redirect_stdout(sys.stderr):
+            return await index_retriever.search_contract_llamaindex(query)
     finally:
         reset_model_event_path(token)
 
@@ -202,7 +210,8 @@ async def docxindex_build_index(docx_path: str, api_events_path: str | None = No
     """Build the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
     try:
-        return await _get_docxindex_retriever().build_index(docx_path)
+        with redirect_stdout(sys.stderr):
+            return await _get_docxindex_retriever().build_index(docx_path)
     finally:
         reset_model_event_path(token)
 
@@ -211,7 +220,8 @@ async def docxindex_search(query: str, api_events_path: str | None = None) -> st
     """Search the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
     try:
-        return await _get_docxindex_retriever().search(query)
+        with redirect_stdout(sys.stderr):
+            return await _get_docxindex_retriever().search(query)
     finally:
         reset_model_event_path(token)
 

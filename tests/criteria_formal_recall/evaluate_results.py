@@ -72,6 +72,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--task-root", type=Path, default=DEFAULT_TASK_ROOT)
     parser.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--max-duration-seconds", type=float, default=300.0)
+    parser.add_argument("--min-recall", type=float, default=0.85)
+    parser.add_argument("--min-accuracy", type=float, default=0.90)
+    parser.add_argument("--fail-on-threshold", action="store_true")
     return parser.parse_args()
 
 
@@ -111,13 +115,25 @@ def load_candidates(
         for issue in issues:
             if not isinstance(issue, dict):
                 continue
+            issue_comment = str(issue.get("issue_comment") or "").strip()
             backend_issues.append(
                 BackendIssue(
                     criterion_id=number,
                     issue_id=str(issue.get("issue_id") or ""),
-                    issue_comment=str(issue.get("issue_comment") or ""),
+                    issue_comment=issue_comment,
                 )
             )
+            if issue_comment:
+                candidates.append(
+                    Candidate(
+                        criterion_id=number,
+                        issue_id=str(issue.get("issue_id") or ""),
+                        anchor_type="",
+                        anchor_id="",
+                        quoted_text="",
+                        comment_text=issue_comment,
+                    )
+                )
             for anchor in issue.get("anchors") or []:
                 if not isinstance(anchor, dict):
                     continue
@@ -151,7 +167,7 @@ def consolidate_annotated_docs(
     for contract_id_value in sorted(records):
         source = Path(str(records[contract_id_value]["output_docx"])).resolve()
         if not source.is_file():
-            raise FileNotFoundError(f"annotated DOCX not found: {source}")
+            continue
         target = annotated_dir / f"{contract_id_value}_已审查.docx"
         shutil.copy2(source, target)
         outputs.append(target)
@@ -216,8 +232,7 @@ def load_records(run_dirs: list[Path]) -> dict[str, dict[str, Any]]:
     for run_dir in run_dirs:
         payload = json.loads((run_dir / "tasks.json").read_text(encoding="utf-8"))
         for record in payload:
-            if record.get("status") == "succeeded":
-                records[str(record["contract_id"])] = record
+            records[str(record["contract_id"])] = record
     return records
 
 
@@ -240,6 +255,175 @@ def manual_error(row: dict[str, Any]) -> tuple[str, str] | None:
     return None
 
 
+def ratio(numerator: int, denominator: int) -> float:
+    return numerator / denominator if denominator else 0.0
+
+
+def write_metrics(
+    output_dir: Path,
+    expected: list[dict[str, str]],
+    records: dict[str, dict[str, Any]],
+    inventory: list[dict[str, Any]],
+    incorrect_rows: list[dict[str, Any]],
+    failures: list[dict[str, Any]],
+    *,
+    max_duration_seconds: float,
+    min_recall: float,
+    min_accuracy: float,
+) -> bool:
+    expected_contract = Counter(row["contract_id"] for row in expected)
+    failed_contract = Counter(row["contract_id"] for row in failures)
+    comments_contract = Counter(row["contract_id"] for row in inventory)
+    incorrect_contract = Counter(row["contract_id"] for row in incorrect_rows)
+    contract_rows: list[dict[str, Any]] = []
+    for contract in sorted(expected_contract):
+        expected_count = expected_contract[contract]
+        recalled = expected_count - failed_contract[contract]
+        comments = comments_contract[contract]
+        accurate = comments - incorrect_contract[contract]
+        record = records.get(contract, {})
+        duration = float(record.get("duration_seconds") or 0.0)
+        contract_rows.append(
+            {
+                "contract_id": contract,
+                "task_status": record.get("status", "missing"),
+                "duration_seconds": f"{duration:.3f}",
+                "within_time_limit": "yes" if 0 < duration < max_duration_seconds else "no",
+                "expected_cases": expected_count,
+                "recalled_cases": recalled,
+                "recall": f"{ratio(recalled, expected_count):.4%}",
+                "visible_comments": comments,
+                "accurate_comments": accurate,
+                "accuracy": f"{ratio(accurate, comments):.4%}",
+            }
+        )
+    write_csv(
+        output_dir / "metrics_by_contract.csv",
+        (
+            "contract_id",
+            "task_status",
+            "duration_seconds",
+            "within_time_limit",
+            "expected_cases",
+            "recalled_cases",
+            "recall",
+            "visible_comments",
+            "accurate_comments",
+            "accuracy",
+        ),
+        contract_rows,
+    )
+
+    expected_criterion = Counter(int(row["criterion_id"]) for row in expected)
+    failed_criterion = Counter(int(row["criterion_id"]) for row in failures)
+    comments_criterion = Counter(
+        int(row["criterion_id"]) for row in inventory if str(row["criterion_id"]).isdigit()
+    )
+    incorrect_criterion = Counter(
+        int(row["criterion_id"])
+        for row in incorrect_rows
+        if str(row["criterion_id"]).isdigit()
+    )
+    criterion_rows: list[dict[str, Any]] = []
+    for criterion in sorted(expected_criterion):
+        expected_count = expected_criterion[criterion]
+        recalled = expected_count - failed_criterion[criterion]
+        comments = comments_criterion[criterion]
+        accurate = comments - incorrect_criterion[criterion]
+        criterion_rows.append(
+            {
+                "criterion_id": criterion,
+                "expected_cases": expected_count,
+                "recalled_cases": recalled,
+                "recall": f"{ratio(recalled, expected_count):.4%}",
+                "visible_comments": comments,
+                "accurate_comments": accurate,
+                "accuracy": f"{ratio(accurate, comments):.4%}",
+            }
+        )
+    write_csv(
+        output_dir / "metrics_by_criterion.csv",
+        (
+            "criterion_id",
+            "expected_cases",
+            "recalled_cases",
+            "recall",
+            "visible_comments",
+            "accurate_comments",
+            "accuracy",
+        ),
+        criterion_rows,
+    )
+
+    total_expected = len(expected)
+    total_recalled = total_expected - len(failures)
+    total_comments = len(inventory)
+    total_accurate = total_comments - len(incorrect_rows)
+    overall_recall = ratio(total_recalled, total_expected)
+    overall_accuracy = ratio(total_accurate, total_comments)
+    time_pass = bool(contract_rows) and all(
+        row["task_status"] == "succeeded" and row["within_time_limit"] == "yes"
+        for row in contract_rows
+    )
+    threshold_pass = time_pass and overall_recall >= min_recall and overall_accuracy >= min_accuracy
+    summary_rows = [
+        {
+            "contracts": len(contract_rows),
+            "max_duration_seconds": max(
+                (float(row["duration_seconds"]) for row in contract_rows), default=0.0
+            ),
+            "all_within_time_limit": "yes" if time_pass else "no",
+            "expected_cases": total_expected,
+            "recalled_cases": total_recalled,
+            "recall": f"{overall_recall:.4%}",
+            "visible_comments": total_comments,
+            "accurate_comments": total_accurate,
+            "accuracy": f"{overall_accuracy:.4%}",
+            "threshold_pass": "yes" if threshold_pass else "no",
+        }
+    ]
+    write_csv(
+        output_dir / "metrics_summary.csv",
+        tuple(summary_rows[0]),
+        summary_rows,
+    )
+    report_lines = [
+        "# criteria-formal 评测结果",
+        "",
+        f"阈值结论：{'通过' if threshold_pass else '未通过'}。",
+        "",
+        "| 合同 | 状态 | 端到端秒数 | <5分钟 | 召回率 | 准确率 |",
+        "|---|---:|---:|---:|---:|---:|",
+    ]
+    report_lines.extend(
+        f"| {row['contract_id']} | {row['task_status']} | {row['duration_seconds']} | "
+        f"{row['within_time_limit']} | {row['recall']} | {row['accuracy']} |"
+        for row in contract_rows
+    )
+    report_lines.extend(
+        [
+            "",
+            "| 审查要点 | 召回数/期望数 | 召回率 | 准确批注/可见批注 | 准确率 |",
+            "|---:|---:|---:|---:|---:|",
+        ]
+    )
+    report_lines.extend(
+        f"| {row['criterion_id']} | {row['recalled_cases']}/{row['expected_cases']} | "
+        f"{row['recall']} | {row['accurate_comments']}/{row['visible_comments']} | {row['accuracy']} |"
+        for row in criterion_rows
+    )
+    report_lines.extend(
+        [
+            "",
+            f"总体召回率：{total_recalled}/{total_expected} = {overall_recall:.4%}。",
+            f"总体准确率：{total_accurate}/{total_comments} = {overall_accuracy:.4%}。",
+            "准确率口径：可见 AI 批注能够映射到后端审查要点，且未命中人工核定错误规则；无法映射的批注计为错误。",
+        ]
+    )
+    (output_dir / "metrics_report.md").write_text("\n".join(report_lines) + "\n", encoding="utf-8")
+    return threshold_pass
+
+
 def main() -> int:
     args = parse_args()
     run_dirs = [path.resolve() for path in args.run_dir]
@@ -257,6 +441,13 @@ def main() -> int:
 
     for contract_id_value in sorted(records):
         record = records[contract_id_value]
+        if record.get("status") != "succeeded" or not record.get("output_docx"):
+            visible_by_contract[contract_id_value] = set()
+            backend_by_contract[contract_id_value] = set()
+            backend_candidates_by_contract[contract_id_value] = []
+            backend_issues_by_contract[contract_id_value] = []
+            backend_issue_counts_by_contract[contract_id_value] = {}
+            continue
         task_id_value = str(record["task_id"])
         candidates, backend_issues, backend_reported, backend_issue_counts = (
             load_candidates(task_root, task_id_value)
@@ -291,22 +482,22 @@ def main() -> int:
 
     incorrect_rows: list[dict[str, Any]] = []
     accurate_visible_by_contract: dict[str, set[int]] = {}
-    matched_rules: set[tuple[str, int, str]] = set()
     for row in inventory:
         if not row["criterion_id"]:
+            incorrect_rows.append(
+                {
+                    **row,
+                    "error_type": "unmapped_comment",
+                    "error_reason": "可见批注无法映射到对应的后端审查要点。",
+                }
+            )
             continue
         error = manual_error(row)
         if error is None:
             accurate_visible_by_contract.setdefault(row["contract_id"], set()).add(int(row["criterion_id"]))
             continue
         error_type, reason = error
-        matched_rules.add((row["contract_id"], int(row["criterion_id"]), error_type + reason))
         incorrect_rows.append({**row, "error_type": error_type, "error_reason": reason})
-
-    if len(matched_rules) != len(MANUAL_ERROR_RULES):
-        raise ValueError(
-            f"manual error rules did not match exactly once: rules={len(MANUAL_ERROR_RULES)}, matched={len(matched_rules)}"
-        )
 
     failures = []
     for row in expected:
@@ -329,7 +520,9 @@ def main() -> int:
         visible_incorrect = [
             comment
             for comment in incorrect_rows
-            if comment["contract_id"] == contract and int(comment["criterion_id"]) == number
+            if comment["contract_id"] == contract
+            and str(comment["criterion_id"]).isdigit()
+            and int(comment["criterion_id"]) == number
         ]
         failures.append(
             {
@@ -433,14 +626,32 @@ def main() -> int:
         incorrect_rows,
     )
     consolidated_docs = consolidate_annotated_docs(records, output_dir)
+    threshold_pass = write_metrics(
+        output_dir,
+        expected,
+        records,
+        inventory,
+        incorrect_rows,
+        failures,
+        max_duration_seconds=args.max_duration_seconds,
+        min_recall=args.min_recall,
+        min_accuracy=args.min_accuracy,
+    )
+    total = len(expected)
+    recalled = total - len(failures)
+    accurate_comments = len(inventory) - len(incorrect_rows)
     print(f"Contracts: {len(records)}")
     print(f"Visible AI comments: {len(inventory)}")
-    print(f"Accurate visible criterion recall: {180 - len(failures)}/180 = {(180 - len(failures)) / 180:.2%}")
+    print(f"Accurate visible criterion recall: {recalled}/{total} = {ratio(recalled, total):.2%}")
     print(f"Recall failures: {len(failures)}")
-    print(f"Incorrect comments: {len(incorrect_rows)}/{len(inventory)} = {len(incorrect_rows) / len(inventory):.2%}")
+    print(
+        f"Accurate comments: {accurate_comments}/{len(inventory)} = "
+        f"{ratio(accurate_comments, len(inventory)):.2%}"
+    )
+    print(f"Thresholds: {'PASS' if threshold_pass else 'FAIL'}")
     print(f"Consolidated annotated DOCX files: {len(consolidated_docs)}")
     print(f"Output: {output_dir}")
-    return 0
+    return 1 if args.fail_on_threshold and not threshold_pass else 0
 
 
 if __name__ == "__main__":

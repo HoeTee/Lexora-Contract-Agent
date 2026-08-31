@@ -7,7 +7,7 @@
 ```text
 持久化 DOCX 结构树索引是主索引。
 规则审查只是少数审查要点的执行方式，不单独设计“规则索引”。
-向量检索不产生新 node，只对已有结构 node 做 fallback 补召回。
+向量检索不产生新 node；它参与 region 范围内检索、全局 hybrid 和显式 fallback。
 最终审查必须展开结构树中的原文 node。
 ```
 
@@ -717,7 +717,17 @@ structure_tree > input_tokens
 
 ## 16. 向量补召回与 rerank
 
-向量检索只用于 fallback，不用于构建结构树。
+向量检索不用于构建结构树。当前有三个调用位置：
+
+- `region`：先用 `allowed_node_ids` 限定区域，再与区域内结构语义结果合并并 rerank；
+- `hybrid`：对全局结构树执行结构语义和向量召回并 rerank；
+- `fallback`：仅当 `RoutePlan.fallback=true` 且路线只有可安全扩大的 `title/rule` 时补充全局语义结果。
+
+`region`、`scan`、`hybrid` 不进入全局 fallback。跨区域比较使用多个独立 `region` 步骤，结果按步骤交错合并，避免后一个区域在 `max_nodes` 截断前完全丢失。
+
+`title(all_titles=true)` 是完整目录查询：所有顶层正文标题、tail 和附件标题都必须以紧凑标题证据返回，
+不受普通 `max_nodes` 候选上限截断。`rule` 的精确关键词全部未命中时，执行器必须同时返回
+“确定性全文精确检索未出现这些词”的结果，供审查模型判断缺失型问题。
 
 向量索引对象来自 DocumentIndex 中已有 node 或 chunk：
 

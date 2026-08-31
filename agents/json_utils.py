@@ -11,6 +11,10 @@ from pydantic import BaseModel, ValidationError
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+class AgentOutputValidationError(ValueError):
+    """Raised when an agent exhausts JSON schema-repair attempts."""
+
+
 def _loads_json(text: str):
     """Parse JSON, allowing only literal TAB, CR, and LF as a controlled fallback."""
     try:
@@ -88,6 +92,6 @@ async def chat_until_valid_json(
                 break
             prompt = _repair_prompt(exc, expected_format)
 
-    raise ValueError(
+    raise AgentOutputValidationError(
         f"{agent.name} output failed schema validation after {max_attempts} attempts: {last_error}"
     )

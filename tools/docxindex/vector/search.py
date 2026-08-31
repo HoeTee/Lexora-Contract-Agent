@@ -21,6 +21,7 @@ def vector_search(
     score_threshold: float | None = None,
     input_tokens: int | None = None,
     concurrency: int = 10,
+    allowed_node_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     limiter = BoundedSemaphore(max(1, concurrency))
     with limiter:
@@ -28,6 +29,8 @@ def vector_search(
     nodes = {node.get("node_id"): node for node in document_index.get("nodes") or []}
     scored = []
     for item in vector_index.items:
+        if allowed_node_ids is not None and item.node_id not in allowed_node_ids:
+            continue
         score = cosine_similarity(query_embedding, item.embedding)
         node = nodes.get(item.node_id) or {}
         scored.append(

@@ -17,7 +17,6 @@ METHODS = {
     "title": "检查标题。",
     "region": "检查区域。",
     "rule": "执行精确匹配。",
-    "join": "联合多个证据。",
     "scan": "扫描全文。",
     "hybrid": "执行语义检索。",
 }
@@ -39,7 +38,7 @@ class RoutePromptContractTests(unittest.TestCase):
         )
 
         self.assertIn(ROUTE_EXPECTED_JSON, prompt)
-        for field in ("steps", "method", "terms", "regions", "slots", "all_titles", "context", "fallback"):
+        for field in ("steps", "method", "terms", "regions", "all_titles", "context", "fallback"):
             self.assertIn(field, prompt)
         for method in METHODS:
             self.assertIn(method, prompt)
@@ -62,7 +61,14 @@ class RoutePromptContractTests(unittest.TestCase):
         self.assertEqual(result.steps[0].method, "rule")
         self.assertEqual(len(client.prompts), 1)
         self.assertIn(ROUTE_EXPECTED_JSON, client.prompts[0])
-        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v4")
+        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v5")
+
+    def test_schema_rejects_removed_join_route_and_slots_field(self) -> None:
+        with self.assertRaises(ValidationError):
+            RouteResponse.model_validate({
+                "steps": [{"method": "join", "slots": ["正文", "附件"]}],
+                "fallback": False,
+            })
 
     def test_invalid_first_output_gets_schema_guided_retry(self) -> None:
         client = LLMClient.__new__(LLMClient)
@@ -90,6 +96,18 @@ class RoutePromptContractTests(unittest.TestCase):
 
         with self.assertRaises(ValidationError):
             RouteResponse.model_validate(invalid)
+
+    def test_schema_rejects_fields_that_do_not_belong_to_method(self) -> None:
+        invalid_plans = [
+            {"steps": [{"method": "rule", "terms": ["金额"], "regions": ["body"]}]},
+            {"steps": [{"method": "region", "regions": ["body", "attachments"]}]},
+            {"steps": [{"method": "scan"}, {"method": "rule", "terms": ["错别字"]}]},
+            {"steps": [{"method": "hybrid"}], "fallback": True},
+        ]
+
+        for plan in invalid_plans:
+            with self.subTest(plan=plan), self.assertRaises(ValidationError):
+                RouteResponse.model_validate(plan)
 
     def test_failed_validation_is_not_written_to_route_cache(self) -> None:
         client = _RejectingClient()

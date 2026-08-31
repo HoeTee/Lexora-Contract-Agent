@@ -1,5 +1,6 @@
 results/
 __pycache__/
 *.pyc
+single_524/
 expected_cases.csv
 xml_changes.csv

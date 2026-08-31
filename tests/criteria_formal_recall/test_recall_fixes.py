@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -10,6 +11,8 @@ from docx.oxml import OxmlElement
 
 from agents.orchestrator import OrchestratorAgent
 from agents.prompts.cn_prompts import load_prompts
+from agents.schemas import SubAgentOutput
+from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
 from tools.docxindex.llm.schemas import RouteResponse
@@ -140,17 +143,75 @@ class PromptAuthorityTests(unittest.TestCase):
         self.assertIn("优先级高于本提示词中的通用风险筛选规则", prompts["SUB_AGENT_BASE_PROMPT"])
         self.assertIn("不得质疑标准本身的必要性", prompts["REFLECTOR_SYSTEM_PROMPT"])
 
+    def test_runtime_prompt_makes_deterministic_absence_authoritative(self) -> None:
+        source = inspect.getsource(OrchestratorAgent.execute_single_criterion)
+
+        self.assertIn("确定性计数和范围说明", source)
+        self.assertIn("必须输出 issues_found，不得输出 compliant", source)
+
+
+class SubAgentSchemaNormalizationTests(unittest.TestCase):
+    def test_word_comment_lengths_are_deterministically_truncated(self) -> None:
+        output = SubAgentOutput.model_validate({
+            "status": "issues_found",
+            "issues": [{
+                "issue_id": "C11.1",
+                "risk_level": "medium",
+                "issue_comment": "问" * 180,
+                "anchors": [{
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p1",
+                    "quoted_text": "合同原文",
+                    "comment_text": "改" * 120,
+                }],
+                "reasoning": "正文与附件日期不一致",
+                "criterion": "检查正文与附件一致性",
+                "check_point": "日期必须一致",
+            }],
+        })
+
+        self.assertEqual(len(output.issues[0].issue_comment), 160)
+        self.assertEqual(len(output.issues[0].anchors[0].comment_text), 100)
+
+
+class PreparedContractValidationTests(unittest.TestCase):
+    def test_contract_title_selection_stays_in_early_frontmatter(self) -> None:
+        values = [
+            "甲方公司",
+            "与",
+            "乙方公司",
+            "人行支付系统重构研发合同",
+            "合同号：ABC",
+            "正文中的合同总价",
+            "合同金额及支付方式",
+        ]
+
+        selected = select_contract_title_group(
+            values,
+            tuple((index,) for index in range(len(values))),
+            frontmatter_end=5,
+        )
+
+        self.assertEqual(selected, (3,))
+
 
 class RetrievalFallbackTests(unittest.TestCase):
-    def test_incomplete_rule_hit_still_uses_semantic_fallback(self) -> None:
+    def test_rule_uses_semantic_fallback_only_when_plan_requests_it(self) -> None:
         plan = RouteResponse.model_validate({
             "steps": [{"method": "rule", "terms": ["人民法院"]}],
-            "fallback": False,
+            "fallback": True,
         })
 
         self.assertTrue(
             _should_use_fallback(plan, [{"node_id": "body/dispute"}], fallback_enabled=True)
         )
+
+    def test_region_cannot_request_global_fallback(self) -> None:
+        with self.assertRaises(ValueError):
+            RouteResponse.model_validate({
+                "steps": [{"method": "region", "regions": ["body"]}],
+                "fallback": True,
+            })
 
     def test_full_scan_does_not_duplicate_semantic_fallback(self) -> None:
         plan = RouteResponse.model_validate({

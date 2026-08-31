@@ -23,10 +23,12 @@ def llm_query(
     input_tokens: int = STRUCTURE_QUERY_BUDGET_TOKENS,
     timer: Any | None = None,
     concurrency: int = 10,
+    allowed_node_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     cache = JsonlCache(cache_dir / "llm_query.jsonl" if cache_dir else None)
     limiter = BoundedSemaphore(max(1, concurrency))
-    structure_parts = _split_structure(_compact_structure(index["structure_tree"]), input_tokens)
+    structure = _compact_structure(index["structure_tree"], allowed_node_ids=allowed_node_ids)
+    structure_parts = _split_structure(structure, input_tokens)
     if timer is not None:
         timer.note("ask.llm_structure_query.part_count", len(structure_parts))
     results = []
@@ -45,7 +47,7 @@ def llm_query(
             for item in cached.get("nodes") or []:
                 node_id = str(item.get("node_id") or "").strip()
                 node = _node_by_id(index, node_id)
-                if not node or node_id in seen:
+                if not node or node_id in seen or (allowed_node_ids is not None and node_id not in allowed_node_ids):
                     continue
                 seen.add(node_id)
                 results.append(
@@ -66,19 +68,26 @@ def llm_query(
     return results
 
 
-def _compact_structure(nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _compact_structure(
+    nodes: list[dict[str, Any]],
+    allowed_node_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
     compact = []
     for node in nodes:
+        node_id = str(node.get("node_id") or "")
+        children = node.get("nodes") or node.get("children") or []
+        compact_children = _compact_structure(children, allowed_node_ids=allowed_node_ids)
+        if allowed_node_ids is not None and node_id not in allowed_node_ids and not compact_children:
+            continue
         item = {
-            "node_id": node.get("node_id"),
+            "node_id": node_id,
             "title": node.get("title"),
             "node_type": node.get("node_type"),
             "summary": node.get("summary"),
             "token_estimate": node.get("token_estimate"),
         }
-        children = node.get("nodes") or node.get("children") or []
-        if children:
-            item["nodes"] = _compact_structure(children)
+        if compact_children:
+            item["nodes"] = compact_children
         compact.append(item)
     return compact
 
@@ -134,35 +143,6 @@ def _stage(timer: Any | None, name: str):
     return timer.stage(name)
 
 
-def _query_prompt(query: str, structure_json: str) -> str:
-    return f"""你正在从 DOCX 合同结构索引中选择与审查问题最相关的 node。
-
-审查问题：
-{query}
-
-结构树：
-{structure_json}
-
-选择规则：
-- 只能返回结构树中真实存在的 node_id。
-- 优先返回标题或摘要直接相关的 node。
-- 如果问题需要跨章节比较，可以返回多个 node。
-- 不要返回整篇正文 body，除非没有更具体的 node。
-- 只返回必要 node，避免返回弱相关 node。
-- 如果某个父 node 和更具体的子 node 都相关，优先返回子 node；只有需要完整章节上下文时才返回父 node。
-
-输出规范：
-- 必须只返回一个合法 JSON object。
-- 不要返回 Markdown。
-- 不要返回解释。
-- 不要返回纯文本。
-- 不要添加 schema 以外的字段。
-- JSON 必须严格符合：
-{{
-  "nodes": [
-    {{"node_id": "body/sec_001", "reason": "选择原因"}}
-  ]
-}}"""
 def _query_prompt(query: str, structure_json: str) -> str:
     return f"""你正在从 DOCX 合同的 PageIndex-like 结构树中选择与审查问题最相关的 node。
 审查问题：{query}

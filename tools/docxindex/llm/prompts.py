@@ -13,12 +13,20 @@ ROUTE_EXPECTED_JSON = """{
       "method": "rule",
       "terms": ["合同金额"],
       "regions": [],
-      "slots": [],
       "all_titles": false,
       "context": 0
     }
   ],
   "fallback": false
+}"""
+
+SCAN_EXPECTED_JSON = """{
+  "findings": [
+    {
+      "anchor_id": "p_0001",
+      "reason": "存在明确的错别字或语病"
+    }
+  ]
 }"""
 
 
@@ -57,10 +65,10 @@ def route_prompt(
 - 标题是否存在、标题顺序、目录检查使用 title；需要完整目录时 all_titles=true。
 - 明确固定区域或明确标题下内容使用 region；region 可取 frontmatter/body/tail/attachments。
 - 精确关键词、金额、存在或不存在判断使用 rule，并在 terms 中列出需要原文匹配的短词。
-- 两个以上区域、首尾、正文与附件或多个证据角色需要联合判断时使用 join，并在 slots 中列出证据角色。
+- 需要比较两个以上区域、首尾、正文与附件时，为每个区域分别生成一个 region 步骤；每个 region 步骤只填写一个 regions 值。
 - 错别字、语病或必须逐段通读全文的问题使用 scan，且不再组合其他步骤。
-- 标题、区域和精确关键词均无法可靠定位时使用 hybrid，并设置 fallback=true。
-- 只有确定性步骤不足以定位语义证据时 fallback=true。
+- 标题、区域和精确关键词均无法可靠限定范围时使用 hybrid；hybrid 本身已经执行全局结构语义与向量检索，不要再设置 fallback=true。
+- 只有 title/rule 结果还需要全局语义补充时 fallback=true；region 与 scan 不使用全局 fallback，避免越过范围或重复扫描。
 - 不得把审查结论写进检索计划。
 
 输出格式要求（JSON）：
@@ -69,11 +77,32 @@ def route_prompt(
 字段约束：
 1. 顶层只能包含 steps 和 fallback。
 2. steps 必须是数组，包含 1 到 5 个路由步骤。
-3. 每个步骤必须包含 method；method 只能是 title、region、rule、join、scan、hybrid 之一。
-4. terms 和 slots 必须是字符串数组；regions 只能包含 frontmatter、body、tail、attachments。
+3. 每个步骤必须包含 method；method 只能是 title、region、rule、scan、hybrid 之一。
+4. terms 必须是字符串数组；regions 只能包含 frontmatter、body、tail、attachments。
 5. all_titles 和 fallback 必须是布尔值；context 必须是 0 到 2 的整数。
-6. 不使用的 terms、regions、slots 返回空数组；不需要完整目录时 all_titles=false。
-7. 只返回合法 JSON object，不要返回 Markdown、代码块、解释、纯文本或 schema 外字段。"""
+6. region 必须且只能填写一个 regions 值；非 region 方法的 regions 必须为空数组。
+7. rule 必须填写至少一个 term；title 必须填写 terms 或设置 all_titles=true。
+8. scan 必须是唯一步骤；包含 region、scan、hybrid 时 fallback 必须为 false。
+9. 不使用的 terms、regions 返回空数组；不需要完整目录时 all_titles=false。
+10. 只返回合法 JSON object，不要返回 Markdown、代码块、解释、纯文本或 schema 外字段。"""
+
+
+def scan_prompt(query: str, items: list[dict[str, str]]) -> str:
+    return f"""你正在逐项检查 DOCX 合同原文，必须检查本批次中的每一个 anchor。
+审查问题：{query}
+
+本批次原文：
+{json.dumps(items, ensure_ascii=False)}
+
+规则：
+- 只报告与审查问题直接相关、原文中真实存在的问题。
+- 错别字检查应报告明显的错字、漏字、重复字和不合理用词；语病检查应报告明确的成分残缺、搭配不当、语序或逻辑问题。
+- 没有问题的 anchor 不要返回。
+- anchor_id 必须原样来自本批次，不得编造；同一 anchor 最多返回一次。
+- 只返回合法 JSON object，不要返回 Markdown、解释或 schema 外字段。
+
+输出格式要求：
+{SCAN_EXPECTED_JSON}"""
 
 
 def expand_prompt(node_id: str, title: str, start_anchor: str, end_anchor: str, items_text: str) -> str:

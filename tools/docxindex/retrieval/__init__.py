@@ -3,8 +3,6 @@ from .content import build_content_context, content_view, get_node
 from .keyword import keyword_search
 from .llm_query import llm_query
 from .rerank import rerank_matches
-from .join import join_matches
-from .region import region_matches
 from .route import RouteConfig, plan_route
 from .rule import rule_matches
 from .scan import scan_matches
@@ -22,9 +20,7 @@ __all__ = [
     "RouteConfig",
     "plan_route",
     "title_matches",
-    "region_matches",
     "rule_matches",
-    "join_matches",
     "scan_matches",
     "structure_summary",
 ]

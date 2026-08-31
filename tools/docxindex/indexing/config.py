@@ -55,6 +55,14 @@ class SummaryIndexConfig(BaseModel):
     batch_max_tokens: int = Field(default=20000, ge=1000, le=100000)
 
 
+class EnrichmentIndexConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    llm_expand: bool = False
+    llm_summary: bool = False
+    llm_attachment_hierarchy: bool = False
+
+
 class HierarchyIndexConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -110,6 +118,7 @@ class IndexingConfig(BaseModel):
     hierarchy: HierarchyIndexConfig = Field(default_factory=HierarchyIndexConfig)
     attachment: AttachmentIndexConfig = Field(default_factory=AttachmentIndexConfig)
     summary: SummaryIndexConfig = Field(default_factory=SummaryIndexConfig)
+    enrichment: EnrichmentIndexConfig = Field(default_factory=EnrichmentIndexConfig)
     heading: HeadingIndexConfig = Field(default_factory=HeadingIndexConfig)
 
     @classmethod

@@ -11,14 +11,15 @@ from .title import _candidate
 def rule_matches(index: dict[str, Any], step: RouteStep, query: str = "") -> list[dict[str, Any]]:
     terms = _literal_terms(query, step.terms)
     by_id = {node.get("node_id"): node for node in index.get("nodes") or []}
-    result = []
+    scored: list[tuple[int, int, dict[str, Any]]] = []
     anchors = sorted(
         (index.get("anchor_map") or {}).items(),
         key=lambda item: item[1].get("body_child_index") or 0,
     )
     for anchor_id, record in anchors:
         text = str(record.get("text") or "")
-        if not terms or not any(term in text for term in terms):
+        matched_term_count = sum(term in text for term in terms)
+        if not terms or not matched_term_count:
             continue
         owner_id = record.get("node_id")
         owner = by_id.get(owner_id)
@@ -36,8 +37,10 @@ def rule_matches(index: dict[str, Any], step: RouteStep, query: str = "") -> lis
                 "end_anchor": anchor_id,
             }
         )
-        result.append(candidate)
-    return result
+        candidate["rule_match_count"] = matched_term_count
+        scored.append((matched_term_count, int(record.get("body_child_index") or 0), candidate))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return [candidate for _, _, candidate in scored]
 
 
 def _literal_terms(query: str, planned: list[str]) -> list[str]:

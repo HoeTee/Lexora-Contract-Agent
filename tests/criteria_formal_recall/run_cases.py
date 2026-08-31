@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import ctypes
 import json
 import os
 import re
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -27,6 +29,24 @@ DEFAULT_API_TASK_ROOT = PROJECT_ROOT / "data" / "api"
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 TERMINAL_STATUSES = {"succeeded", "failed", "cancelled"}
 CRITERION_NUMBER = re.compile(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)")
+
+
+@contextmanager
+def keep_system_awake():
+    """Prevent Windows sleep from invalidating end-to-end benchmark timings."""
+    if sys.platform != "win32":
+        yield
+        return
+
+    execution_state = ctypes.windll.kernel32.SetThreadExecutionState
+    es_continuous = 0x80000000
+    es_system_required = 0x00000001
+    if not execution_state(es_continuous | es_system_required):
+        raise OSError("SetThreadExecutionState failed")
+    try:
+        yield
+    finally:
+        execution_state(es_continuous)
 
 
 @dataclass(frozen=True)
@@ -56,7 +76,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--api-task-root", type=Path, default=DEFAULT_API_TASK_ROOT)
     parser.add_argument("--concurrency", type=int, default=1)
     parser.add_argument("--poll-interval", type=float, default=5.0)
-    parser.add_argument("--task-timeout", type=float, default=3600.0)
+    parser.add_argument("--task-timeout", type=float, default=300.0)
     parser.add_argument("--http-timeout", type=float, default=300.0)
     parser.add_argument(
         "--contract-id",
@@ -149,11 +169,22 @@ async def submit_job(client: httpx.AsyncClient, settings: Settings, contract: Pa
 async def wait_for_task(client: httpx.AsyncClient, settings: Settings, task_id: str) -> dict[str, Any]:
     deadline = monotonic() + settings.task_timeout
     while True:
-        response = await client.post(
-            f"{settings.base_url}/api/review/jobs/status",
-            headers={"Authorization": settings.api_key},
-            json={"task_id": task_id},
-        )
+        try:
+            response = await client.post(
+                f"{settings.base_url}/api/review/jobs/status",
+                headers={"Authorization": settings.api_key},
+                json={"task_id": task_id},
+            )
+        except httpx.RequestError:
+            if monotonic() >= deadline:
+                raise
+            await asyncio.sleep(settings.poll_interval)
+            continue
+        if response.status_code >= 500:
+            if monotonic() >= deadline:
+                response.raise_for_status()
+            await asyncio.sleep(settings.poll_interval)
+            continue
         payload = parse_json_response(response)
         response.raise_for_status()
         status = str(payload.get("status") or "")
@@ -221,6 +252,7 @@ async def run_one(
     contract: Path,
 ) -> dict[str, Any]:
     contract_id = contract.stem
+    started = monotonic()
     record: dict[str, Any] = {
         "contract_id": contract_id,
         "contract_file": contract.name,
@@ -229,6 +261,10 @@ async def run_one(
         "error": "",
         "output_docx": "",
         "criterion_outputs": {},
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": "",
+        "duration_seconds": 0.0,
+        "within_5_minutes": False,
     }
     try:
         task_id = await submit_job(client, settings, contract, f"{current_run_id}-{contract_id}")
@@ -249,6 +285,10 @@ async def run_one(
         record["error"] = f"{type(exc).__name__}: {exc}"
         print(f"failed {contract_id}: {record['error']}", file=sys.stderr)
         return record
+    finally:
+        record["finished_at"] = datetime.now(timezone.utc).isoformat()
+        record["duration_seconds"] = round(monotonic() - started, 3)
+        record["within_5_minutes"] = record["duration_seconds"] < 300.0
 
 
 def read_expected_rows(path: Path) -> list[dict[str, str]]:
@@ -364,7 +404,8 @@ async def run_all(settings: Settings) -> int:
 def main() -> None:
     args = parse_args()
     settings = load_settings(args)
-    raise SystemExit(asyncio.run(run_all(settings)))
+    with keep_system_awake():
+        raise SystemExit(asyncio.run(run_all(settings)))
 
 
 if __name__ == "__main__":

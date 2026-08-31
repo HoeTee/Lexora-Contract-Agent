@@ -27,12 +27,12 @@ rerank:
       - "gte-rerank-v2"
 
 workflow:
-  max_reflection_rounds: 5
-  max_orchestrator_concurrency: 100
+  max_reflection_rounds: 3
+  max_orchestrator_concurrency: 5
   max_api_concurrent_reviews: 1
-  model_call_timeout_seconds: 60
-  model_call_max_retries: 5
-  criterion_retry_max_attempts: 2
+  model_call_timeout_seconds: 30
+  model_call_max_retries: 1
+  criterion_retry_max_attempts: 1
   subagent_allowed_tools:
     - "contract_search"
 
@@ -43,7 +43,7 @@ queue:
 model_semaphore:
   llm:
     enabled: false
-    max_concurrent_requests: 10
+    max_concurrent_requests: 5
     redis_url: "redis://localhost:6379/2"
     key: "contract_agent:model:llm:semaphore"
     wait_timeout_seconds: 600
@@ -51,7 +51,7 @@ model_semaphore:
     poll_interval_seconds: 0.2
   embedding:
     enabled: false
-    max_concurrent_requests: 5
+    max_concurrent_requests: 3
     redis_url: "redis://localhost:6379/2"
     key: "contract_agent:model:embedding:semaphore"
     wait_timeout_seconds: 600
@@ -84,6 +84,10 @@ retrieval:
     rerank:
       enabled: true
     indexing:
+      enrichment:
+        llm_expand: false
+        llm_summary: false
+        llm_attachment_hierarchy: false
       heading:
         profiles:
           primary:
@@ -117,18 +121,17 @@ retrieval:
       fallback_enabled: true
       methods:
         title: "检查目录、标题、章节名称、必备标题和标题顺序。"
-        region: "获取合同首部、正文末端、签署页，或明确标题下的完整内容。"
+        region: "限定合同首部、正文、尾部或附件后，在区域内执行结构语义、向量召回和重排。"
         rule: "执行全文精确关键词、正则、金额和存在性定位。"
-        join: "关联多个区域或节点，获取一致性比较所需的完整证据组。"
-        scan: "按原文顺序返回全部 anchor，用于逐批全文检查。"
-        hybrid: "无法通过确定性标题、区域或关键词定位时，使用结构树语义选择并由向量补召回。"
+        scan: "按 token 预算把全部 anchor 分批交给 LLM 逐项检查。"
+        hybrid: "无法限定标题、区域或精确关键词时，执行全局结构语义、向量召回和重排。"
       llm_candidates: 12
       vector_candidates: 20
       vector_threshold: 0.45
       max_nodes: 5
     concurrency:
       llm: 10
-      embedding: 10
+      embedding: 1
       reranker: 10
 
 api:

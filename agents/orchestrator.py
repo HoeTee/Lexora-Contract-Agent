@@ -15,7 +15,7 @@ from config import (
     SUBAGENT_ALLOWED_TOOLS,
 )
 from agents.base_agent import Agent
-from agents.json_utils import chat_until_valid_json
+from agents.json_utils import AgentOutputValidationError, chat_until_valid_json
 from agents.reflector import ReflectorAgent
 from agents.prompts.cn_prompts import SUB_AGENT_BASE_PROMPT
 from agents.schemas import SubAgentOutput
@@ -337,6 +337,39 @@ class OrchestratorAgent:
             indent=2,
         )
 
+    async def _review_with_fallback(
+        self,
+        reflector: ReflectorAgent,
+        *,
+        cid: str,
+        round_num: int,
+        reflector_input: str,
+        missing_text_review_notes: str,
+    ) -> dict | None:
+        """Return a reflection result, or preserve the valid review on model failure."""
+        try:
+            return await reflector.review(
+                agent_output=reflector_input,
+                missing_text_review_notes=missing_text_review_notes,
+            )
+        except (AgentOutputValidationError, ModelCallError) as exc:
+            print(
+                f"[Orchestrator] {cid}: reflection round {round_num} unavailable; "
+                f"preserving the latest valid review: {exc}"
+            )
+            if self.logger:
+                self.logger.log(
+                    phase="Reflect",
+                    sender="Reflector",
+                    receiver=f"SubAgent_{cid}",
+                    action=f"reflect_fallback({cid}, round={round_num})",
+                    input_summary=reflector_input,
+                    output_summary=f"ModelCallError: {exc}",
+                    tokens=reflector.token_usage.get("total_tokens", 0),
+                    duration=0,
+                )
+            return None
+
     async def execute_single_criterion(
             self,
             criterion: dict
@@ -377,6 +410,12 @@ class OrchestratorAgent:
         task_prompt = (
             f"审查标准：{criterion_text}\n"
             f"检查要点：\n{check_points_text}\n\n"
+            "执行约束：\n"
+            "- 检索结果中的确定性计数和范围说明是已经执行完毕的代码结论，不是待核实信息。\n"
+            "- 若审查标准以某词语缺失为触发条件，且确定性全文检索明确显示出现次数为0，"
+            "必须输出 issues_found，不得输出 compliant。\n"
+            "- 若审查标准要求在触发后‘直接写明’或‘如无则写入’指定提示，且检索结果证明触发条件成立，"
+            "必须按该标准输出 issue，不得再以风险较低、已有相关实体条款或一般完善建议为由跳过。\n\n"
             f"以下是合同原文中与此标准相关的内容：\n\n{context}\n\n"
         )
         parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
@@ -422,10 +461,15 @@ class OrchestratorAgent:
                 check_points,
                 parsed_opinion,
             )
-            review = await reflector.review(
-                agent_output=reflector_input,
+            review = await self._review_with_fallback(
+                reflector,
+                cid=cid,
+                round_num=round_num + 1,
+                reflector_input=reflector_input,
                 missing_text_review_notes=missing_text_review_notes,
             )
+            if review is None:
+                break
 
             status = review["status"]
             if self.logger:

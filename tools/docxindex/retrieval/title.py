@@ -22,7 +22,13 @@ def title_matches(index: dict[str, Any], step: RouteStep) -> list[dict[str, Any]
         node = nodes.get(node_id) or item
         candidate = _candidate(node, "title")
         if node.get("node_type") != "tail":
-            candidate["text_override"] = title
+            candidate.update(
+                {
+                    "text_override": title,
+                    "end_index": node.get("start_index"),
+                    "end_anchor": node.get("start_anchor"),
+                }
+            )
         result.append(candidate)
     return result
 

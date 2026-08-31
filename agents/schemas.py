@@ -35,6 +35,11 @@ class SubAgentAnchor(StrictOutputModel):
     quoted_text: str = Field(min_length=1)
     comment_text: str = Field(min_length=1, max_length=100)
 
+    @field_validator("comment_text", mode="before")
+    @classmethod
+    def truncate_comment_text(cls, value):
+        return value[:100] if isinstance(value, str) else value
+
     @field_validator("xml_anchor_id", "quoted_text", "comment_text")
     @classmethod
     def anchor_text_not_blank(cls, value: str) -> str:
@@ -51,6 +56,11 @@ class SubAgentIssue(StrictOutputModel):
     reasoning: str = Field(min_length=1)
     criterion: str = Field(min_length=1)
     check_point: str = Field(min_length=1)
+
+    @field_validator("issue_comment", mode="before")
+    @classmethod
+    def truncate_issue_comment(cls, value):
+        return value[:160] if isinstance(value, str) else value
 
     @field_validator("issue_id", "issue_comment", "reasoning", "criterion", "check_point") # 字段验证
     @classmethod # 在实例方法创建前检验某字段

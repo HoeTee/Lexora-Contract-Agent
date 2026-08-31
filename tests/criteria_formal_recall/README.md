@@ -12,6 +12,8 @@ python tests/criteria_formal_recall/prepare_cases.py --overwrite
 输入来自 `C:\Users\lenovo\Downloads\合同样例`，输出为 `cases/D01.docx` 至
 `cases/D10.docx`。生成器只替换 `word/document.xml` 中已有 `<w:t>` 节点的文字，
 不使用 Word SaveAs 或 `python-docx` 保存，不增删 XML 节点，其他 DOCX 部件必须逐字节一致。
+生成后还会重新建立 DocxIndex，确认正文对比证据位于 `body`、附件期限和附件名称位于
+`attachments`；任何一项不满足都会终止生成，不能写入期望表冒充阳性样本。
 
 生成的审查基准和XML改动审计分别为：
 
@@ -20,8 +22,12 @@ python tests/criteria_formal_recall/prepare_cases.py --overwrite
 
 ## 运行真实API审查
 
+在 Windows 上，`run_cases.py` 会在评测进程存活期间请求系统保持唤醒，并在退出时恢复默认电源行为，避免休眠时间被错误计入端到端耗时。
+
+小于 5 分钟的性能门禁使用 `config.example.yaml` 的工作流预算：审查要点并发 5、全局 LLM 并发 5、最多 3 轮反思、单次模型调用 30 秒、SDK 最多重试 1 次，且审查要点不做整段重跑。并发限制用于避免模型服务的突发限流；外部模型持续不可用时任务应快速失败，不能用超时后的长重试换取表面成功。
+
 ```powershell
-python tests/criteria_formal_recall/run_cases.py --concurrency 1
+python tests/criteria_formal_recall/run_cases.py --concurrency 1 --task-timeout 300
 ```
 
 需要只补跑某份合同时使用：
@@ -34,6 +40,18 @@ python tests/criteria_formal_recall/run_cases.py --contract-id D03
 `results/<run_id>/`。运行时 `data/api/<task_id>/` 只用于读取正常API任务状态和结构化结果，
 测试集和测试报告不会写入项目 `data/`。
 
+`tasks.json` 对每份合同记录 `started_at`、`finished_at`、`duration_seconds` 和
+`within_5_minutes`。端到端时间从提交 API 前开始，到下载带批注 DOCX 并读取结构化输出后结束；
+默认 300 秒硬超时。合同层建议顺序运行，合同内部18个审查要点仍按服务配置并发，避免跨合同争抢
+模型配额污染单合同耗时。
+
+在运行完整 API 前，可验证真实 stdio MCP 建索引链路：
+
+```powershell
+python tests/criteria_formal_recall/smoke_mcp_docxindex.py `
+  tests/criteria_formal_recall/cases/D01.docx
+```
+
 ## 评测口径
 
 - 最终召回以带批注DOCX中实际可见的正确批注为准，后端结构化结果只用于定位丢失阶段。
@@ -43,6 +61,8 @@ python tests/criteria_formal_recall/run_cases.py --contract-id D03
 
 多个运行批次可通过 `evaluate_results.py` 合并。评估器会先扣除输入合同已有批注，
 再把最终可见的 `AI 条款审查` 批注映射回后端审查要点，并输出：
+有原文锚点的批注使用 `anchors[].comment_text` 映射；条款缺失类的文首/文尾确定性批注使用
+`issue_comment` 映射，因此两种真实可见批注采用同一准确率分母。
 
 - `recall_failures.csv`：最终没有准确可见批注的审查用例及失败阶段。
   同时保留后端 issue 数量、后端引用原文、后端批注，以及错误可见批注的原文、内容和判断理由；
@@ -50,6 +70,19 @@ python tests/criteria_formal_recall/run_cases.py --contract-id D03
   “已识别但无 anchor 原文”；`review` 阶段未识别的用例对应证据字段为空数组。
 - `incorrect_comments.csv`：违反“审查要点、合同事实、锚点”任一条件的批注。
 - `annotated/`：按 `D01_已审查.docx` 至 `D10_已审查.docx` 汇总最终带批注合同。
+- `metrics_by_contract.csv`：每份合同的端到端时间、召回率和准确率。
+- `metrics_by_criterion.csv`：每个审查要点跨10份合同的召回率和准确率。
+- `metrics_summary.csv` 和 `metrics_report.md`：总体阈值结论；默认要求每份合同小于300秒、
+  总体召回率不低于85%、总体准确率不低于90%。
+
+示例：
+
+```powershell
+python tests/criteria_formal_recall/evaluate_results.py `
+  --run-dir tests/criteria_formal_recall/results/<run_id> `
+  --output-dir tests/criteria_formal_recall/results/<evaluation> `
+  --fail-on-threshold
+```
 
 ## 按日志诊断失败
 

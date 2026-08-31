@@ -6,6 +6,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from threading import BoundedSemaphore, Lock
 
+import numpy as _numpy  # noqa: F401 - eagerly load before background response parsing
 from pydantic import BaseModel, ConfigDict
 
 from tools.docxindex.llm.config import find_local_env, find_project_config, load_env_file, load_yaml
