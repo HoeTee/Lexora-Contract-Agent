@@ -327,9 +327,20 @@ class ContractReviewWorkflow:
 
         parsed = json.loads(result)
         if parsed.get("error"):
+            error = parsed["error"]
+            if isinstance(error, dict):
+                detail = str(error.get("detail") or error.get("message") or error)
+                http_status = error.get("http_status")
+                error_type = error.get("error_type")
+            else:
+                detail = str(error)
+                http_status = None
+                error_type = None
             raise classify_model_call_error(
-                f"{RETRIEVAL_BACKEND} index build failed: {parsed['error']}",
+                f"{RETRIEVAL_BACKEND} index build failed: {detail}",
                 default_component="embedding" if RETRIEVAL_BACKEND == "llamaindex" else "agent",
+                http_status=http_status,
+                error_type=error_type,
             )
 
         print(f"  Temporary index built in {round(time.time()-start,1)}s: {result[:200]}")

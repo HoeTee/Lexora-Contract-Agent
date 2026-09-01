@@ -170,6 +170,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                 exc.event_type,
                 component=exc.component,
                 http_status=exc.http_status,
+                error_type=exc.error_type,
                 error=str(exc),
             )
             mark_failed(
@@ -181,7 +182,21 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                 error=exc.as_task_error(),
             )
         else:
-            mark_failed(client_dir, task_id, code="REVIEW_FAILED", message="Review failed. Check task logs.")
+            mark_failed(
+                client_dir,
+                task_id,
+                code="REVIEW_FAILED",
+                message="Review failed. Check task logs.",
+                component="review",
+                error={
+                    "code": "REVIEW_FAILED",
+                    "message": "Review failed. Check task logs.",
+                    "component": "review",
+                    "http_status": getattr(exc, "http_status", getattr(exc, "status_code", None)),
+                    "error_type": type(exc).__name__,
+                    "detail": str(exc),
+                },
+            )
         write_task_log_event(
             client_dir,
             task_id,

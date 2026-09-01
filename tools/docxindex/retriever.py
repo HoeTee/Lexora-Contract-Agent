@@ -86,7 +86,16 @@ class DocxIndexRetriever:
             return json.dumps(result, ensure_ascii=False)
         except Exception as exc:
             _terminal(f"[DocxIndex] Index build failed: {type(exc).__name__}: {exc}")
-            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+            return json.dumps(
+                {
+                    "error": {
+                        "http_status": getattr(exc, "http_status", getattr(exc, "status_code", None)),
+                        "error_type": getattr(exc, "error_type", type(exc).__name__),
+                        "detail": str(exc),
+                    }
+                },
+                ensure_ascii=False,
+            )
 
     async def search(self, query: str) -> str:
         """Retrieve review-ready, DOCX-anchor-aware text for one query."""
@@ -101,7 +110,13 @@ class DocxIndexRetriever:
             return result
         except Exception as exc:
             _terminal(f"[DocxIndex] Search failed: {type(exc).__name__}: {exc}")
-            return f"Error in contract DocxIndex search: {exc}"
+            http_status = getattr(exc, "http_status", getattr(exc, "status_code", None))
+            error_type = getattr(exc, "error_type", type(exc).__name__)
+            return (
+                "Error in contract DocxIndex search: "
+                f"http_status={http_status if http_status is not None else 'null'}; "
+                f"error_type={error_type}; detail={exc}"
+            )
 
     def _build_index_sync(self, docx_path: Path) -> dict[str, Any]:
         if docx_path.suffix.lower() != ".docx":

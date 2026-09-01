@@ -140,8 +140,11 @@ class RouteResponse(BaseModel):
     @model_validator(mode="after")
     def validate_plan(self) -> "RouteResponse":
         methods = {step.method for step in self.steps}
-        if "scan" in methods and len(self.steps) != 1:
-            raise ValueError("scan must be the only route step")
+        scan_count = sum(step.method == "scan" for step in self.steps)
+        if scan_count > 1:
+            raise ValueError("scan route may appear at most once")
+        if "scan" in methods and methods.intersection({"region", "hybrid"}):
+            raise ValueError("scan route may only be combined with title or rule routes")
         if self.fallback and methods.intersection({"region", "scan", "hybrid"}):
             raise ValueError("region, scan, and hybrid routes must not request global fallback")
         return self

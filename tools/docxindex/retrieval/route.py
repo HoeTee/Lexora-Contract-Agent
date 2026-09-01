@@ -18,7 +18,7 @@ from tools.docxindex.llm.schemas import RouteResponse
 
 
 DEFAULT_ROUTE_CONFIG = Path(__file__).resolve().parents[4] / "config.yaml"
-ROUTE_PROMPT_VERSION = "docx_route_v6"
+ROUTE_PROMPT_VERSION = "docx_route_v7"
 ROUTE_TITLE_MAX_DEPTH = 2
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NUMBERED_CRITERION = re.compile(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)(.+)$", re.S)

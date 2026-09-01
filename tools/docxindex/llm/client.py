@@ -14,6 +14,36 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from .config import env_api_key, find_local_env, find_project_config, load_env_file, load_yaml
 
 
+class LLMClientError(RuntimeError):
+    """Preserve upstream HTTP and exception details across retrieval boundaries."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None,
+        error_type: str,
+    ) -> None:
+        self.http_status = http_status
+        self.error_type = error_type
+        super().__init__(message)
+
+
+class LLMResponseValidationError(ValueError):
+    """Raised when an HTTP-successful model response violates the output schema."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        http_status: int | None,
+        error_type: str,
+    ) -> None:
+        self.http_status = http_status
+        self.error_type = error_type
+        super().__init__(message)
+
+
 class LLMSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -79,7 +109,11 @@ class LLMClient:
                 return response.choices[0].message.content or ""
             except Exception as exc:
                 if not _is_rate_limit_error(exc) or attempt >= self._rate_limit_retries:
-                    raise
+                    raise LLMClientError(
+                        str(exc),
+                        http_status=getattr(exc, "status_code", None),
+                        error_type=type(exc).__name__,
+                    ) from exc
                 time.sleep(2**attempt)
         raise RuntimeError("unreachable LLM retry state")
 
@@ -107,9 +141,11 @@ class LLMClient:
             except (json.JSONDecodeError, ValidationError, ValueError) as exc:
                 last_error = exc
                 current_prompt = retry_prompt(prompt, schema, last_content, exc)
-        raise ValueError(
+        raise LLMResponseValidationError(
             f"LLM response failed {schema.__name__} validation after {retries + 1} attempts: "
-            f"{last_error}; last_content={last_content[:300]!r}"
+            f"{last_error}; last_content={last_content[:2000]!r}",
+            http_status=200,
+            error_type="response_validation_error",
         )
 
 

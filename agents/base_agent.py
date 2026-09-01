@@ -288,12 +288,14 @@ class Agent:
                     "agent",
                     f"{self.name}: {exc}",
                     http_status=getattr(exc, "status_code", None),
+                    error_type=type(exc).__name__,
                 ) from exc
             except LLMGlobalSemaphoreTimeout as exc:
                 raise ModelCallError(
                     "agent",
                     f"{self.name}: {exc}",
                     http_status=None,
+                    error_type=type(exc).__name__,
                 ) from exc
 
             response_message = completion.choices[0].message

@@ -5,7 +5,7 @@ import json
 EXPAND_PROMPT_VERSION = "docx_expand_v2"
 SUMMARY_PROMPT_VERSION = "docx_summary_v3"
 SUMMARY_BATCH_PROMPT_VERSION = "docx_summary_batch_v1"
-ATTACHMENT_HIERARCHY_PROMPT_VERSION = "local_hierarchy_v3"
+ATTACHMENT_HIERARCHY_PROMPT_VERSION = "local_hierarchy_v4"
 
 ROUTE_EXPECTED_JSON = """{
   "steps": [
@@ -60,12 +60,12 @@ def route_prompt(
 {methods_text}
 
 规划规则：
-- 可以组合多个步骤，但避免重复扫描。
+- 可以组合多个步骤，但 scan 最多出现一次。
 - 标题是否存在、标题顺序、目录检查使用 title；需要完整目录时 all_titles=true。
 - 明确固定区域或明确标题下内容使用 region；region 可取 frontmatter/body/tail/attachments。region 先执行区域内结构树语义检索，结果不足时才由向量补充。
 - 精确关键词、金额、存在或不存在判断使用 rule，并在 terms 中列出需要原文匹配的短词。
 - 需要比较两个以上区域、首尾、正文与附件时，为每个区域分别生成一个 region 步骤；每个 region 步骤只填写一个 regions 值。
-- 错别字、语病或必须逐段通读全文的问题使用 scan，且不再组合其他步骤。
+- 错别字、语病或必须逐段通读全文的问题使用 scan。同一审查标准还包含标题、顺序、精确关键词或金额检查时，scan 可以与 title/rule 组合；不得与 region/hybrid 组合。
 - 标题、区域和精确关键词均无法可靠限定范围时使用 hybrid；hybrid 先执行全局结构树语义检索，结果不足时才由向量补充，不要再设置 fallback=true。
 - 只有 title/rule 结果还需要全局语义补充时 fallback=true；region 与 scan 不使用全局 fallback，避免越过范围或重复扫描。
 - 不得把审查结论写进检索计划。
@@ -81,7 +81,7 @@ def route_prompt(
 5. all_titles 和 fallback 必须是布尔值。
 6. region 必须且只能填写一个 regions 值；非 region 方法的 regions 必须为空数组。
 7. rule 必须填写至少一个 term；title 必须填写 terms 或设置 all_titles=true。
-8. scan 必须是唯一步骤；包含 region、scan、hybrid 时 fallback 必须为 false。
+8. scan 最多出现一次，只能与 title/rule 组合；包含 region、scan、hybrid 时 fallback 必须为 false。
 9. 不使用的 terms、regions 返回空数组；不需要完整目录时 all_titles=false。
 10. 只返回合法 JSON object，不要返回 Markdown、代码块、解释、纯文本或 schema 外字段。"""
 
@@ -168,7 +168,7 @@ def attachment_hierarchy_prompt(
 - start_anchor 是 segment 覆盖的第一个候选；下一个 segment 开始时，前一个 segment 结束。
 - document_title 只填写无编号的内部文档名称；没有时填 null，且其 level 必须为 1。
 - level_rules 只返回该 segment 中真实作为结构标题的编号族及层级。脚本会把规则应用到该编号族的全部连续候选。
-- additional_headings 只返回无法通过编号族表达、但确实属于标题的少量无编号候选。
+- additional_headings 只返回无法通过编号族表达、但确实属于标题的少量无编号候选；每一项必须完整包含 anchor、title、level，任何字段都不能省略。
 - level 是相对于当前附件的层级，1 为附件内部最高层，最多 {max_levels} 级。
 - 例如“科技部门驻场外包考核细则 -> 第一条 -> （一） -> 1、”应归纳为 document_title level 1、article level 2、cn_paren level 3、arabic_comma level 4。
 - chapter、article、section 是不同编号族；同一 segment 内同一编号族只能对应一个层级。
@@ -191,7 +191,9 @@ def attachment_hierarchy_prompt(
         {{"number_family": "article", "level": 2}},
         {{"number_family": "cn_paren", "level": 3}}
       ],
-      "additional_headings": []
+      "additional_headings": [
+        {{"anchor": "p_0008", "title": "其他约定", "level": 2}}
+      ]
     }}
   ]
 }}"""

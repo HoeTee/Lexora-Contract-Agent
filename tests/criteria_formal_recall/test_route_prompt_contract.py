@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -7,9 +8,11 @@ import unittest
 
 from pydantic import ValidationError
 
-from tools.docxindex.llm.client import LLMClient
-from tools.docxindex.llm.prompts import ROUTE_EXPECTED_JSON, route_prompt
+from endpoints.runtime.errors import classify_model_call_error
+from tools.docxindex.llm.client import LLMClient, LLMResponseValidationError
+from tools.docxindex.llm.prompts import ATTACHMENT_HIERARCHY_PROMPT_VERSION, ROUTE_EXPECTED_JSON, route_prompt
 from tools.docxindex.llm.schemas import RouteResponse
+from tools.docxindex.retriever import DocxIndexRetriever
 from tools.docxindex.retrieval.route import ROUTE_PROMPT_VERSION, RouteConfig, plan_route
 
 
@@ -62,7 +65,7 @@ class RoutePromptContractTests(unittest.TestCase):
         self.assertEqual(result.steps[0].method, "rule")
         self.assertEqual(len(client.prompts), 1)
         self.assertIn(ROUTE_EXPECTED_JSON, client.prompts[0])
-        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v6")
+        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v7")
 
     def test_schema_rejects_removed_join_route_and_slots_field(self) -> None:
         with self.assertRaises(ValidationError):
@@ -109,13 +112,70 @@ class RoutePromptContractTests(unittest.TestCase):
         invalid_plans = [
             {"steps": [{"method": "rule", "terms": ["金额"], "regions": ["body"]}]},
             {"steps": [{"method": "region", "regions": ["body", "attachments"]}]},
-            {"steps": [{"method": "scan"}, {"method": "rule", "terms": ["错别字"]}]},
+            {"steps": [{"method": "scan"}, {"method": "region", "regions": ["body"]}]},
+            {"steps": [{"method": "scan"}, {"method": "hybrid"}]},
+            {"steps": [{"method": "scan"}, {"method": "scan"}]},
             {"steps": [{"method": "hybrid"}], "fallback": True},
         ]
 
         for plan in invalid_plans:
             with self.subTest(plan=plan), self.assertRaises(ValidationError):
                 RouteResponse.model_validate(plan)
+
+    def test_schema_accepts_title_rule_and_scan_for_one_mixed_criterion(self) -> None:
+        result = RouteResponse.model_validate(
+            {
+                "steps": [
+                    {"method": "title", "all_titles": True},
+                    {"method": "rule", "terms": ["分批支付", "人民币"]},
+                    {"method": "scan"},
+                ],
+                "fallback": False,
+            }
+        )
+
+        self.assertEqual([step.method for step in result.steps], ["title", "rule", "scan"])
+
+    def test_validation_failure_preserves_successful_upstream_http_status(self) -> None:
+        client = LLMClient.__new__(LLMClient)
+        client.complete = lambda _prompt: '{"steps":[{"method":"scan"},{"method":"hybrid"}]}'  # type: ignore[method-assign]
+
+        with self.assertRaises(LLMResponseValidationError) as raised:
+            client.complete_model("route prompt", RouteResponse, retries=0)
+
+        self.assertEqual(raised.exception.http_status, 200)
+        self.assertEqual(raised.exception.error_type, "response_validation_error")
+        self.assertIn("scan route may only be combined", str(raised.exception))
+
+    def test_retrieval_error_fields_survive_model_error_classification(self) -> None:
+        error = classify_model_call_error(
+            "Error in contract DocxIndex search: http_status=200; "
+            "error_type=response_validation_error; detail=invalid route response"
+        )
+
+        payload = error.as_task_error()
+        self.assertEqual(payload["http_status"], 200)
+        self.assertEqual(payload["error_type"], "response_validation_error")
+        self.assertIn("invalid route response", payload["detail"])
+        self.assertIn("响应格式校验失败", payload["message"])
+
+    def test_index_build_error_preserves_http_status_and_error_type(self) -> None:
+        retriever = DocxIndexRetriever.__new__(DocxIndexRetriever)
+
+        def fail_build(_path: Path) -> dict:
+            raise LLMResponseValidationError(
+                "invalid attachment hierarchy",
+                http_status=200,
+                error_type="response_validation_error",
+            )
+
+        retriever._build_index_sync = fail_build  # type: ignore[method-assign]
+        result = json.loads(asyncio.run(retriever.build_index("D02.docx")))
+
+        self.assertEqual(result["error"]["http_status"], 200)
+        self.assertEqual(result["error"]["error_type"], "response_validation_error")
+        self.assertIn("invalid attachment hierarchy", result["error"]["detail"])
+        self.assertEqual(ATTACHMENT_HIERARCHY_PROMPT_VERSION, "local_hierarchy_v4")
 
     def test_failed_validation_is_not_written_to_route_cache(self) -> None:
         client = _RejectingClient()

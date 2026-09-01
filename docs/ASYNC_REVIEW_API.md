@@ -221,17 +221,20 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs" `
 }
 ```
 
-模型调用失败时，状态查询响应的 `error` 会包含 `http_status` 和完整错误文本 `detail`：
+模型调用失败时，状态查询响应的 `error` 固定包含上游 `http_status`、异常分类 `error_type` 和完整错误文本 `detail`：
 
 ```json
 {
   "code": "agent_model_call_failed",
-  "message": "模型调用超时或重试失败（Agent 模型）",
+  "message": "模型调用失败（Agent 模型）",
   "component": "agent",
   "http_status": 429,
-  "detail": "模型调用超时或重试失败（Agent 模型）：Error code: 429 - ..."
+  "error_type": "RateLimitError",
+  "detail": "模型调用失败（Agent 模型）：Error code: 429 - ..."
 }
 ```
+
+如果模型接口返回 HTTP 200，但响应内容无法通过程序 Schema 校验，`http_status` 仍记录为 `200`，`error_type` 为 `response_validation_error`。如果连接失败或超时且上游没有产生 HTTP 响应，`http_status` 为 `null`，`error_type` 和 `detail` 仍保留真实异常信息。状态查询接口本身成功读取任务时仍返回 HTTP 200；这里的 `error.http_status` 表示上游模型服务状态，不表示状态查询接口状态。
 
 鉴权失败发生在 `task_id` 生成前，因此仍返回 FastAPI 错误结构。
 
