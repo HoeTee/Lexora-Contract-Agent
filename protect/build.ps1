@@ -13,7 +13,7 @@ try {
         $VmpToolsDir = $env:VMP_TOOLS_DIR
     }
     if (-not $VmpToolsDir) {
-        $VmpToolsDir = Join-Path $PSScriptRoot "vmp\tools"
+        throw "VMP tools directory is required. Pass -VmpToolsDir or set VMP_TOOLS_DIR."
     }
     if (-not (Test-Path -LiteralPath $VmpToolsDir -PathType Container)) {
         throw "VMP tools directory does not exist: $VmpToolsDir. Pass -VmpToolsDir or set VMP_TOOLS_DIR."

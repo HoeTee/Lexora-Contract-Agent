@@ -104,7 +104,7 @@ runtime（python:3.12-slim）
 
 `protect/build.ps1` 将仓库外的工具目录作为 BuildKit named context `vmp_tools` 传入。`protect-builder` 仅以只读方式挂载 SDK；`vmp-pack` 使用临时可写挂载规范化 Windows 文件系统传入的执行权限，挂载内修改会在该条 `RUN` 完成后丢弃。VMP 工具不会被 `COPY` 到构建层，也不会进入最终镜像。
 
-仓库只保留 VMProtect SDK marker、目录校验和 `vmprotect_con` 调用接口，不保留 VMP 程序、SDK、许可证、VMP 源码生成脚本或源码补丁脚本。缺少 VMP named context 时只允许构建失败，不允许静默输出未保护镜像。
+仓库不保留 VMP 程序、SDK、动态库或许可证；这些文件只能存在于仓库外的 `VmpToolsDir`。仓库保留 `protect/vmp/gen_lang.py` 和 `protect/vmp/patch_vmp_sources.sh`，用于对外部 VMP 源码树生成语言文件和应用 Linux 工具链兼容补丁；脚本不会自动下载、提交或复制 VMP 程序。缺少 `VmpToolsDir` 时只允许构建失败，不允许静默输出未保护镜像。
 
 ## 运行时流程
 
@@ -188,6 +188,8 @@ curl.exe -I http://127.0.0.1:8000/docs
 
 - `Dockerfile`：三阶段生产镜像和仅构建期可见的 VMP bind mount。
 - `protect/build.ps1`：AES密钥和VMP工具目录校验、BuildKit构建入口。
+- `protect/vmp/gen_lang.py`：为外部 VMP 源码树生成语言 include 文件。
+- `protect/vmp/patch_vmp_sources.sh`：为外部 VMP 源码树应用 Linux 编译兼容补丁。
 - `protect/pack.py`：字节码归档和AES-256-GCM加密。
 - `protect/loader/CMakeLists.txt`：`loader_so` 与 `host` 编译目标。
 - `protect/loader/src/crypto.cpp`：密钥重建和AES解密marker。

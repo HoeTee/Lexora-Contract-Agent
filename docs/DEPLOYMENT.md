@@ -29,7 +29,7 @@ C:\Users\lenovo\vmprotect\
   -VmpToolsDir C:\Users\lenovo\vmprotect
 ```
 
-脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。`VmpToolsDir` 被作为独立 BuildKit named context 传入，Dockerfile 只在 `RUN` 期间挂载它，不把 VMP 工具、SDK、动态库或许可证复制进镜像层。缺少该目录不影响运行已有镜像，但受保护镜像构建会在启动 Docker 前明确失败。三阶段构建、工具文件要求和密钥边界见 `SOURCE_PROTECTION.md`。
+脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。`VmpToolsDir` 必须通过参数显式传入或由 `VMP_TOOLS_DIR` 环境变量指定，不再回退查找仓库内的 `protect/vmp/tools`。该目录被作为独立 BuildKit named context 传入，Dockerfile 只在 `RUN` 期间挂载它，不把 VMP 工具、SDK、动态库或许可证复制进镜像层。缺少该目录不影响运行已有镜像，但受保护镜像构建会在启动 Docker 前明确失败。三阶段构建、工具文件要求和密钥边界见 `SOURCE_PROTECTION.md`。
 
 ## 构建后验证
 
