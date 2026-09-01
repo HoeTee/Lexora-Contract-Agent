@@ -9,9 +9,13 @@ from typing import Any
 
 
 _GLOBAL_STRUCTURE_TERMS = ("条款序号", "标题顺序", "断号", "序号杂乱", "序号不连续")
+_MISSING_STRUCTURE_TERMS = ("合同框架", "必备标题", "关键标题", "缺失多项")
 _DURATION_SUMMARY_TERMS = ("合同履行期限", "起止日期不明确", "补充合同履行期限")
 _QUOTED_TEXT_PATTERN = re.compile(r"[“\"]([^”\"]+)[”\"]")
+_PRESCRIBED_TEXT_PATTERN = re.compile(r"(?:写明|写入)[“\"](.+)[”\"]")
 _REPLACEMENT_PATTERN = re.compile(r"(?:修改|改)为[：:]?[“\"]?([^”\"。；]+)")
+_REFERENCE_ONLY_TERMS = ("作为修正基准", "作为正文引用的修正基准", "作为对比", "用于对比", "此处为正确", "此处为附件")
+_TEXT_QUALITY_TERMS = ("错别字", "语病", "重复")
 
 
 @dataclass(frozen=True)
@@ -107,7 +111,7 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
     for record in records:
         issue_key = record["issue_key"]
         if _is_summary_only(record):
-            comment = str(record.get("issue_comment") or record.get("check_point") or "").strip()
+            comment = _summary_comment(record)
             summary_results.append(_materialize_result(record, [], comment))
             if comment and comment not in summary_issue_comments:
                 summary_issue_comments.append(comment)
@@ -122,6 +126,11 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
             for anchor in record["_issue"].get("anchors") or []
             if _valid_anchor(anchor)
         ]
+        substantive_anchors = [
+            anchor for anchor in source_anchors if not _is_reference_only_anchor(anchor)
+        ]
+        if substantive_anchors:
+            source_anchors = substantive_anchors
         if fixed_instruction:
             source_anchors = source_anchors[:1]
         for source_anchor in source_anchors:
@@ -129,7 +138,11 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
             comment = fixed_instruction or str(anchor.get("comment_text") or record["issue_comment"]).strip()
             anchor["comment_text"] = comment
             annotation_key = _annotation_key(anchor, comment)
-            duplicate_issue = _find_duplicate_annotation(annotations, annotation_key)
+            duplicate_issue = _find_duplicate_annotation(
+                annotations,
+                annotation_key,
+                record,
+            )
             if duplicate_issue is not None:
                 duplicate_issues.append(duplicate_issue)
                 continue
@@ -143,7 +156,7 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
                         source_keys.append(issue_key)
                 represented.add(issue_key)
             else:
-                comment = str(record.get("issue_comment") or record.get("check_point") or "").strip()
+                comment = _summary_comment(record)
                 summary_results.append(_materialize_result(record, [], comment))
                 if comment and comment not in summary_issue_comments:
                     summary_issue_comments.append(comment)
@@ -204,12 +217,21 @@ def _is_summary_only(record: dict[str, Any]) -> bool:
     )
     if any(term in context for term in _DURATION_SUMMARY_TERMS):
         return True
+    if "缺失" in context and any(term in context for term in _MISSING_STRUCTURE_TERMS):
+        return True
     return len(anchors) >= 3 and any(term in context for term in _GLOBAL_STRUCTURE_TERMS)
 
 
 def _extract_fixed_instruction(record: dict[str, Any]) -> str | None:
     """Extract prescribed wording only from the current check point."""
     source = str(record.get("check_point") or "")
+    prescribed = [
+        value.strip()
+        for value in _PRESCRIBED_TEXT_PATTERN.findall(source)
+        if value.strip().startswith(("注意：", "补充"))
+    ]
+    if prescribed:
+        return max(prescribed, key=len)
     candidates = [
         value.strip()
         for value in _QUOTED_TEXT_PATTERN.findall(source)
@@ -223,6 +245,18 @@ def _valid_anchor(anchor: dict) -> bool:
         str(anchor.get("xml_anchor_type") or "").strip()
         and str(anchor.get("xml_anchor_id") or "").strip()
         and str(anchor.get("quoted_text") or "").strip()
+    )
+
+
+def _is_reference_only_anchor(anchor: dict) -> bool:
+    comment = str(anchor.get("comment_text") or "")
+    return any(term in comment for term in _REFERENCE_ONLY_TERMS)
+
+
+def _summary_comment(record: dict[str, Any]) -> str:
+    return (
+        _extract_fixed_instruction(record)
+        or str(record.get("issue_comment") or record.get("check_point") or "").strip()
     )
 
 
@@ -240,6 +274,7 @@ def _annotation_key(anchor: dict, comment: str) -> tuple[str, str, str, str]:
 def _find_duplicate_annotation(
     annotations: dict[tuple[str, str, str, str], dict],
     candidate: tuple[str, str, str, str],
+    record: dict[str, Any],
 ) -> dict | None:
     exact = annotations.get(candidate)
     if exact is not None:
@@ -249,6 +284,13 @@ def _find_duplicate_annotation(
     for existing_key, issue in annotations.items():
         if existing_key[:3] != candidate_range:
             continue
+        existing_criterion = str(issue.get("criterion") or "")
+        candidate_criterion = str(record.get("criterion") or "")
+        if (
+            any(term in existing_criterion for term in _TEXT_QUALITY_TERMS)
+            and any(term in candidate_criterion for term in _TEXT_QUALITY_TERMS)
+        ):
+            return issue
         existing_action = existing_key[3]
         if (
             len(candidate_action) >= 4

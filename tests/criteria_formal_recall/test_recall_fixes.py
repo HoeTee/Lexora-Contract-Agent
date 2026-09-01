@@ -317,6 +317,24 @@ class ReviewPresentationTests(unittest.TestCase):
         self.assertEqual(issue["source_issue_keys"], ["C12::C12.1", "C15::C15.1"])
         self.assertEqual(len(issue["anchors"]), 1)
 
+    def test_text_quality_duplicates_merge_even_when_advice_differs(self) -> None:
+        for result in self.results:
+            result["issues"][0]["anchors"][0]["quoted_text"] = "乙方向甲方发贷。"
+        self.results[0]["issues"][0]["anchors"][0]["comment_text"] = (
+            "若意为交付货物请改为“发货”，若为无关内容请删除。"
+        )
+        self.results[1]["issues"][0]["anchors"][0]["comment_text"] = (
+            "结合语境应改为“乙方向甲方发货”。"
+        )
+
+        presentation = build_review_presentation(self.results)
+
+        self.assertEqual(len(presentation.inline_results), 1)
+        self.assertEqual(
+            presentation.inline_results[0]["issues"][0]["source_issue_keys"],
+            ["C12::C12.1", "C15::C15.1"],
+        )
+
     def test_anchorless_issue_is_summary_only_and_still_represented(self) -> None:
         self.results[0]["issues"][0]["anchors"] = []
 
@@ -359,6 +377,41 @@ class ReviewPresentationTests(unittest.TestCase):
             ["条款序号存在多处断号。"],
         )
 
+    def test_missing_contract_framework_is_summary_only_with_two_anchors(self) -> None:
+        result = self.results[0]
+        result["criterion"] = "合同框架需要具备至少以下必备标题"
+        issue = result["issues"][0]
+        issue["issue_comment"] = "合同框架缺失多项必备标题：保密条款、争议解决。"
+        issue["anchors"].append({
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "path:body/p2",
+            "quoted_text": "第四条 甲方义务",
+            "comment_text": "作为结构参照。",
+        })
+
+        presentation = build_review_presentation([result])
+
+        self.assertEqual(presentation.inline_results, [])
+        self.assertEqual(
+            presentation.summary_issue_comments,
+            ["合同框架缺失多项必备标题：保密条款、争议解决。"],
+        )
+
+    def test_reference_only_attachment_anchor_is_removed(self) -> None:
+        issue = self.results[0]["issues"][0]
+        issue["anchors"].append({
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "path:body/p2",
+            "quoted_text": "附件一：服务清单",
+            "comment_text": "此处为附件一实际标题，作为正文引用的修正基准。",
+        })
+
+        presentation = build_review_presentation([self.results[0]])
+        anchors = presentation.inline_results[0]["issues"][0]["anchors"]
+
+        self.assertEqual(len(anchors), 1)
+        self.assertEqual(anchors[0]["xml_anchor_id"], "path:body/p1")
+
     def test_fixed_instruction_comes_from_current_check_point_only(self) -> None:
         results = [{
             "criterion_id": "FIXED",
@@ -396,6 +449,21 @@ class ReviewPresentationTests(unittest.TestCase):
 
         self.assertEqual(presentation.inline_results, [])
         self.assertEqual(presentation.summary_issue_comments, ["存在重复用词。"])
+
+    def test_nested_prescribed_text_is_complete_in_summary(self) -> None:
+        issue = self.results[0]["issues"][0]
+        issue["anchors"] = []
+        issue["check_point"] = (
+            "如无上述内容，在正文结尾处写入“注意：补充“以下为合同签署栏”"
+            "或“以下无正文””"
+        )
+
+        presentation = build_review_presentation([self.results[0]])
+
+        self.assertEqual(
+            presentation.summary_issue_comments,
+            ["注意：补充“以下为合同签署栏”或“以下无正文”"],
+        )
 
 
 class PreparedContractValidationTests(unittest.TestCase):

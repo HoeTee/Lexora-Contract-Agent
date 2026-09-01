@@ -133,7 +133,7 @@ presentation_results + final_review -> generate_docx_report -> 批注版 DOCX
 
 `raw results` 继续写入审查日志，保留各 criterion 的原始输出；`presentation_results` 只包含最终写入原文的批注。没有有效锚点、合同整体期限问题，以及三个以上锚点共同描述的条款断号/标题顺序问题由程序放入 `summary_issue_comments`。每个原始 `issue_key` 必须进入一个规范化问题，否则程序直接报错，不能静默遗漏。Summarizer 只读取规范化问题，不再返回 discard 或锚点决策。该调整复用原有 Summarizer 调用，不增加 LLM 调用次数。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
 
-`build_review_presentation()` 的输入是 Orchestrator `results`，输出是 `ReviewPresentation`：`inline_results`、`summarizer_results`、`summary_issue_comments`。相同 XML 范围且修改动作相同的跨要点批注只保留一次，并在规范化 issue 的 `source_issue_keys` 中记录全部来源；当前 `check_point` 含“直接写明”的固定引号文字时，只保留一个落点并原样写入。该步骤不调用模型。
+`build_review_presentation()` 的输入是 Orchestrator `results`，输出是 `ReviewPresentation`：`inline_results`、`summarizer_results`、`summary_issue_comments`。相同 XML 范围且修改动作相同的跨要点批注只保留一次；“错别字/语病/重复”等文字质量要点命中同一范围时也合并，并在规范化 issue 的 `source_issue_keys` 中记录全部来源。合同框架缺失、全局断号、履行期限和无锚点问题进入总结；关系型问题中仅作正确值参照的附件标题锚点不写批注。当前 `check_point` 含“写明/写入”的固定引号文字时，只保留一个落点或总结项并原样写入。该步骤不调用模型。
 
 ## 架构边界
 
