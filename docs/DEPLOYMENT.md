@@ -82,6 +82,8 @@ host 根据自身路径 `dlopen` 同目录的 `libloader.vmp.so`；共享库重�
 
 API client、租户和用户管理脚本已经编译、加密进 `code.bin`。最终镜像没有 `/app/scripts/*.py`，因此不能在容器内执行 `python scripts/manage_*.py`。
 
+本节只说明部署环境中的启动方式；完整子命令、参数和删除边界见 [管理 CLI 手册](MANAGEMENT_CLI.md)。
+
 进入正在运行且已经挂载 `profiles/`、`data/` 的服务容器：
 
 ```bash

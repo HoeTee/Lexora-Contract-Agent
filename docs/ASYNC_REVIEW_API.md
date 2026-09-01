@@ -14,7 +14,7 @@ Authorization: <api_key>
 
 服务端接受原始 key 或 `Bearer <api_key>`。平台负责该 key 的鉴权；本服务只用其 SHA-256 指纹查找本地客户映射。
 
-管理员通过 `scripts/manage_api_clients.py` 登记平台 key 映射；`profiles/api_clients.json` 只保存 SHA-256 指纹，不保存明文 key。CLI 参数以 `python scripts/manage_api_clients.py --help` 为准；受保护容器中的启动方式见 `DEPLOYMENT.md`。
+管理员通过 `scripts/manage_api_clients.py` 登记平台 key 映射；`profiles/api_clients.json` 只保存 SHA-256 指纹，不保存明文 key。完整子命令和容器运行方式见 [管理 CLI 手册](MANAGEMENT_CLI.md)。
 
 ## 2. 异步调用流程
 
@@ -62,7 +62,32 @@ Authorization: <api_key>
 
 只有请求已经被识别为合法的任务提交后，服务才会生成 `task_id`、创建任务目录、保存输入文件、写入 `task.json` 并投递执行。此后发生的文件保存、URL 下载、DOCX 校验、审查标准校验或 worker 执行失败，才属于 task-level error，可以返回带 `task_id` 的失败任务结构。
 
-如果 `config.yaml` 中 `api.require_request_model_config: true`，服务不会采用根目录 `.env` 和 `config.yaml` 中的模型配置，提交任务时必须在请求体中同时传入模型密钥和模型名称：
+### 3.1 提交参数如何判断是否必填
+
+提交参数分为三类：
+
+| 参数类别 | 字段 | 是否必填 |
+| --- | --- | --- |
+| 固定必填 | `Authorization` 请求头 | 所有请求都必填。 |
+| 固定必填 | multipart 的 `file`，或 JSON 的 `file_url` | 二选一，由 `Content-Type` 决定。 |
+| 固定可选 | `criteria_file` 或 `criteria_file_url` | 可选；不传时使用服务端默认审查标准。 |
+| 条件必填 | `api.meta_fields` 配置的业务字段 | `api.meta_required: true` 时全部必填；为 `false` 时可选。 |
+| 条件必填 | 六个请求级模型字段 | `api.require_request_model_config: true` 时全部必填；为 `false` 时不要传，服务端不会使用。 |
+
+当前仓库的 `config.yaml` 配置为：
+
+```yaml
+api:
+  require_request_model_config: false
+  meta_required: true
+  meta_fields:
+    - "templateCode"
+    - "serialNo"
+```
+
+因此，当前配置下的最小提交必须包含合同输入、`templateCode` 和 `serialNo`；`criteria_file` / `criteria_file_url` 可省略，六个模型字段不需要传。
+
+如果将 `api.require_request_model_config` 改为 `true`，提交任务时还必须同时传入以下六个字段：
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
@@ -73,7 +98,7 @@ Authorization: <api_key>
 | `reranker_api_key` | 字符串 | 是 | 本次任务使用的 Reranker 密钥。 |
 | `reranker_model_name` | 字符串 | 是 | 本次任务使用的 Reranker 模型名称。 |
 
-如果 `api.require_request_model_config: false`，服务采用根目录 `.env` 中的模型密钥和 `config.yaml` 中的模型名称，请求体中的上述字段不会被使用。Reranker 请求体风格不由客户传入，服务会根据 `reranker_model_name` 在 `config.yaml` 的 `rerank.provider_model_names` 中查找对应 provider。
+当 `api.require_request_model_config: false` 时，服务采用根目录 `.env` 中的模型密钥和 `config.yaml` 中的模型名称，请求体中的上述字段不会被使用。Reranker 请求体风格不由客户传入；启用请求级模型配置后，服务根据 `reranker_model_name` 在 `config.yaml` 的 `rerank.provider_model_names` 中查找 provider。
 
 `api.meta_fields` 定义任务提交接口接受的业务元字段。当前配置为 `templateCode` 和 `serialNo`。`api.meta_required: true` 时，所有配置字段必须是非空字符串，缺少或空白会在生成 `task_id` 前返回 `400`。`api.meta_required: false` 时字段可选，传入的值仍会保存到任务状态中；无论是否必填，已传入的字段都必须是字符串。
 
@@ -91,25 +116,31 @@ Authorization: <api_key>
 | --- | --- | --- | --- |
 | `file` | DOCX 文件 | 是 | 待审查的合同文件。 |
 | `criteria_file` | DOCX 文件 | 否 | 本次审查标准；不传时使用默认审查标准。 |
-| `templateCode` | 字符串 | 由 `api.meta_required` 决定 | 业务模板编号。 |
-| `serialNo` | 字符串 | 由 `api.meta_required` 决定 | 业务流水号。 |
+| `templateCode` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
+| `serialNo` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
 
-PowerShell 示例：
+当前配置的最小请求，只包含必填参数：
 
 ```powershell
 curl.exe -X POST "http://localhost:5000/api/review/jobs" `
   -H "Authorization: platform-key-for-client-a" `
   -F "file=@C:/Users/lenovo/Desktop/contract.docx" `
-  -F "criteria_file=@C:/Users/lenovo/Desktop/criteria.docx" `
+  -F "templateCode=template_001" `
+  -F "serialNo=serial_001"
+```
+
+需要为本次任务覆盖默认审查标准时，再增加可选的 `criteria_file`：
+
+```powershell
+curl.exe -X POST "http://localhost:5000/api/review/jobs" `
+  -H "Authorization: platform-key-for-client-a" `
+  -F "file=@C:/Users/lenovo/Desktop/contract.docx" `
   -F "templateCode=template_001" `
   -F "serialNo=serial_001" `
-  -F "llm_api_key=<llm_api_key>" `
-  -F "llm_model_name=<llm_model_name>" `
-  -F "embedding_api_key=<embedding_api_key>" `
-  -F "embedding_model_name=<embedding_model_name>" `
-  -F "reranker_api_key=<reranker_api_key>" `
-  -F "reranker_model_name=<reranker_model_name>"
+  -F "criteria_file=@C:/Users/lenovo/Desktop/criteria.docx"
 ```
+
+只有将 `api.require_request_model_config` 改为 `true` 后，才在上述请求中追加六个模型字段；六个字段必须同时提供，不能只传其中一部分。
 
 **URL 输入**
 
@@ -125,17 +156,28 @@ Authorization: <api_key>
 | --- | --- | --- | --- |
 | `file_url` | URL 字符串 | 是 | 待审查合同 DOCX 的下载地址。 |
 | `criteria_file_url` | URL 字符串 | 否 | 本次审查标准 DOCX 的下载地址；不传时使用默认审查标准。 |
-| `templateCode` | 字符串 | 由 `api.meta_required` 决定 | 业务模板编号。 |
-| `serialNo` | 字符串 | 由 `api.meta_required` 决定 | 业务流水号。 |
+| `templateCode` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
+| `serialNo` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
 
-PowerShell 示例：
+当前配置的最小请求，只包含必填参数：
 
 ```powershell
 curl.exe -X POST "http://localhost:5000/api/review/jobs" `
   -H "Authorization: platform-key-for-client-a" `
   -H "Content-Type: application/json" `
-  -d '{ "file_url": "https://example.com/contract.docx", "criteria_file_url": "https://example.com/criteria.docx", "templateCode": "template_001", "serialNo": "serial_001", "llm_api_key": "<llm_api_key>", "llm_model_name": "<llm_model_name>", "embedding_api_key": "<embedding_api_key>", "embedding_model_name": "<embedding_model_name>", "reranker_api_key": "<reranker_api_key>", "reranker_model_name": "<reranker_model_name>" }'
+  -d '{ "file_url": "https://example.com/contract.docx", "templateCode": "template_001", "serialNo": "serial_001" }'
 ```
+
+需要为本次任务覆盖默认审查标准时，再增加可选的 `criteria_file_url`：
+
+```powershell
+curl.exe -X POST "http://localhost:5000/api/review/jobs" `
+  -H "Authorization: platform-key-for-client-a" `
+  -H "Content-Type: application/json" `
+  -d '{ "file_url": "https://example.com/contract.docx", "templateCode": "template_001", "serialNo": "serial_001", "criteria_file_url": "https://example.com/criteria.docx" }'
+```
+
+只有将 `api.require_request_model_config` 改为 `true` 后，才在 JSON 对象中追加六个模型字段；六个字段必须同时提供。
 
 `application/json` 的文件输入只支持 URL：`file_url` 必填，`criteria_file_url` 可选；此外可以传入配置的业务元字段，以及启用请求级模型配置时所需的模型字段。URL 文件会先下载到任务 `input/` 目录，再执行与本地上传一致的 DOCX 校验。保存文件名优先使用下载响应 `Content-Disposition` 中的 `filename*` / `filename`，没有时使用最终 URL path、原始 URL path，仍取不到时使用默认 fallback。
 
@@ -217,6 +259,10 @@ Authorization: <api_key>
 
 请求体：
 
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `task_id` | 字符串 | 是 | 要查询的任务 ID。 |
+
 ```json
 {
   "task_id": "20260714-143119-5ece"
@@ -286,7 +332,12 @@ Content-Type: application/json
 Authorization: <api_key>
 ```
 
-该接口通过请求体中的 `task_id` 指定任务，通过 `output_type` 指定输出方式。
+该接口通过请求体中的 `task_id` 指定任务，通过可选的 `output_type` 覆盖默认输出方式。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `task_id` | 字符串 | 是 | 已完成任务的 ID。 |
+| `output_type` | `file` 或 `url` | 否 | 省略时使用 `api.result_output_default`；当前默认值是 `file`。 |
 
 | `output_type` | 响应类型 | 调用方处理方式 |
 | --- | --- | --- |
@@ -295,7 +346,19 @@ Authorization: <api_key>
 
 `task_id` 必填；`output_type` 可省略，省略时使用 `api.result_output_default`。默认配置为 `file`，兼容已有调用方。主接口不能省略整个请求体。
 
+当前配置的最小请求，只包含必填参数，并按默认值返回文件流：
+
+```powershell
+curl.exe --fail -X POST "http://localhost:5000/api/review/jobs/result" `
+  -H "Authorization: platform-key-for-client-a" `
+  -H "Content-Type: application/json" `
+  -d '{ "task_id": "20260714-143119-5ece" }' `
+  -o "C:\Users\lenovo\Desktop\review_result.docx"
+```
+
 **文件流输出**
+
+下面显式传入可选的 `output_type: file`，用于不依赖服务端默认值的调用方。
 
 请求体：
 
@@ -323,6 +386,8 @@ Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.doc
 ```
 
 **URL 输出**
+
+URL 输出不是默认值，必须显式传入 `output_type: url`，并要求服务端启用结果上传。
 
 请求体：
 
@@ -411,6 +476,11 @@ POST /api/review/jobs/{task_id}/cancel
 Authorization: <api_key>
 ```
 
+| 参数位置 | 参数 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| path | `task_id` | 是 | 要取消的任务 ID。 |
+| body | 无 | 否 | 该接口不需要请求体。 |
+
 PowerShell 示例：
 
 ```powershell
@@ -471,6 +541,6 @@ data/api/<task_id>/
 | --- | --- | --- |
 | `POST /review/jobs/{task_id}` | `404 Not Found` | 查询状态应使用 `POST /api/review/jobs/status` 并在 body 传 `task_id`。 |
 | `POST /api/review/jobs/status` 未传 `task_id` | `400` | 在 JSON body 中传 `{ "task_id": "..." }`。 |
-| `POST /api/review/jobs/result` 未传 `task_id` | `400` | 在 JSON body 中传 `{ "task_id": "...", "output_type": "file" }`。 |
+| `POST /api/review/jobs/result` 未传 `task_id` | `400` | 最小 JSON body 为 `{ "task_id": "..." }`；仅在需要覆盖默认输出方式时再传 `output_type`。 |
 | `POST /api/review/jobs/{task_id}/result` 传 `output_path` | 仍返回文件流，不会写入该路径。 | 使用 `curl.exe -o` 或客户端代码保存响应体。 |
 | PowerShell `curl.exe` 未使用 `-o` | 文件内容输出到终端。 | 使用上文的 `-o "C:\...\review_result.docx"` 写法。 |

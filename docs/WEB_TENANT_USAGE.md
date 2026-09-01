@@ -27,6 +27,8 @@ data/web/<tenant_id>/<task_id>/
 
 ## 管理 CLI
 
+完整租户、用户和 API client 管理命令见 [管理 CLI 手册](MANAGEMENT_CLI.md)。
+
 本地源码环境：
 
 ```powershell

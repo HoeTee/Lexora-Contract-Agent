@@ -74,6 +74,8 @@ API 和 Web 任务都保存 `task.json`、`input/`、`output/` 和启用后的 `
 
 ## 管理 CLI
 
+完整子命令、必填/可选参数、容器执行方式和数据边界见 [管理 CLI 手册](docs/MANAGEMENT_CLI.md)。
+
 拥有源码时直接运行脚本；完整子命令以脚本 `--help` 为准：
 
 ```powershell
@@ -97,6 +99,7 @@ docker exec -it lexora bash
 
 ## 文档
 
+- [管理 CLI 手册](docs/MANAGEMENT_CLI.md)
 - [异步审查 API](docs/ASYNC_REVIEW_API.md)
 - [Web 多租户使用说明](docs/WEB_TENANT_USAGE.md)
 - [部署说明](docs/DEPLOYMENT.md)
