@@ -68,13 +68,13 @@
         <mxCell id="user_mgmt" value="endpoints/web/user_management.py&lt;br&gt;创建、更新、删除用户&lt;br&gt;初始化用户目录" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F3FF;strokeColor=#8B5CF6;" vertex="1" parent="auth_group">
           <mxGeometry x="30" y="230" width="300" height="68" as="geometry" />
         </mxCell>
-        <mxCell id="users_file" value="USERS_FILE&lt;br&gt;profiles/users.json&lt;br&gt;账号、角色、启用状态、密码哈希" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F3E8FF;strokeColor=#9333EA;" vertex="1" parent="auth_group">
+        <mxCell id="users_file" value="profiles/tenants/&amp;lt;tenant_id&amp;gt;/profiles.json&lt;br&gt;账号、角色、启用状态、密码哈希" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F3E8FF;strokeColor=#9333EA;" vertex="1" parent="auth_group">
           <mxGeometry x="30" y="322" width="138" height="82" as="geometry" />
         </mxCell>
-        <mxCell id="data_dir" value="DATA_DIR/&amp;lt;username&amp;gt;&lt;br&gt;contracts / reports_docx / logs / records / criteria" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F3E8FF;strokeColor=#9333EA;" vertex="1" parent="auth_group">
+        <mxCell id="data_dir" value="DATA_DIR/web/&amp;lt;tenant_id&amp;gt;/&amp;lt;task_id&amp;gt;&lt;br&gt;input / output / logs / task.json" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F3E8FF;strokeColor=#9333EA;" vertex="1" parent="auth_group">
           <mxGeometry x="190" y="322" width="140" height="82" as="geometry" />
         </mxCell>
-        <mxCell id="history_store" value="review_history.json&lt;br&gt;历史记录来源" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F3E8FF;strokeColor=#9333EA;" vertex="1" parent="auth_group">
+        <mxCell id="history_store" value="task.json&lt;br&gt;租户任务状态与历史记录来源" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fillColor=#F3E8FF;strokeColor=#9333EA;" vertex="1" parent="auth_group">
           <mxGeometry x="110" y="430" width="140" height="62" as="geometry" />
         </mxCell>
 

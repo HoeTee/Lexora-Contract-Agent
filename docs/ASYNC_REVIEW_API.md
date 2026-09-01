@@ -16,7 +16,7 @@ Authorization: <api_key>
 
 管理员在本地登记平台 key 映射。`profiles/api_clients.json` 只保存 key 的 SHA-256 指纹，不保存明文 key。
 
-以下管理命令应在项目根目录执行；Docker 部署时，应在挂载了与服务容器相同 `profiles/`、`data/` 持久化目录的临时管理容器中执行。
+以下命令用于拥有源码的本地开发机，应在项目根目录执行。受保护 Docker 镜像没有明文脚本，应进入挂载了相同 `profiles/`、`data/` 的服务容器后，使用 `/app/host -m scripts.manage_api_clients` 执行；完整说明见 `docs/MANAGEMENT_CLI.md`。
 
 | 命令 | 输入 | 输出或作用 |
 | --- | --- | --- |
@@ -40,6 +40,14 @@ python scripts/manage_api_clients.py reset-api-key --client-id "client_a" --api-
 python scripts/manage_api_clients.py disable --client-id "client_a"
 python scripts/manage_api_clients.py enable --client-id "client_a"
 python scripts/manage_api_clients.py delete --client-id "client_a"
+```
+
+受保护容器示例：
+
+```bash
+docker exec -it lexora bash
+/app/host -m scripts.manage_api_clients list
+/app/host -m scripts.manage_api_clients check --client-id "client_a"
 ```
 
 旧记录若只包含 `secret_hash` 或 `secret_fingerprint`，不能用于平台 key 映射。请对该 `client_id` 执行一次 `reset-api-key --api-key "<platform_api_key>"`，脚本会移除旧字段并写入 `api_key_fingerprint`。

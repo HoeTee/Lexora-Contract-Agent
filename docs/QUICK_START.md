@@ -8,10 +8,11 @@
 pip install -r requirements.txt
 ```
 
-## 2. 创建测试用户
+## 2. 创建测试租户和用户
 
 ```powershell
-python scripts/manage_users.py create --username testuser --password Test123456 --display-name TestUser
+python scripts/manage_tenants.py create --tenant-id demo --name "Demo Tenant"
+python scripts/manage_users.py create --tenant-id demo --username testuser --password Test123456 --display-name TestUser
 ```
 
 创建用户时会自动初始化用户目录，并从 `resources/criteria/criteria.docx` 复制默认审查要点。
@@ -19,7 +20,7 @@ python scripts/manage_users.py create --username testuser --password Test123456 
 如果用户已经存在，可以重置密码：
 
 ```powershell
-python scripts/manage_users.py reset-password --username testuser --password Test123456
+python scripts/manage_users.py reset-password --tenant-id demo --username testuser --password Test123456
 ```
 
 ## 3. 确认审查要点
@@ -27,7 +28,7 @@ python scripts/manage_users.py reset-password --username testuser --password Tes
 默认审查要点应已经存在于：
 
 ```text
-data/testuser/criteria/criteria.docx
+profiles/tenants/demo/criteria/testuser.docx
 ```
 
 如果要临时使用其他审查要点，可以在 `/work` 页面上传合同的同时上传本次审查要点；如果要修改该用户默认审查要点，可以用管理员后台进入用户详情页上传覆盖。
@@ -35,13 +36,13 @@ data/testuser/criteria/criteria.docx
 ## 4. 创建管理员用户
 
 ```powershell
-python scripts/manage_users.py create --username admin --password Admin123456 --display-name 管理员 --role admin
+python scripts/manage_users.py create --tenant-id demo --username admin --password Admin123456 --display-name 管理员 --role admin
 ```
 
 如果管理员已经存在，可以重置密码：
 
 ```powershell
-python scripts/manage_users.py reset-password --username admin --password Admin123456
+python scripts/manage_users.py reset-password --tenant-id demo --username admin --password Admin123456
 ```
 
 ## 5. 启动 Web 服务
@@ -73,6 +74,7 @@ http://127.0.0.1:5000
 登录信息：
 
 ```text
+tenant_id: demo
 username: testuser
 password: Test123456
 ```
@@ -90,10 +92,10 @@ http://127.0.0.1:5000/admin
 审查成功后，服务会写入：
 
 ```text
-data/testuser/contracts/
-data/testuser/reports_docx/
-data/testuser/records/review_history.json
-data/testuser/logs/
+data/web/demo/<task_id>/input/
+data/web/demo/<task_id>/output/
+data/web/demo/<task_id>/logs/
+data/web/demo/<task_id>/task.json
 ```
 
 页面会显示批注版 DOCX 的下载链接。
@@ -128,7 +130,7 @@ $ctx = [regex]::Match($loginResponse.Headers.Location, 'ctx=([^&]+)').Groups[1].
 
 ```powershell
 $form = @{
-  file = Get-Item "data/testuser/contracts/合同文件名.docx"
+  file = Get-Item "C:\path\合同文件名.docx"
 }
 Invoke-WebRequest `
   -Uri "http://127.0.0.1:5000/review?ctx=$ctx" `
@@ -151,7 +153,7 @@ profiles/
 data/
 ```
 
-`profiles/` 和 `data/` 都可以是空目录。首次创建用户时，程序会自动生成 `profiles/users.json`。
+`profiles/` 和 `data/` 都可以是空目录。创建租户和用户后，程序会生成 `profiles/tenant_profiles.json`、`profiles/tenants/<tenant_id>/profiles.json` 和租户数据目录。
 
 构建并启动：
 
@@ -181,6 +183,16 @@ foreach ($term in @("reconstruct_key", "aes_decrypt", "LEXORA1", "zipfile")) {
 
 产物检查应成功退出，两条 `find` 命令应无输出，关键字循环不应抛出异常；`code.bin` 文件头应为 `4c 45 58 4f 52 41 31 00`。`agents/prompts/cn_prompts.yaml` 以只读方式挂载；修改 Prompt 后需要重启 API 服务和所有 Celery worker。
 
+验证受保护镜像中的管理 CLI：
+
+```powershell
+docker exec -it lexora /app/host -m scripts.manage_tenants list
+docker exec -it lexora /app/host -m scripts.manage_users list --tenant-id demo
+docker exec -it lexora /app/host -m scripts.manage_api_clients list
+```
+
+这些命令从 `/app/code.bin` 加载管理模块，并读写 Compose 共享的 `/app/profiles`、`/app/data`。完整命令见 `docs/MANAGEMENT_CLI.md`。
+
 当前 compose 映射：
 
 ```text
@@ -205,23 +217,23 @@ http://127.0.0.1:5000
 上传合同：
 
 ```text
-data/testuser/contracts/<task_prefix>_<original_filename>.docx
+data/web/demo/<task_id>/input/<original_filename>.docx
 ```
 
 批注结果：
 
 ```text
-data/testuser/reports_docx/<task_prefix>_【已AI审查】<contract_name>.docx
+data/web/demo/<task_id>/output/<contract_name>_reviewed.docx
 ```
 
 任务日志：
 
 ```text
-data/testuser/logs/<YYYY-MM-DD>/<task>/
+data/web/demo/<task_id>/logs/
 ```
 
-历史索引：
+历史状态来源：
 
 ```text
-data/testuser/records/review_history.json
+data/web/demo/<task_id>/task.json
 ```

@@ -77,7 +77,12 @@ data/
       <task_id>/
 
 profiles/
-  users.json
+  tenant_profiles.json
+  tenants/
+    <tenant_id>/
+      profiles.json
+      criteria/
+        <username>.docx
   api_clients.json
 ```
 
@@ -85,7 +90,8 @@ API 和 Web 任务数据保持隔离：
 
 - API 任务：`data/api/<task_id>/`
 - Web 任务：`data/web/<tenant_id>/<task_id>/`
-- Web 用户配置：`profiles/users.json`
+- Web 租户注册表：`profiles/tenant_profiles.json`
+- Web 用户配置：`profiles/tenants/<tenant_id>/profiles.json`
 - API client 映射：`profiles/api_clients.json`
 
 任务目录中保存 `task.json`、输入文件、输出文件，以及开启日志后的任务级日志。
@@ -142,6 +148,8 @@ python main.py --contract .\contract.docx --criteria .\criteria.docx --output .\
 
 生产镜像采用双层源码保护：项目 Python 模块先编译并通过 AES-256-GCM 加密为 `code.bin`，负责密钥重建和解密的 loader 共享库再经过 VMP 虚拟化。容器通过 `/app/host` 加载 `/app/libloader.vmp.so`，最终镜像不包含项目 `.py`、明文 `.pyc`、未加壳 `libloader.so` 或 VMP 构建工具。
 
+API client、租户和用户管理脚本同样编译、加密进 `code.bin`。本地开发使用 `python scripts/manage_*.py`；受保护容器内使用 `/app/host -m scripts.manage_*`。完整命令和数据边界见 [管理 CLI](docs/MANAGEMENT_CLI.md)。
+
 运行数据应持久化到容器外：
 
 ```yaml
@@ -155,6 +163,7 @@ Docker 部署和排障文档：
 
 - [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
 - [docs/SOURCE_PROTECTION.md](docs/SOURCE_PROTECTION.md)
+- [docs/MANAGEMENT_CLI.md](docs/MANAGEMENT_CLI.md)
 - [docs/DOCKER_NETWORK_TROUBLESHOOTING.md](docs/DOCKER_NETWORK_TROUBLESHOOTING.md)
 
 ## 项目文档

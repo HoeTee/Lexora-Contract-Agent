@@ -46,7 +46,7 @@ frontend/templates/index.html
 
 - 上传合同 DOCX。
 - 可选上传本次审查要点 DOCX。
-- 如果本次不上传审查要点，则使用 `data/<username>/criteria/criteria.docx`。
+- 如果本次不上传审查要点，则使用 `profiles/tenants/<tenant_id>/criteria/<username>.docx`。
 - 审核中会禁用提交按钮并定时刷新任务状态。
 - 审核完成后提供批注版 DOCX 下载入口。
 
@@ -69,10 +69,10 @@ frontend/templates/history.html
 - 输出时间
 - 下载入口
 
-历史记录不是扫描目录生成，而是读取：
+历史记录按租户任务目录中的状态文件汇总：
 
 ```text
-data/<username>/records/review_history.json
+data/web/<tenant_id>/<task_id>/task.json
 ```
 
 读写逻辑在：
@@ -173,15 +173,12 @@ frontend/static/app.js
 
 ## 后端账号数据
 
-账号数据路径由 `config.py` 中的 `USERS_FILE` 决定。
-
-默认值：
+租户注册表和用户账号按租户保存在项目 `profiles/` 目录：
 
 ```text
-<PROJECT_ROOT>/profiles/users.json
+<PROJECT_ROOT>/profiles/tenant_profiles.json
+<PROJECT_ROOT>/profiles/tenants/<tenant_id>/profiles.json
 ```
-
-当前 `USERS_FILE` 在 `config.py` 中固定为项目内的 `profiles/users.json`，不再通过 `.env` 或 `config.yaml` 配置。
 
 账号 JSON 结构：
 
@@ -203,7 +200,8 @@ frontend/static/app.js
 字段说明：
 
 ```text
-username             登录用户名，也是用户数据目录名
+tenant_id            用户所属租户
+username             租户内登录用户名
 password_hash        PBKDF2 密码哈希，不保存明文密码
 display_name         前端展示名称
 role                 user 或 admin
@@ -235,18 +233,12 @@ disabled_at          禁用时间
 
 当前 `DATA_DIR` 在 `config.py` 中固定为项目内的 `data/`，不再通过 `.env` 或 `config.yaml` 配置。
 
-创建用户后会生成：
+创建租户用户后会生成或更新：
 
 ```text
-data/<username>/
-  criteria/
-    criteria.docx
-  institutional_docs/
-  contracts/
-  reports_docx/
-  records/
-    review_history.json
-  logs/
+profiles/tenants/<tenant_id>/profiles.json
+profiles/tenants/<tenant_id>/criteria/<username>.docx
+data/web/<tenant_id>/
 ```
 
 目录初始化逻辑在：
@@ -263,16 +255,16 @@ loggers/resolve_review_task_paths.py
 resources/criteria/criteria.docx
 ```
 
-新建用户时，程序会复制它到：
+新建租户用户时，程序会复制它到：
 
 ```text
-data/<username>/criteria/criteria.docx
+profiles/tenants/<tenant_id>/criteria/<username>.docx
 ```
 
 普通用户在 `/work` 上传的审查要点只用于本次任务。管理员在用户详情页上传的审查要点会覆盖该用户默认文件：
 
 ```text
-data/<username>/criteria/criteria.docx
+profiles/tenants/<tenant_id>/criteria/<username>.docx
 ```
 
 审查要点上传前会做 DOCX 格式检查和内容检查。内容检查逻辑在 `endpoints/runtime/document_validation.py`，目标是拒绝明显不是审查要点的 DOCX。
@@ -295,7 +287,7 @@ set_user_enabled()      启用或禁用用户
 delete_user_account()   删除用户账号，可选删除用户目录
 ```
 
-这些函数会写入或更新 `USERS_FILE`，并按需要创建或删除 `DATA_DIR/<username>`。
+租户模式下，这些函数写入 `profiles/tenants/<tenant_id>/profiles.json`，并初始化 `data/web/<tenant_id>/` 和 `profiles/tenants/<tenant_id>/criteria/<username>.docx`。删除租户用户只删除用户配置，不删除已有任务数据。
 
 ## CLI
 
@@ -311,51 +303,62 @@ scripts/manage_users.py
 python scripts/manage_users.py --help
 ```
 
+所有用户命令都必须指定已经存在且已启用的 `--tenant-id`。
+
 创建普通用户：
 
 ```powershell
-python scripts/manage_users.py create --username user001 --password Abc123456 --display-name 张三
+python scripts/manage_users.py create --tenant-id tenant_a --username user001 --password Abc123456 --display-name 张三
 ```
 
 创建管理员：
 
 ```powershell
-python scripts/manage_users.py create --username admin --password Admin123456 --display-name 管理员 --role admin
+python scripts/manage_users.py create --tenant-id tenant_a --username admin --password Admin123456 --display-name 管理员 --role admin
 ```
 
 修改角色：
 
 ```powershell
-python scripts/manage_users.py set-role --username user001 --role admin
-python scripts/manage_users.py set-role --username user001 --role user
+python scripts/manage_users.py set-role --tenant-id tenant_a --username user001 --role admin
+python scripts/manage_users.py set-role --tenant-id tenant_a --username user001 --role user
 ```
 
 重置密码：
 
 ```powershell
-python scripts/manage_users.py reset-password --username user001 --password NewPass123
+python scripts/manage_users.py reset-password --tenant-id tenant_a --username user001 --password NewPass123
 ```
 
 禁用或启用用户：
 
 ```powershell
-python scripts/manage_users.py disable --username user001
-python scripts/manage_users.py enable --username user001
+python scripts/manage_users.py disable --tenant-id tenant_a --username user001
+python scripts/manage_users.py enable --tenant-id tenant_a --username user001
 ```
 
-删除账号但保留用户数据目录：
+列出租户用户：
 
 ```powershell
-python scripts/manage_users.py delete --username user001 --keep-data
+python scripts/manage_users.py list --tenant-id tenant_a
 ```
 
-删除账号并删除用户数据目录：
+删除用户配置：
 
 ```powershell
-python scripts/manage_users.py delete --username user001
+python scripts/manage_users.py delete --tenant-id tenant_a --username user001
 ```
 
-删除目录前，后端会检查目标路径必须位于 `DATA_DIR` 内，避免误删不安全路径。
+当前租户用户 CLI 不支持 `--keep-data`。删除操作只移除 `profiles/tenants/<tenant_id>/profiles.json` 中的用户记录，保留 `data/web/<tenant_id>/` 下已有任务数据。
+
+受保护 Docker 镜像中没有明文脚本。进入 `lexora` 容器后，使用：
+
+```bash
+/app/host -m scripts.manage_users list --tenant-id tenant_a
+/app/host -m scripts.manage_users reset-password --tenant-id tenant_a --username user001 --password NewPass123
+```
+
+完整本地与容器命令见 `docs/MANAGEMENT_CLI.md`。
 
 ## 多标签页 Session
 
@@ -387,18 +390,12 @@ auth_contexts[ctx] = {
 
 需要区分开发机、远端宿主机、正在运行的服务容器和临时管理容器。
 
-当前仓库默认 `.env.example` 配置：
-
-```env
-DATA_DIR=data
-USERS_FILE=profiles/users.json
-```
-
-当前 `docker-compose.yaml` 挂载后，容器内实际等价于：
+当前 `docker-compose.yaml` 挂载后，容器内身份和任务数据路径为：
 
 ```text
 DATA_DIR=/app/data
-USERS_FILE=/app/profiles/users.json
+租户注册表=/app/profiles/tenant_profiles.json
+租户用户=/app/profiles/tenants/<tenant_id>/profiles.json
 ```
 
 compose 挂载：
@@ -412,31 +409,13 @@ volumes:
 此时 Web 后台和 CLI 创建用户后，最终写到远端宿主机：
 
 ```text
-./profiles/users.json
-./data/<username>/
+./profiles/tenant_profiles.json
+./profiles/tenants/<tenant_id>/profiles.json
+./profiles/tenants/<tenant_id>/criteria/<username>.docx
+./data/web/<tenant_id>/
 ```
 
 如果没有挂载 `DATA_DIR`，这些数据会写进服务容器内部文件系统，容器重建后有丢失风险。
-
-如果从旧部署迁移，原来的 `users.json` 需要手动移动到：
-
-```text
-profiles/users.json
-```
-
-如果希望账号 JSON 放入统一数据挂载目录，可以设置：
-
-```env
-DATA_DIR=/app/data
-USERS_FILE=/app/data/users.json
-```
-
-并把 compose 调整为只挂载总数据目录：
-
-```yaml
-volumes:
-  - ./data:/app/data
-```
 
 如果要自定义新用户默认审查要点，可以挂载单个文件：
 
@@ -450,19 +429,13 @@ volumes:
 
 ## 当前边界
 
-当前用户管理仍是单租户用户体系：
+当前用户管理是租户分区体系：
 
-- 所有用户共享一个 `USERS_FILE`。
-- 用户之间通过 `DATA_DIR/<username>` 分区。
-- 管理员是全局管理员，不是租户管理员。
-- 还没有租户表或租户级权限模型。
-
-后续进入租户阶段时，需要把账号数据和目录结构扩展为租户分区，例如：
-
-```text
-data/<tenant_id>/<username>/
-```
+- 所有用户操作必须归属于已注册租户。
+- 用户身份按 `profiles/tenants/<tenant_id>/profiles.json` 分区。
+- Web 任务按 `data/web/<tenant_id>/<task_id>/` 分区，不再按用户名建立独立任务根目录。
+- 删除租户或用户配置不会级联删除历史任务数据。
 
 ## 当前路径配置
 
-`DATA_DIR` 和 `USERS_FILE` 在 `config.py` 中固定为项目内的 `data/` 和 `profiles/users.json`。它们不再通过 `.env` 或 `config.yaml` 配置。
+`DATA_DIR` 在 `config.py` 中固定为项目内的 `data/`；租户身份根目录固定为项目内的 `profiles/`。它们不再通过 `.env` 或 `config.yaml` 配置。

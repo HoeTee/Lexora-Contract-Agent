@@ -64,6 +64,8 @@ data/
 
 ## 租户 CLI
 
+以下示例用于拥有源码的本地开发机。受保护 Docker 镜像中，将 `python scripts/manage_tenants.py` 替换为 `/app/host -m scripts.manage_tenants`，将 `python scripts/manage_users.py` 替换为 `/app/host -m scripts.manage_users`；完整说明见 `docs/MANAGEMENT_CLI.md`。
+
 创建租户：
 
 ```bash
@@ -232,12 +234,21 @@ volumes:
 
 ## 快速开始
 
-在拥有项目代码且挂载了 `profiles/` 的机器或管理容器中执行：
+本地开发机拥有源码时执行：
 
 ```bash
 python scripts/manage_tenants.py create --tenant-id tenant_a --name "Tenant A"
 python scripts/manage_users.py create --tenant-id tenant_a --username admin --password "ChangeMe123" --role admin
 python scripts/manage_users.py create --tenant-id tenant_a --username alice --password "ChangeMe123" --role user
+```
+
+受保护镜像已经运行时，可进入服务容器执行同一 CLI：
+
+```bash
+docker exec -it lexora bash
+/app/host -m scripts.manage_tenants create --tenant-id tenant_a --name "Tenant A"
+/app/host -m scripts.manage_users create --tenant-id tenant_a --username admin --password "ChangeMe123" --role admin
+/app/host -m scripts.manage_users create --tenant-id tenant_a --username alice --password "ChangeMe123" --role user
 ```
 
 然后打开：

@@ -32,7 +32,7 @@ OA 集成不属于 `/api`。OA 后续应放在 `/oa`，使用独立鉴权和 cal
 API client 不在 `config.yaml` 配置。使用脚本管理：
 
 ```powershell
-python scripts/manage_api_clients.py register --client-id "client_a" --secret-key "<platform_key>"
+python scripts/manage_api_clients.py register --client-id "client_a" --api-key "<platform_key>"
 python scripts/manage_api_clients.py list
 python scripts/manage_api_clients.py check --client-id "client_a"
 python scripts/manage_api_clients.py list --client-id "client_a"
@@ -75,6 +75,15 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/status" `
   -H "Content-Type: application/json" `
   -d '{ "task_id": "20260712-144123-dccf" }'
 ```
+
+以上是拥有源码的本地开发命令。受保护镜像不包含明文脚本；进入 `lexora` 容器后，将启动部分替换为：
+
+```bash
+/app/host -m scripts.manage_api_clients register --client-id "client_a" --api-key "<platform_key>"
+/app/host -m scripts.manage_api_clients list
+```
+
+其余子命令和参数不变。完整说明见 `docs/MANAGEMENT_CLI.md`。
 
 结果输出推荐写法：
 

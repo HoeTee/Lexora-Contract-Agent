@@ -8,3 +8,6 @@ mcp_service
 task_queue
 tools
 workflow
+scripts/manage_api_clients.py
+scripts/manage_tenants.py
+scripts/manage_users.py

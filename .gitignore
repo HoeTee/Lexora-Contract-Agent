@@ -65,7 +65,9 @@ build/
 # Entire local-only trees
 /tests/*
 !/tests/criteria_formal_recall/
-/scripts/
+/scripts/docx_retrieval_eval/
+/scripts/docxindex/
+/scripts/api_review_callback_receiver.py
 /packages/
 /pageindex/
 /deploy/

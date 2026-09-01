@@ -34,11 +34,13 @@
 
 ## 服务和脚本
 
-- `scripts/manage_users.py`：Web 用户管理脚本。
-- `scripts/manage_tenants.py`：Web 租户管理脚本。
+- `scripts/manage_users.py`：Web 租户用户管理脚本；提交到 Git，并在生产构建时加密进 `code.bin`。
+- `scripts/manage_tenants.py`：Web 租户管理脚本；提交到 Git，并在生产构建时加密进 `code.bin`。
 - `endpoints/web/user_management.py`：`/web` 管理端使用的用户管理逻辑。
-- `scripts/manage_api_clients.py`：`/api` client 映射管理脚本，支持 register、list、check、reset-api-key、enable、disable、delete。
-- `scripts/api_review_callback_receiver.py`：本地测试 callback 的临时接收服务；普通 `/api` 异步主流程不依赖 callback。
+- `scripts/manage_api_clients.py`：`/api` client 映射管理脚本，支持 register、list、check、reset-api-key、enable、disable、delete；提交到 Git，并在生产构建时加密进 `code.bin`。
+- `scripts/api_review_callback_receiver.py`：本地测试 callback 的临时接收服务；普通 `/api` 异步主流程不依赖 callback，不提交到 Git，也不进入 Docker 构建上下文。
+
+`scripts/docx_retrieval_eval/` 和 `scripts/docxindex/` 是本地评测/开发目录，不提交到 Git，也不进入 Docker 构建上下文。受保护容器中的管理 CLI 用法见 `docs/MANAGEMENT_CLI.md`。
 
 ## 身份文件
 

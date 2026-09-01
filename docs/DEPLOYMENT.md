@@ -103,6 +103,26 @@ API、Celery worker 和本地 MCP 子进程都通过 host 的 `-m` 接口进入�
 
 host 根据自身路径 `dlopen` 同目录的 `libloader.vmp.so`；共享库重建 AES 密钥、解密 `/app/code.bin` 并通过内存 importer 加载模块，不会把项目 `.pyc` 写回容器文件系统。加壳后的共享库运行时不依赖 `libVMProtectSDK64.so`。
 
+## 受保护镜像中的管理 CLI
+
+API client、租户和用户管理脚本已经编译、加密进 `code.bin`。最终镜像没有 `/app/scripts/*.py`，因此不能在容器内执行 `python scripts/manage_*.py`。
+
+进入正在运行且已经挂载 `profiles/`、`data/` 的服务容器：
+
+```bash
+docker exec -it lexora bash
+```
+
+再由 `/app/host` 启动嵌入式 Python 并执行加密模块：
+
+```bash
+/app/host -m scripts.manage_api_clients list
+/app/host -m scripts.manage_tenants list
+/app/host -m scripts.manage_users list --tenant-id tenant_a
+```
+
+输入来自命令行参数；身份配置写入 `/app/profiles`，任务目录读取或初始化于 `/app/data`；运行中的 API 和 worker 通过相同宿主机挂载读取结果。完整子命令、删除边界和本地开发命令见 `docs/MANAGEMENT_CLI.md`。
+
 ## 服务器上必须准备的文件和目录
 
 ```text
@@ -126,13 +146,7 @@ volumes:
 
 输入文件来自远端部署宿主机；`.env`、`config.yaml` 和 Prompt 以只读方式供 API 与 worker 启动时读取，`profiles/` 和 `data/` 写入宿主机持久化目录，不写入镜像层。修改 Prompt 后，需要重启 API 服务和所有 worker。
 
-`profiles/` 可以为空。首次创建用户时，程序会生成 `profiles/users.json`。该目录必须可写，因为管理脚本、管理员后台和用户资料修改都会更新身份数据。
-
-如果从旧部署迁移，将原来的 `users.json` 移动到：
-
-```text
-profiles/users.json
-```
+`profiles/` 可以为空。创建租户和用户后，程序会生成 `profiles/tenant_profiles.json`、`profiles/tenants/<tenant_id>/profiles.json` 和用户审查标准文件。该目录必须可写，因为管理 CLI、管理员后台和用户资料修改都会更新身份数据。
 
 如需自定义默认审查要点，可挂载单个文件：
 
