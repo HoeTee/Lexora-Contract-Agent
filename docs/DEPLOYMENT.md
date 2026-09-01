@@ -2,17 +2,17 @@
 
 ## 环境边界
 
-- **镜像构建机**：持有项目源码、Docker/BuildKit、32字节 AES 密钥和仓库外的 VMP console/SDK 工具目录；VMP 只临时挂载到 Docker 构建阶段。
+- **镜像构建机**：持有项目源码、Docker/BuildKit 和仓库根目录下的本地 `vmp-tools/`；VMP 只临时挂载到 Docker 构建阶段。
 - **远端部署宿主机**：只需要生产镜像、Compose 配置、`.env`、`config.yaml` 和持久化目录；不要求存在源码、Python、VMP 或项目脚本。
 - **运行服务容器**：只包含运行依赖、`/app/host`、`/app/libloader.vmp.so`、`/app/code.bin` 和明确列出的可读资源。
 - **临时管理容器**：执行用户或 API client 管理命令时，挂载与服务容器相同的 `profiles/`、`data/` 和配置文件。
 
 ## 构建生产镜像
 
-构建机需要 Docker/BuildKit 和项目目录之外的 VMP console/SDK 工具目录。本机推荐放在 `C:\Users\lenovo\vmprotect`，目录结构必须是：
+构建机需要 Docker/BuildKit，以及仓库根目录下的本地 `vmp-tools/`。该目录已被 Git 和主 Docker 构建上下文忽略，不会随源码提交，也不会被复制进镜像。目录结构必须是：
 
 ```text
-C:\Users\lenovo\vmprotect\
+<仓库根目录>\vmp-tools\
 ├─ vmprotect_con
 ├─ libVMProtectSDK64.so
 ├─ libjitterentropy.so.3
@@ -24,12 +24,16 @@ C:\Users\lenovo\vmprotect\
 在项目根目录执行：
 
 ```powershell
-.\protect\build.ps1 `
-  -Tag southernbanker/lexora:latest `
-  -VmpToolsDir C:\Users\lenovo\vmprotect
+.\protect\build.ps1 -Tag southernbanker/lexora:latest
 ```
 
-脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。`VmpToolsDir` 必须通过参数显式传入或由 `VMP_TOOLS_DIR` 环境变量指定，不再回退查找仓库内的 `protect/vmp/tools`。该目录被作为独立 BuildKit named context 传入，Dockerfile 只在 `RUN` 期间挂载它，不把 VMP 工具、SDK、动态库或许可证复制进镜像层。缺少该目录不影响运行已有镜像，但受保护镜像构建会在启动 Docker 前明确失败。三阶段构建、工具文件要求和密钥边界见 `SOURCE_PROTECTION.md`。
+`VmpToolsDir` 的优先级为：命令行 `-VmpToolsDir`、环境变量 `VMP_TOOLS_DIR`、仓库根目录 `vmp-tools/`。需要临时覆盖默认目录时使用：
+
+```powershell
+.\protect\build.ps1 -Tag southernbanker/lexora:latest -VmpToolsDir C:\path\to\vmp-tools
+```
+
+脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。VMP 目录作为独立 BuildKit named context 传入，Dockerfile 只在 `RUN` 期间挂载它，不把工具、SDK、动态库或许可证复制进镜像层。缺少工具不影响运行已有镜像，但构建受保护镜像会在启动 Docker 前明确失败。三阶段构建、工具文件要求和密钥边界见 [源码保护方案](SOURCE_PROTECTION.md)。
 
 ## 构建后验证
 
@@ -43,7 +47,7 @@ docker run --rm --entrypoint find $image /app -type f -name "*.py"
 docker run --rm --entrypoint find $image /app -type f -name "*.pyc"
 ```
 
-第一条命令必须成功，两条 `find` 命令必须无输出。完整静态证据检查见 `SOURCE_PROTECTION.md`。
+第一条命令必须成功，两条 `find` 命令必须无输出。完整静态证据检查见 [源码保护方案](SOURCE_PROTECTION.md)。
 
 ## 启动服务
 
@@ -83,6 +87,13 @@ host 根据自身路径 `dlopen` 同目录的 `libloader.vmp.so`；共享库重�
 API client、租户和用户管理脚本已经编译、加密进 `code.bin`。最终镜像没有 `/app/scripts/*.py`，因此不能在容器内执行 `python scripts/manage_*.py`。
 
 本节只说明部署环境中的启动方式；完整子命令、参数和删除边界见 [管理 CLI 手册](MANAGEMENT_CLI.md)。
+
+| 环境 | 命令形式 | 适用位置 |
+| --- | --- | --- |
+| 本地 `.venv` | `.\.venv\Scripts\python.exe scripts/manage_tenants.py list` | 有源码和虚拟环境的开发机 |
+| VMP 受保护容器 | `/app/host -m scripts.manage_tenants list` | 已构建镜像的服务容器 |
+
+远端镜像部署不要求存在源码、`.venv` 或 Python 命令，因此下面使用第二种形式。
 
 进入正在运行且已经挂载 `profiles/`、`data/` 的服务容器：
 
@@ -180,11 +191,11 @@ queue:
   broker_url: "redis://redis:6379/0"
 ```
 
-Celery task、broker、worker 与 workflow 内部并发的边界见 `AGENT_WORKFLOW_ARCHITECTURE.md`。
+Celery task、broker、worker 与 workflow 内部并发的边界见 [智能体与工作流架构](AGENT_WORKFLOW_ARCHITECTURE.md)。
 
 ## 安全和授权边界
 
-- VMP提高的是离线静态分析成本，不保证运行时明文永不可获得。
+- VMP 提高的是离线静态分析成本，不保证运行时明文永不可获得。
 - 能运行容器并使用 `docker exec`、`ptrace`、`LD_PRELOAD` 或进程内存转储的攻击者，仍可提取内存中的解密归档。
-- 生产环境应配合非root运行、限制容器管理权限、避免开放 `docker exec`、启用宿主机审计，并在兼容业务写入需求的前提下收紧容器文件系统权限。
-- 当前VMP工具来源存在授权风险，仅限已获合法授权的内部研究或保护场景；分发和商用前必须完成法律审核。
+- 生产环境应配合非 root 运行、限制容器管理权限、避免开放 `docker exec`、启用宿主机审计，并在兼容业务写入需求的前提下收紧容器文件系统权限。
+- 当前 VMP 工具来源存在授权风险，仅限已获合法授权的内部研究或保护场景；分发和商用前必须完成法律审核。

@@ -29,14 +29,14 @@ data/web/<tenant_id>/<task_id>/
 
 完整租户、用户和 API client 管理命令见 [管理 CLI 手册](MANAGEMENT_CLI.md)。
 
-本地源码环境：
+### 本地 `.venv`
 
 ```powershell
-python scripts/manage_tenants.py --help
-python scripts/manage_users.py --help
+.\.venv\Scripts\python.exe scripts/manage_tenants.py --help
+.\.venv\Scripts\python.exe scripts/manage_users.py --help
 ```
 
-受保护服务容器：
+### VMP 受保护容器
 
 ```bash
 docker exec -it lexora bash
@@ -44,7 +44,7 @@ docker exec -it lexora bash
 /app/host -m scripts.manage_users --help
 ```
 
-命令参数以脚本 `--help` 为准。所有用户命令都要求 `--tenant-id`。
+两种形式使用相同的子命令和参数；所有用户命令都要求 `--tenant-id`。完整参数以对应命令的 `--help` 为准。
 
 删除边界：
 

@@ -8,23 +8,29 @@
 | `scripts.manage_tenants` | Web 租户注册表 | `profiles/tenant_profiles.json` |
 | `scripts.manage_users` | 指定租户下的 Web 用户 | `profiles/tenants/<tenant_id>/profiles.json` |
 
-生产镜像会将这三个模块编译、加密进 `/app/code.bin`，不会保留 `/app/scripts/*.py`。因此，本地源码环境使用 `python scripts/*.py`，受保护容器使用 `/app/host -m scripts.*`。
+生产镜像会将这三个模块编译、加密进 `/app/code.bin`，不会保留 `/app/scripts/*.py`。两种命令只在启动前缀上不同，子命令和参数保持一致：
+
+| 管理对象 | 本地 `.venv` | VMP 受保护容器 |
+| --- | --- | --- |
+| API client | `.\.venv\Scripts\python.exe scripts/manage_api_clients.py` | `/app/host -m scripts.manage_api_clients` |
+| 租户 | `.\.venv\Scripts\python.exe scripts/manage_tenants.py` | `/app/host -m scripts.manage_tenants` |
+| 租户用户 | `.\.venv\Scripts\python.exe scripts/manage_users.py` | `/app/host -m scripts.manage_users` |
 
 ## 1. 执行方式
 
-### 本地开发机
+### 本地开发机：`.venv`
 
 在项目根目录执行：
 
 ```powershell
-python scripts/manage_api_clients.py --help
-python scripts/manage_tenants.py --help
-python scripts/manage_users.py --help
+.\.venv\Scripts\python.exe scripts/manage_api_clients.py --help
+.\.venv\Scripts\python.exe scripts/manage_tenants.py --help
+.\.venv\Scripts\python.exe scripts/manage_users.py --help
 ```
 
 本地命令直接读写项目目录中的 `.env`、`config.yaml`、`profiles/` 和 `data/`。
 
-### 正在运行的服务容器
+### VMP 受保护的服务容器
 
 先进入容器：
 
@@ -64,7 +70,14 @@ docker compose run --rm --no-deps --entrypoint /app/host lexora -m scripts.manag
 | `enable` | `--client-id` | 无 | 恢复该 client 的 `/api` 调用权限。 |
 | `delete` | `--client-id` | 无 | 删除鉴权映射，不删除历史任务。 |
 
-容器内示例：
+本地 `.venv` 示例：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/manage_api_clients.py register --client-id client_a --api-key "<platform-key>"
+.\.venv\Scripts\python.exe scripts/manage_api_clients.py list
+```
+
+VMP 受保护容器示例：
 
 ```bash
 /app/host -m scripts.manage_api_clients register --client-id client_a --api-key "<platform-key>"
@@ -89,7 +102,14 @@ docker compose run --rm --no-deps --entrypoint /app/host lexora -m scripts.manag
 | `enable` | `--tenant-id` | 无 | 重新启用租户。 |
 | `delete` | `--tenant-id` | 无 | 删除租户注册记录，不级联删除用户和任务数据。 |
 
-容器内示例：
+本地 `.venv` 示例：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/manage_tenants.py create --tenant-id tenant_a --name "租户 A"
+.\.venv\Scripts\python.exe scripts/manage_tenants.py list
+```
+
+VMP 受保护容器示例：
 
 ```bash
 /app/host -m scripts.manage_tenants create --tenant-id tenant_a --name "租户 A"
@@ -113,7 +133,14 @@ docker compose run --rm --no-deps --entrypoint /app/host lexora -m scripts.manag
 | `enable` | `--username` | 无 | 重新启用用户。 |
 | `delete` | `--username` | 无 | 删除用户配置，不删除历史任务。 |
 
-容器内示例：
+本地 `.venv` 示例：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/manage_users.py create --tenant-id tenant_a --username admin --password "<password>" --role admin
+.\.venv\Scripts\python.exe scripts/manage_users.py list --tenant-id tenant_a
+```
+
+VMP 受保护容器示例：
 
 ```bash
 /app/host -m scripts.manage_users create --tenant-id tenant_a --username admin --password "<password>" --role admin --display-name "租户管理员"

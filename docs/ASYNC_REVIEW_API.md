@@ -14,7 +14,7 @@ Authorization: <api_key>
 
 服务端接受原始 key 或 `Bearer <api_key>`。平台负责该 key 的鉴权；本服务只用其 SHA-256 指纹查找本地客户映射。
 
-管理员通过 `scripts/manage_api_clients.py` 登记平台 key 映射；`profiles/api_clients.json` 只保存 SHA-256 指纹，不保存明文 key。完整子命令和容器运行方式见 [管理 CLI 手册](MANAGEMENT_CLI.md)。
+管理员通过管理 CLI 登记平台 key 映射；`profiles/api_clients.json` 只保存 SHA-256 指纹，不保存明文 key。本地 `.venv` 和 VMP 受保护容器的两种命令形式、完整子命令及参数见 [管理 CLI 手册](MANAGEMENT_CLI.md)。
 
 ## 2. 异步调用流程
 
@@ -31,7 +31,7 @@ POST /api/review/jobs/result
 
 当 `queue.enabled=true` 时，提交接口只创建任务并投递到队列，审查 workflow 由独立 Celery worker 进程执行。状态查询仍然只读取 `task.json`，外部 API 路径、鉴权方式和请求体不变。这个设计的关键是进程隔离：`/status` 所在的 API 进程不再直接承载 workflow、MCP、LLM 调用和 DOCX 生成。
 
-Celery task、Redis broker 和 worker 的部署边界见 `DEPLOYMENT.md`，workflow 内部并发与恢复边界见 `AGENT_WORKFLOW_ARCHITECTURE.md`。
+Celery task、Redis broker 和 worker 的部署边界见 [部署说明](DEPLOYMENT.md)，workflow 内部并发与恢复边界见 [智能体与工作流架构](AGENT_WORKFLOW_ARCHITECTURE.md)。
 
 `GET /api/review/jobs/{task_id}` 和 `POST /api/review/jobs/{task_id}/result` 保留为兼容接口。`POST /api/review/jobs/{task_id}/cancel` 仍使用 path 中的 `task_id`，只能取消 `pending` 或 `queued` 任务。`running` 表示任务已经进入 `workflow.run()`，该 API 不支持中止。
 
@@ -102,7 +102,7 @@ api:
 
 `api.meta_fields` 定义任务提交接口接受的业务元字段。当前配置为 `templateCode` 和 `serialNo`。`api.meta_required: true` 时，所有配置字段必须是非空字符串，缺少或空白会在生成 `task_id` 前返回 `400`。`api.meta_required: false` 时字段可选，传入的值仍会保存到任务状态中；无论是否必填，已传入的字段都必须是字符串。
 
-**本地文件上传**
+### 3.2 本地文件上传
 
 ```http
 POST /api/review/jobs
@@ -142,7 +142,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs" `
 
 只有将 `api.require_request_model_config` 改为 `true` 后，才在上述请求中追加六个模型字段；六个字段必须同时提供，不能只传其中一部分。
 
-**URL 输入**
+### 3.3 URL 输入
 
 ```http
 POST /api/review/jobs
@@ -181,7 +181,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs" `
 
 `application/json` 的文件输入只支持 URL：`file_url` 必填，`criteria_file_url` 可选；此外可以传入配置的业务元字段，以及启用请求级模型配置时所需的模型字段。URL 文件会先下载到任务 `input/` 目录，再执行与本地上传一致的 DOCX 校验。保存文件名优先使用下载响应 `Content-Disposition` 中的 `filename*` / `filename`，没有时使用最终 URL path、原始 URL path，仍取不到时使用默认 fallback。
 
-**成功响应**
+### 3.4 成功响应
 
 HTTP `202`：
 
@@ -193,7 +193,7 @@ HTTP `202`：
 }
 ```
 
-**提交期错误响应**
+### 3.5 提交期错误响应
 
 如果请求尚未进入任务生命周期，接口返回普通 HTTP 错误结构，不返回 `task_id`。例如把状态查询请求体发到提交接口：
 
@@ -356,7 +356,7 @@ curl.exe --fail -X POST "http://localhost:5000/api/review/jobs/result" `
   -o "C:\Users\lenovo\Desktop\review_result.docx"
 ```
 
-**文件流输出**
+### 5.1 文件流输出
 
 下面显式传入可选的 `output_type: file`，用于不依赖服务端默认值的调用方。
 
@@ -385,7 +385,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/result" `
 Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
 ```
 
-**URL 输出**
+### 5.2 URL 输出
 
 URL 输出不是默认值，必须显式传入 `output_type: url`，并要求服务端启用结果上传。
 
@@ -419,7 +419,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/result" `
 }
 ```
 
-**URL 输出配置**
+### 5.3 URL 输出配置
 
 URL 输出依赖以下配置：
 
@@ -446,7 +446,7 @@ curl -X POST "https://upload.example.com/api/files" \
 
 上传成功后，服务会从上传接口 JSON 响应中的常见 URL 字段解析结果地址，例如 `url`、`fileUrl`、`downloadUrl` 以及它们在 `data` 或 `data[0]` 下的形式；如果解析不到 URL，接口返回 `502`。
 
-**错误响应**
+### 5.4 错误响应
 
 | HTTP 状态码 | 返回场景 | 响应 |
 | --- | --- | --- |
@@ -460,7 +460,7 @@ curl -X POST "https://upload.example.com/api/files" \
 | `500` | 服务端结果源文件不存在，或客户鉴权映射异常。 | `{ "detail": "..." }` |
 | `502` | URL 输出上传失败，或上传响应中无法解析 URL。 | `{ "detail": "Result file URL upload failed." }` |
 
-**兼容接口**
+### 5.5 兼容接口
 
 ```http
 POST /api/review/jobs/{task_id}/result

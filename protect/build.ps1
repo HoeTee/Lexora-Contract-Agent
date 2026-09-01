@@ -13,10 +13,10 @@ try {
         $VmpToolsDir = $env:VMP_TOOLS_DIR
     }
     if (-not $VmpToolsDir) {
-        throw "VMP tools directory is required. Pass -VmpToolsDir or set VMP_TOOLS_DIR."
+        $VmpToolsDir = Join-Path $projectRoot "vmp-tools"
     }
     if (-not (Test-Path -LiteralPath $VmpToolsDir -PathType Container)) {
-        throw "VMP tools directory does not exist: $VmpToolsDir. Pass -VmpToolsDir or set VMP_TOOLS_DIR."
+        throw "VMP tools directory does not exist: $VmpToolsDir. Populate the repository-root vmp-tools directory, pass -VmpToolsDir, or set VMP_TOOLS_DIR."
     }
     $resolvedVmpToolsDir = (Resolve-Path -LiteralPath $VmpToolsDir).Path
     $requiredVmpFiles = @(

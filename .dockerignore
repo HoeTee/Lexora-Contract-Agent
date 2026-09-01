@@ -82,6 +82,7 @@ build/
 /image.tar
 
 # Source-protection build artifacts
+/vmp-tools/
 /protect/*.key
 /protect/out/
 /protect/tmp/
