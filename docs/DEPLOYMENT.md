@@ -2,22 +2,34 @@
 
 ## 环境边界
 
-- **镜像构建机**：持有项目源码、Docker/BuildKit、32字节 AES 密钥和 VMP console/SDK 工具目录，负责生成生产镜像。
+- **镜像构建机**：持有项目源码、Docker/BuildKit、32字节 AES 密钥和仓库外的 VMP console/SDK 工具目录；VMP 只临时挂载到 Docker 构建阶段。
 - **远端部署宿主机**：只需要生产镜像、Compose 配置、`.env`、`config.yaml` 和持久化目录；不要求存在源码、Python、VMP 或项目脚本。
 - **运行服务容器**：只包含运行依赖、`/app/host`、`/app/libloader.vmp.so`、`/app/code.bin` 和明确列出的可读资源。
 - **临时管理容器**：执行用户或 API client 管理命令时，挂载与服务容器相同的 `profiles/`、`data/` 和配置文件。
 
 ## 构建生产镜像
 
-构建机需要 Docker/BuildKit 和项目目录之外的 VMP console/SDK 工具目录。在项目根目录执行：
+构建机需要 Docker/BuildKit 和项目目录之外的 VMP console/SDK 工具目录。本机推荐放在 `C:\Users\lenovo\vmprotect`，目录结构必须是：
+
+```text
+C:\Users\lenovo\vmprotect\
+├─ vmprotect_con
+├─ libVMProtectSDK64.so
+├─ libjitterentropy.so.3
+├─ VMProtectLicense.ini
+└─ sdk\
+   └─ VMProtectSDK.h
+```
+
+在项目根目录执行：
 
 ```powershell
 .\protect\build.ps1 `
   -Tag southernbanker/lexora:latest `
-  -VmpToolsDir C:\secure\vmp-tools
+  -VmpToolsDir C:\Users\lenovo\vmprotect
 ```
 
-脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。三阶段构建、工具文件要求和密钥边界见 `SOURCE_PROTECTION.md`。
+脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。`VmpToolsDir` 被作为独立 BuildKit named context 传入，Dockerfile 只在 `RUN` 期间挂载它，不把 VMP 工具、SDK、动态库或许可证复制进镜像层。缺少该目录不影响运行已有镜像，但受保护镜像构建会在启动 Docker 前明确失败。三阶段构建、工具文件要求和密钥边界见 `SOURCE_PROTECTION.md`。
 
 ## 构建后验证
 
@@ -41,6 +53,21 @@ docker run --rm --entrypoint find $image /app -type f -name "*.pyc"
 docker compose pull
 docker compose up -d --force-recreate
 ```
+
+如果通过 TAR 交付，在构建机导出：
+
+```powershell
+docker save -o lexora.tar southernbanker/lexora:latest
+```
+
+远端导入后直接启动：
+
+```bash
+docker load -i lexora.tar
+docker compose up -d --force-recreate
+```
+
+两份 Compose 都只运行镜像，不执行 `docker build`，因此远端宿主机和运行容器都不需要挂载 VMP。
 
 API、Celery worker 和本地 MCP 子进程都通过 host 的 `-m` 接口进入受保护 Python 运行时：
 

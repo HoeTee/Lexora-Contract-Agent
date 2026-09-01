@@ -81,10 +81,11 @@ lexora_loader_main
 ```text
 protect-builder（python:3.12-slim）
   ├─ pack.py → code.bin + key_data.h
+  ├─ VMP SDK以只读BuildKit挂载提供
   └─ CMake → libloader.so + host
 
 vmp-pack（ubuntu:24.04）
-  ├─ vmprotect_con + SDK由BuildKit named context提供
+  ├─ vmprotect_con + SDK由BuildKit临时挂载提供
   └─ libloader.so → libloader.vmp.so
 
 runtime（python:3.12-slim）
@@ -98,10 +99,12 @@ runtime（python:3.12-slim）
 ```powershell
 .\protect\build.ps1 `
   -Tag southernbanker/lexora:latest `
-  -VmpToolsDir C:\secure\vmp-tools
+  -VmpToolsDir C:\Users\lenovo\vmprotect
 ```
 
-`protect/build.ps1` 将工具目录作为 BuildKit named context `vmp_tools` 传入，工具不会被普通项目构建上下文或最终镜像收录。
+`protect/build.ps1` 将仓库外的工具目录作为 BuildKit named context `vmp_tools` 传入。`protect-builder` 仅以只读方式挂载 SDK；`vmp-pack` 使用临时可写挂载规范化 Windows 文件系统传入的执行权限，挂载内修改会在该条 `RUN` 完成后丢弃。VMP 工具不会被 `COPY` 到构建层，也不会进入最终镜像。
+
+仓库只保留 VMProtect SDK marker、目录校验和 `vmprotect_con` 调用接口，不保留 VMP 程序、SDK、许可证、VMP 源码生成脚本或源码补丁脚本。缺少 VMP named context 时只允许构建失败，不允许静默输出未保护镜像。
 
 ## 运行时流程
 
@@ -152,6 +155,7 @@ docker run --rm --entrypoint sh $image -c "test -x /app/host && test -s /app/lib
 docker run --rm --entrypoint find $image /app -type f -name "*.py"
 docker run --rm --entrypoint find $image /app -type f -name "*.pyc"
 docker run --rm --entrypoint sh $image -c "od -An -tx1 -N8 /app/code.bin"
+docker run --rm --entrypoint sh $image -c "test ! -e /run/vmp-tools && test ! -e /app/vmprotect_con && test ! -e /app/libVMProtectSDK64.so && test ! -e /app/VMProtectLicense.ini && test ! -e /app/libloader.so"
 
 foreach ($term in @("reconstruct_key", "aes_decrypt", "LEXORA1", "zipfile")) {
   docker run --rm --entrypoint grep $image -a -q $term /app/libloader.vmp.so
@@ -182,7 +186,7 @@ curl.exe -I http://127.0.0.1:8000/docs
 
 ## 相关实现
 
-- `Dockerfile`：三阶段生产镜像。
+- `Dockerfile`：三阶段生产镜像和仅构建期可见的 VMP bind mount。
 - `protect/build.ps1`：AES密钥和VMP工具目录校验、BuildKit构建入口。
 - `protect/pack.py`：字节码归档和AES-256-GCM加密。
 - `protect/loader/CMakeLists.txt`：`loader_so` 与 `host` 编译目标。

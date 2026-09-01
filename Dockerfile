@@ -25,12 +25,12 @@ RUN python -m pip install \
         -r /tmp/protect-requirements.txt
 
 COPY . /src/
-COPY --from=vmp_tools /sdk/ /vmp-sdk/sdk/
-COPY --from=vmp_tools /libVMProtectSDK64.so /vmp-sdk/libVMProtectSDK64.so
 
 # The secret is available only to this build instruction. key_data.h is compiled
-# into libloader.so and removed with the temporary build directory.
+# into libloader.so and removed with the temporary build directory. The VMP SDK
+# is mounted only for this instruction and is never copied into a build layer.
 RUN --mount=type=secret,id=source_key,required=true \
+    --mount=type=bind,from=vmp_tools,target=/run/vmp-tools,ro \
     python /src/protect/pack.py \
         --root /src \
         --modules-file /src/protect/modules.txt \
@@ -41,8 +41,8 @@ RUN --mount=type=secret,id=source_key,required=true \
         -S /src/protect/loader \
         -B /tmp/loader-build \
         -DKEY_HEADER_DIR=/tmp/lexora-key \
-        -DVMP_SDK_INCLUDE=/vmp-sdk/sdk \
-        -DVMP_SDK_LIB=/vmp-sdk/libVMProtectSDK64.so \
+        -DVMP_SDK_INCLUDE=/run/vmp-tools/sdk \
+        -DVMP_SDK_LIB=/run/vmp-tools/libVMProtectSDK64.so \
         -DCMAKE_BUILD_TYPE=Release \
     && cmake --build /tmp/loader-build --target loader_so host --config Release --parallel \
     && install -m 0755 /tmp/loader-build/libloader.so /out/libloader.so \
@@ -55,22 +55,22 @@ RUN --mount=type=secret,id=source_key,required=true \
 FROM ubuntu:24.04 AS vmp-pack
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-WORKDIR /vmp-tools
+WORKDIR /tmp/vmp-work
 
-COPY --from=vmp_tools /vmprotect_con /vmp-tools/vmprotect_con
-COPY --from=vmp_tools /libVMProtectSDK64.so /vmp-tools/libVMProtectSDK64.so
-COPY --from=vmp_tools /libjitterentropy.so.3 /vmp-tools/libjitterentropy.so.3
-COPY --from=vmp_tools /VMProtectLicense.ini /vmp-tools/VMProtectLicense.ini
-COPY --from=protect-builder /out/libloader.so /vmp-tools/libloader.so
+COPY --from=protect-builder /out/libloader.so /tmp/vmp-work/libloader.so
 
-RUN chmod 0755 /vmp-tools/vmprotect_con \
+# The writable bind mount is required to normalize the executable bit when the
+# context comes from Windows. BuildKit discards writes to this mount after RUN.
+RUN --mount=type=bind,from=vmp_tools,target=/run/vmp-tools,rw \
+    chmod 0755 /run/vmp-tools/vmprotect_con \
     && mkdir -p /out \
-    && LD_LIBRARY_PATH=/vmp-tools /vmp-tools/vmprotect_con /vmp-tools/libloader.so 2>&1 | tee /tmp/vmp-pack.log \
-    && test -s /vmp-tools/libloader.vmp.so \
+    && cd /run/vmp-tools \
+    && LD_LIBRARY_PATH=/run/vmp-tools /run/vmp-tools/vmprotect_con /tmp/vmp-work/libloader.so 2>&1 | tee /tmp/vmp-pack.log \
+    && test -s /tmp/vmp-work/libloader.vmp.so \
     && grep -q "lexora_key_reconstruct" /tmp/vmp-pack.log \
     && grep -q "lexora_aes_decrypt" /tmp/vmp-pack.log \
     && grep -q "Compilation completed" /tmp/vmp-pack.log \
-    && install -m 0755 /vmp-tools/libloader.vmp.so /out/libloader.vmp.so
+    && install -m 0755 /tmp/vmp-work/libloader.vmp.so /out/libloader.vmp.so
 
 
 # STAGE 3: Final runtime image. VMProtect build tools and the unprotected

@@ -93,7 +93,7 @@ docker exec -it lexora bash
 
 ## Docker
 
-生产镜像通过 `/app/host` 加载加密代码包，不包含项目 `.py` 或明文项目 `.pyc`。构建、部署、挂载和管理命令见 [部署说明](docs/DEPLOYMENT.md)，保护实现与验证边界见 [源码保护方案](docs/SOURCE_PROTECTION.md)。
+生产镜像通过 `/app/host` 加载加密代码包，不包含项目 `.py` 或明文项目 `.pyc`。VMP 工具只在镜像构建阶段从仓库外目录临时挂载，镜像 TAR、远端 Compose 和运行容器均不需要 VMP。构建、部署、挂载和管理命令见 [部署说明](docs/DEPLOYMENT.md)，保护实现与验证边界见 [源码保护方案](docs/SOURCE_PROTECTION.md)。
 
 ## 文档
 

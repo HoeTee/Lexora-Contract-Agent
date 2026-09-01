@@ -85,6 +85,11 @@ build/
 /protect/tmp/
 /protect/vmp/tools/
 /protect/vmp/tmp_test/
+**/vmprotect_con
+**/libVMProtectSDK*.so
+**/libjitterentropy.so*
+**/VMProtectLicense.ini
+**/VMProtectSDK.h
 
 # Local notes and generated documentation artifacts
 /DEPLOYMENT.md
