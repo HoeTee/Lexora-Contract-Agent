@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Any
 
 
 _RISK_ORDER = {"low": 1, "medium": 2, "high": 3}
+_QUOTED_TEXT_PATTERN = re.compile(r"“([^”]+)”")
+_GLOBAL_STRUCTURE_TERMS = ("条款序号", "标题顺序", "断号", "序号杂乱")
 
 
 def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
@@ -158,3 +161,79 @@ def add_summary_issue_comments(final_review: dict) -> dict:
         and decision.get("merged_comment", "").strip()
     ]
     return enriched
+
+
+def normalize_issue_decisions(results: list[dict], final_review: dict) -> dict:
+    """Apply deterministic presentation invariants after the LLM finalizer."""
+    normalized = deepcopy(final_review)
+    records = collect_issue_records(results)
+    record_by_key = {record["issue_key"]: record for record in records}
+    anchor_by_key = {
+        anchor["anchor_key"]: original_anchor
+        for record in records
+        for anchor, original_anchor in zip(
+            record["anchors"],
+            record["_issue"].get("anchors") or [],
+            strict=True,
+        )
+    }
+
+    for decision in normalized.get("issue_decisions") or []:
+        source_records = [
+            record_by_key[key]
+            for key in decision.get("source_issue_keys") or []
+            if key in record_by_key
+        ]
+        selected = []
+        seen_ranges: set[tuple[str, str, str]] = set()
+        for annotation in decision.get("selected_anchors") or []:
+            anchor = anchor_by_key.get(annotation.get("anchor_key", ""))
+            if anchor is None:
+                continue
+            range_key = (
+                str(anchor.get("xml_anchor_type") or ""),
+                str(anchor.get("xml_anchor_id") or ""),
+                str(anchor.get("quoted_text") or "").strip(),
+            )
+            if range_key in seen_ranges:
+                continue
+            seen_ranges.add(range_key)
+            selected.append(annotation)
+        decision["selected_anchors"] = selected
+
+        context = " ".join(
+            [str(decision.get("merged_comment") or "")]
+            + [
+                " ".join(
+                    str(record.get(field) or "")
+                    for field in ("criterion", "check_point", "issue_comment")
+                )
+                for record in source_records
+            ]
+        )
+        if len(selected) >= 3 and any(term in context for term in _GLOBAL_STRUCTURE_TERMS):
+            decision["output_scope"] = "summary_only"
+            decision["selected_anchors"] = []
+            continue
+
+        if len(source_records) == 1 and decision.get("output_scope") in {"inline", "both"}:
+            fixed_text = _extract_fixed_instruction(source_records[0])
+            if fixed_text and selected:
+                decision["merged_comment"] = fixed_text
+                selected[0]["comment_text"] = fixed_text
+                decision["selected_anchors"] = selected[:1]
+
+    return normalized
+
+
+def _extract_fixed_instruction(record: dict[str, Any]) -> str | None:
+    source = " ".join(
+        str(record.get(field) or "")
+        for field in ("criterion", "check_point")
+    )
+    candidates = [
+        value.strip()
+        for value in _QUOTED_TEXT_PATTERN.findall(source)
+        if value.strip().startswith(("注意：", "补充"))
+    ]
+    return max(candidates, key=len) if candidates else None

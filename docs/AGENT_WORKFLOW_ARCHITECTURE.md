@@ -143,6 +143,8 @@ presentation_results + final_review -> generate_docx_report -> 批注版 DOCX
 
 `raw results` 继续写入审查日志，保留各 criterion 的原始输出；`presentation_results` 只包含最终允许写入原文的批注。`summary_only` 的完整 `merged_comment` 由程序确定性加入总览，避免模型在 200 字概述中遗漏；`discard` 只允许处理事实错误或完全未被标准触发的无效结果，不能因风险低而删除。该调整复用原有 Summarizer 调用，不增加 LLM 调用次数。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
 
+Finalizer 输出通过 schema 后还会执行确定性规范化：相同 `xml_anchor_type + xml_anchor_id + quoted_text` 只保留一次；三个以上锚点共同描述条款断号/标题顺序问题时强制改为 `summary_only`；单一审查问题包含“直接写明”的固定引号文字时，逐条批注只保留一个落点，并原样使用该固定文字。该步骤不调用模型。
+
 ## 架构边界
 
 - 简化工作流：无 web search、无制度 RAG，检索后端由 `retrieval.backend` 选择。

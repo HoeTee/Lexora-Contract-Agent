@@ -36,6 +36,8 @@ SubAgentOutput
 - `selected_anchors` 为每个保留锚点分别提供 `comment_text`，因此不同原文不会共用一段罗列其他位置问题的泛化批注。
 - 多个审查要点命中同一处相同问题时，一个 decision 可以合并多个 `source_issue_keys`；只有事实和原文都相同的批注才能合并。
 - `summary_only` / `both` 的完整 `merged_comment` 由程序派生到 `summary_issue_comments`，写入总览的“其他审查问题”，不依赖模型是否在 200 字概述中再次复述。
+- 写入前按 `xml_anchor_type + xml_anchor_id + quoted_text` 去重，同一 XML 范围即使由多个审查要点分别返回，也只生成一次批注。
+- 三个以上锚点共同描述条款断号或标题顺序问题时，确定性改为 `summary_only`；包含“直接写明”的单一固定提示语则原样复制标准引号文字，并只保留一个批注落点。
 - 该职责扩展复用原有 SummaryAgent 调用，不增加新的 LLM 调用。
 
 ## 审查文本如何生成

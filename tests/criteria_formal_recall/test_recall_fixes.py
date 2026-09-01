@@ -14,6 +14,7 @@ from agents.prompts.cn_prompts import load_prompts
 from agents.review_presentation import (
     add_summary_issue_comments,
     apply_issue_decisions,
+    normalize_issue_decisions,
     prompt_issue_records,
 )
 from agents.schemas import SubAgentOutput, SummaryOutput
@@ -381,6 +382,114 @@ class ReviewPresentationTests(unittest.TestCase):
         self.assertEqual(
             [anchor["comment_text"] for anchor in anchors],
             ["删除重复的“原因”。", "删除重复的“一致”。"],
+        )
+
+    def test_normalizer_deduplicates_same_xml_range_across_criteria(self) -> None:
+        final_review = {
+            "issue_decisions": [{
+                "source_issue_keys": ["C12::C12.1", "C15::C15.1"],
+                "output_scope": "inline",
+                "merged_comment": "删除重复的原因。",
+                "selected_anchors": [
+                    {
+                        "anchor_key": "C12::C12.1#anchor_1",
+                        "comment_text": "删除重复的原因。",
+                    },
+                    {
+                        "anchor_key": "C15::C15.1#anchor_1",
+                        "comment_text": "删除重复的原因。",
+                    },
+                ],
+            }],
+        }
+
+        normalized = normalize_issue_decisions(self.results, final_review)
+
+        self.assertEqual(len(normalized["issue_decisions"][0]["selected_anchors"]), 1)
+
+    def test_normalizer_routes_multi_anchor_numbering_issue_to_summary(self) -> None:
+        anchors = [
+            {
+                "xml_anchor_type": "paragraph",
+                "xml_anchor_id": f"path:body/p{index}",
+                "quoted_text": f"第{index}条",
+                "comment_text": "序号断号。",
+            }
+            for index in range(1, 4)
+        ]
+        results = [{
+            "criterion_id": "ORDER",
+            "criterion": "检查标题顺序是否杂乱",
+            "status": "issues_found",
+            "issues": [{
+                "issue_id": "ORDER.1",
+                "risk_level": "low",
+                "issue_comment": "条款序号存在多处断号。",
+                "anchors": anchors,
+                "reasoning": "多处断号",
+                "criterion": "检查标题顺序是否杂乱",
+                "check_point": "条款序号",
+            }],
+        }]
+        final_review = {
+            "issue_decisions": [{
+                "source_issue_keys": ["ORDER::ORDER.1"],
+                "output_scope": "inline",
+                "merged_comment": "条款序号存在多处断号。",
+                "selected_anchors": [
+                    {
+                        "anchor_key": f"ORDER::ORDER.1#anchor_{index}",
+                        "comment_text": "序号断号。",
+                    }
+                    for index in range(1, 4)
+                ],
+            }],
+        }
+
+        normalized = normalize_issue_decisions(results, final_review)
+        decision = normalized["issue_decisions"][0]
+
+        self.assertEqual(decision["output_scope"], "summary_only")
+        self.assertEqual(decision["selected_anchors"], [])
+
+    def test_normalizer_copies_fixed_instruction_without_wrapper(self) -> None:
+        results = [{
+            "criterion_id": "FIXED",
+            "criterion": "如果标题出现采购，就直接在合同首部写明“注意：完整固定文字”。",
+            "status": "issues_found",
+            "issues": [{
+                "issue_id": "FIXED.1",
+                "risk_level": "low",
+                "issue_comment": "缺少提示语。",
+                "anchors": [{
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p1",
+                    "quoted_text": "采购合同",
+                    "comment_text": "建议补充提示语。",
+                }],
+                "reasoning": "标准触发",
+                "criterion": "如果标题出现采购，就直接在合同首部写明“注意：完整固定文字”。",
+                "check_point": "直接写明固定文字",
+            }],
+        }]
+        final_review = {
+            "issue_decisions": [{
+                "source_issue_keys": ["FIXED::FIXED.1"],
+                "output_scope": "inline",
+                "merged_comment": "请补充指定提示语。",
+                "selected_anchors": [{
+                    "anchor_key": "FIXED::FIXED.1#anchor_1",
+                    "comment_text": "请补充指定提示语。",
+                }],
+            }],
+        }
+
+        decision = normalize_issue_decisions(results, final_review)["issue_decisions"][0]
+
+        self.assertEqual(decision["merged_comment"], "注意：完整固定文字")
+        self.assertEqual(
+            decision["selected_anchors"][0]["comment_text"],
+            "注意：完整固定文字",
         )
 
 
