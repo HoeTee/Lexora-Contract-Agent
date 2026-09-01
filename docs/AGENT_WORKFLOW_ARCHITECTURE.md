@@ -94,8 +94,8 @@ class SummaryOutput:
 - `asyncio.gather` 负责并发调度：多条 criterion 可以同时进入等待队列，并在外部模型调用、检索或反思等待期间交错推进。
 - `asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)` 负责并发限制：同一时间最多允许指定数量的 criterion 进入 `execute_single_criterion()`；其余 coroutine 会等待 semaphore 释放。
 - 因此，当前并发边界是“多条 criterion / 多个 SubAgent 审查任务并发”，不是单个 SubAgent 内部把同一条标准拆成多个并发步骤。
-- 单条 criterion 抛 `ModelCallError` 会直接上抛，导致整次审查失败。
-- 其他异常会被降级为该条 `status=ERROR`（记录 `error_message`），不影响其它 criterion。
+- 单条 criterion 最多执行 `workflow.criterion_retry_max_attempts` 次；重试耗尽后的 `ModelCallError` 会导致整次审查失败。
+- 其他异常在重试耗尽后降级为该条 `status=ERROR`（记录 `error_message`），不影响其它 criterion。
 
 简化结构如下：
 
@@ -123,18 +123,52 @@ results = await asyncio.gather(
 
 ```text
 审查标准 DOCX -> ingest -> 审查标准 markdown -> Planner -> criteria_list
-合同 DOCX     -> DOCX XML anchor nodes -> LlamaIndex 临时索引
+合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引
 每条 criterion: 检索 context -> SubAgent(可调用白名单工具) -> (Reflector 反思循环) -> 单条结果
 所有单条结果 -> results -> Summarizer -> summary_sections
 results + summary_sections -> generate_docx_report -> 批注版 DOCX
 ```
 
-其中 `results` 决定逐条问题批注，`summary_sections` 决定文档开头总览批注。LlamaIndex DOCX anchor 检索链路见 `DOCX_XML_ANCHOR_INDEXING.md`，批注写入与 `quoted_text` 定位细节见 `DOCX_ANNOTATION_DESIGN.md`。
+其中 `results` 决定逐条问题批注，`summary_sections` 决定文档开头总览批注。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
 
 ## 架构边界
 
-- 简化工作流：无 web search、无制度 RAG，检索模式固定为 LlamaIndex。
-- 审查只基于合同文本与检索片段；依赖外部数据或法律知识库的检查点处理方式见 `REVIEW_BOUNDARIES.md`。
+- 简化工作流：无 web search、无制度 RAG，检索后端由 `retrieval.backend` 选择。
+- 审查只基于合同文本和检索片段。完全依赖工商、涉诉、知识产权、法人授权或现行法律知识库的检查点必须返回 `not_applicable`，不能编造外部事实；合同文本本身足以判断的部分仍应审查。
+- 正文与附件分别审查；只有审查标准明确要求时才扩展正文与附件内容一致性检查。
+
+## API 队列与进程边界
+
+当 `queue.enabled=true` 时，普通 `/api` 任务由 API 写入 `task.json` 后，通过 `task_queue.review_queue` 投递到 Redis；Celery worker 执行 `review.run_job`。Broker 只保存 `client_dir + task_id` 调度消息，不保存合同、审查结果或恢复状态。
+
+```text
+API process -> Redis broker -> Celery worker -> workflow.run()
+```
+
+API 进程负责提交、状态和结果响应，worker 负责 workflow、MCP、模型调用和 DOCX 生成。Web 任务目前仍在 Web 应用进程内执行，不经过 Celery。
+
+整份合同并发由 worker 数量和 Celery `--concurrency` 控制；单份合同内 criterion 并发由 `workflow.max_orchestrator_concurrency` 控制。这两个限制不是同一层。
+
+## Criterion 恢复状态
+
+API 任务通过 `endpoints/review/review_state.py` 在任务目录保存可重放状态：
+
+```text
+state/
+  plan.json
+  criteria/
+    <criterion_id>.input.json
+    <criterion_id>.output.json
+    <criterion_id>.error.json
+```
+
+成功的 criterion 输出可以在同一任务重跑时复用；失败 criterion 按 `workflow.criterion_retry_max_attempts` 重新执行。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败。
+
+## 全局模型并发
+
+`model_semaphore.llm`、`embedding`、`reranker` 使用 Redis 租约控制跨进程、跨容器的模型 HTTP 请求总并发。它不会替代 Celery 合同并发或 workflow criterion 并发。
+
+每类配置包含 `enabled`、`max_concurrent_requests`、`redis_url`、`key`、`wait_timeout_seconds`、`lease_seconds` 和 `poll_interval_seconds`。实际读取与租约实现位于 `config.py` 和 `endpoints/runtime/llm_semaphore.py`。
 
 ## SubAgent 工具白名单
 

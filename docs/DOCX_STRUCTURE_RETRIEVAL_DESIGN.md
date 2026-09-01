@@ -835,6 +835,27 @@ score 必须在 0 到 1 之间；
 
 向量召回和 rerank 都只用于找到已有 `node_id`。最终仍然回到 DocumentIndex 展开原文，再进行审查。
 
+### LlamaIndex reranker provider 配置
+
+以下配置只用于 LlamaIndex 后端的独立 HTTP reranker；docxindex 的候选重排复用其结构化 LLM client。`rerank.provider_model_names` 是模型名到请求体格式的唯一映射来源，模型名不能同时属于多个 provider：
+
+```yaml
+rerank:
+  base_url: "<完整请求 URL>"
+  name: "qwen3-rerank"
+  instruct: "<可选指令>"
+  provider_model_names:
+    higress_qwen: ["Qwen3-Reranker-8B"]
+    bge: ["bge-reranker-v2-m3"]
+    dashscope_qwen: ["qwen3-rerank", "gte-rerank-v2"]
+```
+
+- `higress_qwen`：发送 `model/query/documents/top_n` 和可选 `instruct`。
+- `bge`：发送 `query/documents/top_n`，不发送 `model`、`instruct`。
+- `dashscope_qwen`：使用 DashScope `input`、`parameters` 结构。
+
+provider 推断与校验在 `config.py`，请求体和响应解析在 `tools/retrieval/llamaindex/qwen_reranker.py`。HTTP 408、409、429、5xx 和网络错误按 workflow 模型重试配置处理；HTTP 400 不重试。
+
 ## 17. 批注定位链路
 
 审查结果必须能回到 DOCX XML。
@@ -871,28 +892,3 @@ SubAgent 输出 issue 时至少包含：
   "char_end": 48
 }
 ```
-
-## 18. 实施顺序
-
-建议按以下顺序实施：
-
-```text
-1. DOCX body child anchor 提取：p/tbl 顺序和文本。
-2. DocumentIndex 落盘结构。
-3. 顶层区域识别：frontmatter/body/tail/attachments。
-4. 正文 Level1/Level2/Level3 标题识别。
-5. 附件 section 识别。
-6. 附件内部 node 识别。
-7. node token 统计与 ChunkNode 切分。
-8. summary tree 生成。
-9. 结构树加载接口。
-10. 关键词规则审查：4、5、8、9、16。
-11. 标题规则审查：2。
-12. 标题顺序规则检查。
-13. 全文遍历审查：12、15。
-14. 普通 LLM 审查的累加加载。
-15. 向量补召回。
-16. 批注定位链路对接。
-```
-
-优先稳定结构树和 anchor，再接入向量补召回。否则即使召回命中，也无法可靠展开原文和写回批注。

@@ -14,43 +14,7 @@ Authorization: <api_key>
 
 服务端接受原始 key 或 `Bearer <api_key>`。平台负责该 key 的鉴权；本服务只用其 SHA-256 指纹查找本地客户映射。
 
-管理员在本地登记平台 key 映射。`profiles/api_clients.json` 只保存 key 的 SHA-256 指纹，不保存明文 key。
-
-以下命令用于拥有源码的本地开发机，应在项目根目录执行。受保护 Docker 镜像没有明文脚本，应进入挂载了相同 `profiles/`、`data/` 的服务容器后，使用 `/app/host -m scripts.manage_api_clients` 执行；完整说明见 `docs/MANAGEMENT_CLI.md`。
-
-| 命令 | 输入 | 输出或作用 |
-| --- | --- | --- |
-| `register` | `--client-id`、`--api-key` | 注册一个客户映射。重复的 `client_id` 或 `api_key` 会报错。 |
-| `list` | 无 | 列出全部已注册客户。 |
-| `check` | `--client-id` | 显示一个客户的注册状态和任务数量。 |
-| `list --client-id` | `--client-id` | 以块状格式显示该客户的全部任务。 |
-| `list --client-id --compact` | `--client-id` | 以紧凑单行格式显示该客户的全部任务。 |
-| `reset-api-key` | `--client-id`、`--api-key` | 替换客户的平台 key 映射。新 key 不能属于其他客户。 |
-| `disable` | `--client-id` | 禁用该客户的 `/api` 调用权限。 |
-| `enable` | `--client-id` | 恢复该客户的 `/api` 调用权限。 |
-| `delete` | `--client-id` | 仅移除鉴权映射，已有任务数据会保留。 |
-
-```powershell
-python scripts/manage_api_clients.py register --client-id "client_a" --api-key "platform-key-for-client-a"
-python scripts/manage_api_clients.py list
-python scripts/manage_api_clients.py check --client-id "client_a"
-python scripts/manage_api_clients.py list --client-id "client_a"
-python scripts/manage_api_clients.py list --client-id "client_a" --compact
-python scripts/manage_api_clients.py reset-api-key --client-id "client_a" --api-key "new-platform-key"
-python scripts/manage_api_clients.py disable --client-id "client_a"
-python scripts/manage_api_clients.py enable --client-id "client_a"
-python scripts/manage_api_clients.py delete --client-id "client_a"
-```
-
-受保护容器示例：
-
-```bash
-docker exec -it lexora bash
-/app/host -m scripts.manage_api_clients list
-/app/host -m scripts.manage_api_clients check --client-id "client_a"
-```
-
-旧记录若只包含 `secret_hash` 或 `secret_fingerprint`，不能用于平台 key 映射。请对该 `client_id` 执行一次 `reset-api-key --api-key "<platform_api_key>"`，脚本会移除旧字段并写入 `api_key_fingerprint`。
+管理员通过 `scripts/manage_api_clients.py` 登记平台 key 映射；`profiles/api_clients.json` 只保存 SHA-256 指纹，不保存明文 key。CLI 参数以 `python scripts/manage_api_clients.py --help` 为准；受保护容器中的启动方式见 `DEPLOYMENT.md`。
 
 ## 2. 异步调用流程
 
@@ -67,7 +31,7 @@ POST /api/review/jobs/result
 
 当 `queue.enabled=true` 时，提交接口只创建任务并投递到队列，审查 workflow 由独立 Celery worker 进程执行。状态查询仍然只读取 `task.json`，外部 API 路径、鉴权方式和请求体不变。这个设计的关键是进程隔离：`/status` 所在的 API 进程不再直接承载 workflow、MCP、LLM 调用和 DOCX 生成。
 
-Celery task、Redis broker 和 worker 进程的区别见 `docs/QUEUE_WORKER.md`。
+Celery task、Redis broker 和 worker 的部署边界见 `DEPLOYMENT.md`，workflow 内部并发与恢复边界见 `AGENT_WORKFLOW_ARCHITECTURE.md`。
 
 `GET /api/review/jobs/{task_id}` 和 `POST /api/review/jobs/{task_id}/result` 保留为兼容接口。`POST /api/review/jobs/{task_id}/cancel` 仍使用 path 中的 `task_id`，只能取消 `pending` 或 `queued` 任务。`running` 表示任务已经进入 `workflow.run()`，该 API 不支持中止。
 
@@ -399,8 +363,8 @@ api:
   keep_output: true
   result_output_default: "file"
   result_upload_enabled: false
-  result_upload_domain: "http://64.202.33.42:30843"
-  result_upload_path: "/openapi/agentar/v1/attachment/batchUploadAttachmentFile.json"
+  result_upload_domain: "https://upload.example.com"
+  result_upload_path: "/api/files"
   result_upload_authorization: ""
   result_upload_timeout_seconds: 60
 ```
@@ -408,7 +372,7 @@ api:
 上传请求等价于：
 
 ```bash
-curl -X POST "http://64.202.33.42:30843/openapi/agentar/v1/attachment/batchUploadAttachmentFile.json" \
+curl -X POST "https://upload.example.com/api/files" \
   -H "Authorization: <result_upload_authorization>" \
   -F "files=@/path/to/【已AI审查】contract.docx;type=application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 ```

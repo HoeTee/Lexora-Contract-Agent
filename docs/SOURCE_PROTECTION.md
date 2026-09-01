@@ -130,7 +130,7 @@ Celery worker容器：
 /app/host -m scripts.manage_users ...
 ```
 
-三个管理脚本由 `protect/modules.txt` 选中并加密进 `code.bin`。最终镜像不存在 `/app/scripts/*.py`，所以不能使用 `python scripts/manage_*.py`；本地源码环境仍使用原有 Python 命令。完整用法见 `docs/MANAGEMENT_CLI.md`。
+三个管理脚本由 `protect/modules.txt` 选中并加密进 `code.bin`。最终镜像不存在 `/app/scripts/*.py`，所以不能使用 `python scripts/manage_*.py`；本地源码环境仍使用原有 Python 命令。容器运行方式见 `DEPLOYMENT.md`，具体参数由各模块 `--help` 提供。
 
 解密不会生成磁盘 `.pyc`，但解密后的 ZIP 字节会在 Python importer 的内存对象中存在，直到进程退出。
 

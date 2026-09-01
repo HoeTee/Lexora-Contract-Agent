@@ -9,25 +9,7 @@
 
 ## 构建生产镜像
 
-正式构建是三阶段流程：
-
-1. `protect-builder`（`python:3.12-slim`）：编译项目字节码并生成 AES-256-GCM 密文 `code.bin`，同时编译未加壳 `libloader.so` 和明文小型 host。
-2. `vmp-pack`（`ubuntu:24.04`）：使用 glibc 2.39 运行 `vmprotect_con`，把 `libloader.so` 中标记的密钥重建和 AES 解密函数虚拟化为 `libloader.vmp.so`。
-3. `runtime`（`python:3.12-slim`）：只复制 `host + libloader.vmp.so + code.bin`，不复制未加壳 loader、VMP 工具、构建密钥或项目源码。
-
-VMP 工具目录由构建机提供，不提交到 Git。目录至少包含：
-
-```text
-<vmp-tools>/
-  vmprotect_con
-  libVMProtectSDK64.so
-  libjitterentropy.so.3
-  VMProtectLicense.ini
-  sdk/
-    VMProtectSDK.h
-```
-
-在项目根目录执行：
+构建机需要 Docker/BuildKit 和项目目录之外的 VMP console/SDK 工具目录。在项目根目录执行：
 
 ```powershell
 .\protect\build.ps1 `
@@ -35,55 +17,21 @@ VMP 工具目录由构建机提供，不提交到 Git。目录至少包含：
   -VmpToolsDir C:\secure\vmp-tools
 ```
 
-也可以通过环境变量提供工具目录：
-
-```powershell
-$env:VMP_TOOLS_DIR = "C:\secure\vmp-tools"
-.\protect\build.ps1 -Tag southernbanker/lexora:latest
-```
-
-脚本默认生成一次性32字节 AES 密钥，通过 BuildKit secret `source_key` 传入 `protect-builder`，完成后删除临时密钥。如需可重现构建，可以显式提供项目目录之外的原始32字节密钥：
-
-```powershell
-.\protect\build.ps1 `
-  -Tag southernbanker/lexora:latest `
-  -VmpToolsDir C:\secure\vmp-tools `
-  -KeyFile C:\secure\lexora-aes.key
-```
-
-`vmprotect_con` 需要 glibc 2.38或更高版本，不能在 `python:3.12-slim` 的 Debian bookworm 层直接运行。正式 Dockerfile 因此固定使用 `ubuntu:24.04` 执行加壳；运行阶段仍使用 `python:3.12-slim`。
+脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。三阶段构建、工具文件要求和密钥边界见 `SOURCE_PROTECTION.md`。
 
 ## 构建后验证
 
-Dockerfile 会检查加壳日志中同时出现 `lexora_key_reconstruct`、`lexora_aes_decrypt` 和 `Compilation completed`；任何一项缺失都会中止构建。
-
-继续检查最终镜像：
+构建完成后做最小运行产物检查：
 
 ```powershell
 $image = "southernbanker/lexora:latest"
 
 docker run --rm --entrypoint sh $image -c "test -x /app/host && test -s /app/libloader.vmp.so && test -s /app/code.bin"
-docker run --rm --entrypoint sh $image -c "test ! -e /app/loader && test ! -e /app/libloader.so && test ! -e /app/libVMProtectSDK64.so && test ! -e /app/vmprotect_con"
 docker run --rm --entrypoint find $image /app -type f -name "*.py"
 docker run --rm --entrypoint find $image /app -type f -name "*.pyc"
-docker run --rm --entrypoint sh $image -c "od -An -tx1 -N8 /app/code.bin"
-
-foreach ($term in @("reconstruct_key", "aes_decrypt", "LEXORA1", "zipfile")) {
-  docker run --rm --entrypoint grep $image -a -q $term /app/libloader.vmp.so
-  if ($LASTEXITCODE -eq 0) { throw "Sensitive string remains in packed library: $term" }
-}
-
-$dependencies = docker run --rm --entrypoint ldd $image /app/libloader.vmp.so
-if ($dependencies -match "VMProtectSDK") { throw "Packed library still depends on VMProtect SDK." }
 ```
 
-预期结果：
-
-- `/app/host`、`/app/libloader.vmp.so`、`/app/code.bin` 存在。
-- `/app/loader`、未加壳 `libloader.so`、VMP SDK和console不存在。
-- 两条 `find` 命令无输出，即 `/app` 下不存在项目 `.py` 或明文 `.pyc`；第三方依赖位于 `/usr/local/lib/python3.12/site-packages/`，仍可包含依赖自身的公开源码。
-- `code.bin` 前8字节为 `4c 45 58 4f 52 41 31 00`（`LEXORA1\0`）。
-- 加壳 `.so` 中无法直接检索到密钥重建、AES解密或 importer 的关键明文字符串。
+第一条命令必须成功，两条 `find` 命令必须无输出。完整静态证据检查见 `SOURCE_PROTECTION.md`。
 
 ## 启动服务
 
@@ -121,7 +69,13 @@ docker exec -it lexora bash
 /app/host -m scripts.manage_users list --tenant-id tenant_a
 ```
 
-输入来自命令行参数；身份配置写入 `/app/profiles`，任务目录读取或初始化于 `/app/data`；运行中的 API 和 worker 通过相同宿主机挂载读取结果。完整子命令、删除边界和本地开发命令见 `docs/MANAGEMENT_CLI.md`。
+输入来自命令行参数；身份配置写入 `/app/profiles`，任务目录读取或初始化于 `/app/data`；运行中的 API 和 worker 通过相同宿主机挂载读取结果。完整参数直接查看模块帮助：
+
+```bash
+/app/host -m scripts.manage_api_clients --help
+/app/host -m scripts.manage_tenants --help
+/app/host -m scripts.manage_users --help
+```
 
 ## 服务器上必须准备的文件和目录
 
@@ -197,7 +151,7 @@ queue:
   broker_url: "redis://redis:6379/0"
 ```
 
-Celery task、broker 和 worker 的详细边界见 `docs/QUEUE_WORKER.md`。
+Celery task、broker、worker 与 workflow 内部并发的边界见 `AGENT_WORKFLOW_ARCHITECTURE.md`。
 
 ## 安全和授权边界
 

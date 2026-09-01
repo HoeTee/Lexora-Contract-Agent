@@ -51,7 +51,7 @@ curl -v -L -o /tmp/test.docx '完整URL'
 重点看输出中的实际连接 IP：
 
 ```text
-Trying 64.202.33.42:80...
+Trying <宿主机成功解析的IP>:443...
 ```
 
 这个 IP 是宿主机成功下载时的入口。后续要确认容器是否也解析到同一个入口。
@@ -127,13 +127,13 @@ docker exec -it <container> python -c 'import httpx; u="完整URL"; r=httpx.get(
 
 ## 修复容器 DNS/hosts
 
-如果宿主机成功下载时连接的是某个固定 IP，而容器解析到其他 IP，可以在 `docker-compose.yml` 中使用 `extra_hosts`：
+如果宿主机成功下载时连接的是某个固定 IP，而容器解析到其他 IP，可以在 `docker-compose.yaml` 中使用 `extra_hosts`：
 
 ```yaml
 services:
   lexora:
     extra_hosts:
-      - "agentar.agentx.qa.zrubft.com:64.202.33.42"
+      - "service.example.internal:<目标IP>"
 ```
 
 然后重建容器：
@@ -146,7 +146,7 @@ docker compose up -d
 重建后验证：
 
 ```bash
-docker exec -it <container> python -c 'import socket; print({x[4][0] for x in socket.getaddrinfo("agentar.agentx.qa.zrubft.com",80)})'
+docker exec -it <container> python -c 'import socket; print({x[4][0] for x in socket.getaddrinfo("service.example.internal",443)})'
 ```
 
 必须只输出目标 IP。
@@ -156,7 +156,7 @@ docker exec -it <container> python -c 'import socket; print({x[4][0] for x in so
 `extra_hosts` 会在容器启动时向容器 `/etc/hosts` 注入记录，效果类似：
 
 ```text
-64.202.33.42 agentar.agentx.qa.zrubft.com
+<目标IP> service.example.internal
 ```
 
 它用于让容器把指定域名解析到指定 IP。它是短期稳定修复，适合内网 DNS 暂时不可用或域名解析入口不一致的场景。
@@ -176,7 +176,7 @@ services:
   lexora:
     extra_hosts:
       - ""
-      - "agentar.agentx.qa.zrubft.com:"
+      - "service.example.internal:"
 ```
 
 这类占位值可能导致 Compose 解析失败，或向容器 `/etc/hosts` 写入异常记录。
@@ -223,35 +223,3 @@ echo 'IP domain' >> /etc/hosts
 ```
 
 重复记录会导致解析结果混乱，容器可能仍然解析到错误入口。
-
-## 本次问题模板
-
-现象：
-
-```text
-宿主机 curl 成功：Trying 64.202.33.42:80
-容器曾解析到：64.202.33.30
-容器 httpx 请求：nginx 404
-强制使用 64.202.33.42 并保留 Host：200
-```
-
-结论：
-
-```text
-URL 本身没有错。
-错误原因是容器 DNS/hosts 解析到了错误入口。
-```
-
-修复：
-
-```yaml
-extra_hosts:
-  - "agentar.agentx.qa.zrubft.com:64.202.33.42"
-```
-
-边界：
-
-```text
-这是容器网络配置问题，不是 /api/review/jobs 下载代码问题。
-如果未来内网 DNS 可用，应优先改为配置容器 DNS，而不是长期固定 IP。
-```
