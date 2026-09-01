@@ -1,19 +1,30 @@
-"""Prepare stable issue keys and apply the final DOCX presentation decisions."""
+"""Prepare deterministic inline annotations and summary-only review issues."""
 
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 import re
 from typing import Any
 
 
-_RISK_ORDER = {"low": 1, "medium": 2, "high": 3}
-_QUOTED_TEXT_PATTERN = re.compile(r"“([^”]+)”")
-_GLOBAL_STRUCTURE_TERMS = ("条款序号", "标题顺序", "断号", "序号杂乱")
+_GLOBAL_STRUCTURE_TERMS = ("条款序号", "标题顺序", "断号", "序号杂乱", "序号不连续")
+_DURATION_SUMMARY_TERMS = ("合同履行期限", "起止日期不明确", "补充合同履行期限")
+_QUOTED_TEXT_PATTERN = re.compile(r"[“\"]([^”\"]+)[”\"]")
+_REPLACEMENT_PATTERN = re.compile(r"(?:修改|改)为[：:]?[“\"]?([^”\"。；]+)")
+
+
+@dataclass(frozen=True)
+class ReviewPresentation:
+    """Inputs for the DOCX writer and the summary-only LLM call."""
+
+    inline_results: list[dict]
+    summarizer_results: list[dict]
+    summary_issue_comments: list[str]
 
 
 def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
-    """Flatten raw results into stable issue and anchor records for the finalizer."""
+    """Flatten raw results into stable issue and anchor records."""
     records: list[dict[str, Any]] = []
     used_issue_keys: set[str] = set()
     for result_index, result in enumerate(results):
@@ -28,18 +39,16 @@ def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
                 suffix += 1
             used_issue_keys.add(issue_key)
 
-            anchors = []
-            for anchor_index, anchor in enumerate(issue.get("anchors") or []):
-                anchors.append(
-                    {
-                        "anchor_key": f"{issue_key}#anchor_{anchor_index + 1}",
-                        "xml_anchor_type": anchor.get("xml_anchor_type", ""),
-                        "xml_anchor_id": anchor.get("xml_anchor_id", ""),
-                        "quoted_text": anchor.get("quoted_text", ""),
-                        "comment_text": anchor.get("comment_text", ""),
-                    }
-                )
-
+            anchors = [
+                {
+                    "anchor_key": f"{issue_key}#anchor_{anchor_index + 1}",
+                    "xml_anchor_type": anchor.get("xml_anchor_type", ""),
+                    "xml_anchor_id": anchor.get("xml_anchor_id", ""),
+                    "quoted_text": anchor.get("quoted_text", ""),
+                    "comment_text": anchor.get("comment_text", ""),
+                }
+                for anchor_index, anchor in enumerate(issue.get("anchors") or [])
+            ]
             records.append(
                 {
                     "issue_key": issue_key,
@@ -60,180 +69,199 @@ def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
 
 
 def prompt_issue_records(results: list[dict]) -> list[dict[str, Any]]:
-    """Return the LLM-safe view of raw issue records."""
-    records = collect_issue_records(results)
+    """Return the complete LLM-safe issue view; retained for trace compatibility."""
     return [
         {key: value for key, value in record.items() if not key.startswith("_")}
-        for record in records
+        for record in collect_issue_records(results)
     ]
 
 
-def apply_issue_decisions(results: list[dict], final_review: dict) -> list[dict]:
-    """Materialize validated finalizer decisions into report-writer input.
+def prompt_summary_records(results: list[dict]) -> list[dict[str, Any]]:
+    """Return only the fields needed to write an overall review summary."""
+    return [
+        {
+            "section": record["section"],
+            "criterion_id": record["criterion_id"],
+            "risk_level": record["risk_level"],
+            "issue_comment": record["issue_comment"],
+            "check_point": record["check_point"],
+        }
+        for record in collect_issue_records(results)
+    ]
 
-    Unknown or omitted issue keys fall back to their original inline result so an
-    imperfect finalizer response cannot silently reduce review recall.
+
+def build_review_presentation(results: list[dict]) -> ReviewPresentation:
+    """Route every raw issue to one canonical inline annotation or the summary.
+
+    Input: reviewer result dictionaries containing issues and XML anchors.
+    Output: canonical inline writer input, complete summarizer input, and
+    deterministic summary-only comments. No issue may be silently discarded.
     """
     records = collect_issue_records(results)
-    record_by_key = {record["issue_key"]: record for record in records}
-    anchor_by_key = {
-        anchor["anchor_key"]: (record, original_anchor)
-        for record in records
-        for anchor, original_anchor in zip(
-            record["anchors"],
-            record["_issue"].get("anchors") or [],
-            strict=True,
-        )
-    }
-    consumed: set[str] = set()
-    rendered: list[dict] = []
-
-    for decision_index, decision in enumerate(final_review.get("issue_decisions") or []):
-        source_keys = [
-            key for key in decision.get("source_issue_keys") or []
-            if key in record_by_key and key not in consumed
-        ]
-        if not source_keys:
-            continue
-        source_records = [record_by_key[key] for key in source_keys]
-        source_key_set = set(source_keys)
-        selected_anchors = []
-        for annotation in decision.get("selected_anchors") or []:
-            anchor_key = annotation.get("anchor_key", "")
-            mapped = anchor_by_key.get(anchor_key)
-            if mapped is None or mapped[0]["issue_key"] not in source_key_set:
-                continue
-            anchor = deepcopy(mapped[1])
-            anchor["comment_text"] = annotation.get("comment_text", "")
-            selected_anchors.append(anchor)
-
-        scope = decision.get("output_scope")
-        if scope in {"inline", "both"} and not selected_anchors:
-            continue
-
-        consumed.update(source_keys)
-        if scope in {"summary_only", "discard"}:
-            continue
-
-        primary = source_records[0]
-        risk_level = max(
-            (record.get("risk_level", "low") for record in source_records),
-            key=lambda value: _RISK_ORDER.get(value, 0),
-        )
-        rendered.append(
-            {
-                "section": primary.get("section", ""),
-                "criterion_id": "+".join(record["criterion_id"] for record in source_records),
-                "criterion": "\n".join(
-                    dict.fromkeys(str(record.get("criterion") or "") for record in source_records)
-                ),
-                "status": "issues_found",
-                "issues": [
-                    {
-                        "issue_id": f"final.{decision_index + 1}",
-                        "risk_level": risk_level,
-                        "issue_comment": decision.get("merged_comment", ""),
-                        "anchors": selected_anchors,
-                        "reasoning": "Finalized from: " + ", ".join(source_keys),
-                        "criterion": primary.get("criterion", ""),
-                        "check_point": primary.get("check_point", ""),
-                    }
-                ],
-            }
-        )
+    inline_results: list[dict] = []
+    summary_results: list[dict] = []
+    summary_issue_comments: list[str] = []
+    represented: set[str] = set()
+    annotations: dict[tuple[str, str, str, str], dict] = {}
 
     for record in records:
-        if record["issue_key"] in consumed:
+        issue_key = record["issue_key"]
+        if _is_summary_only(record):
+            comment = str(record.get("issue_comment") or record.get("check_point") or "").strip()
+            summary_results.append(_materialize_result(record, [], comment))
+            if comment and comment not in summary_issue_comments:
+                summary_issue_comments.append(comment)
+            represented.add(issue_key)
             continue
-        fallback_result = deepcopy(record["_result"])
-        fallback_result["issues"] = [deepcopy(record["_issue"])]
-        rendered.append(fallback_result)
-    return rendered
 
+        fixed_instruction = _extract_fixed_instruction(record)
+        selected_anchors = []
+        duplicate_issues: list[dict] = []
+        source_anchors = [
+            anchor
+            for anchor in record["_issue"].get("anchors") or []
+            if _valid_anchor(anchor)
+        ]
+        if fixed_instruction:
+            source_anchors = source_anchors[:1]
+        for source_anchor in source_anchors:
+            anchor = deepcopy(source_anchor)
+            comment = fixed_instruction or str(anchor.get("comment_text") or record["issue_comment"]).strip()
+            anchor["comment_text"] = comment
+            annotation_key = _annotation_key(anchor, comment)
+            duplicate_issue = _find_duplicate_annotation(annotations, annotation_key)
+            if duplicate_issue is not None:
+                duplicate_issues.append(duplicate_issue)
+                continue
+            selected_anchors.append(anchor)
 
-def add_summary_issue_comments(final_review: dict) -> dict:
-    """Derive complete summary-only text so the renderer cannot omit routed issues."""
-    enriched = deepcopy(final_review)
-    enriched["summary_issue_comments"] = [
-        decision.get("merged_comment", "").strip()
-        for decision in final_review.get("issue_decisions") or []
-        if decision.get("output_scope") in {"summary_only", "both"}
-        and decision.get("merged_comment", "").strip()
-    ]
-    return enriched
+        if not selected_anchors:
+            if duplicate_issues:
+                for duplicate_issue in duplicate_issues:
+                    source_keys = duplicate_issue.setdefault("source_issue_keys", [])
+                    if issue_key not in source_keys:
+                        source_keys.append(issue_key)
+                represented.add(issue_key)
+            else:
+                comment = str(record.get("issue_comment") or record.get("check_point") or "").strip()
+                summary_results.append(_materialize_result(record, [], comment))
+                if comment and comment not in summary_issue_comments:
+                    summary_issue_comments.append(comment)
+                represented.add(issue_key)
+            continue
 
-
-def normalize_issue_decisions(results: list[dict], final_review: dict) -> dict:
-    """Apply deterministic presentation invariants after the LLM finalizer."""
-    normalized = deepcopy(final_review)
-    records = collect_issue_records(results)
-    record_by_key = {record["issue_key"]: record for record in records}
-    anchor_by_key = {
-        anchor["anchor_key"]: original_anchor
-        for record in records
-        for anchor, original_anchor in zip(
-            record["anchors"],
-            record["_issue"].get("anchors") or [],
-            strict=True,
+        rendered = _materialize_result(
+            record,
+            selected_anchors,
+            fixed_instruction or str(record["issue_comment"]).strip(),
         )
+        inline_results.append(rendered)
+        rendered_issue = rendered["issues"][0]
+        for anchor in selected_anchors:
+            annotations[_annotation_key(anchor, anchor["comment_text"])] = rendered_issue
+        represented.add(issue_key)
+
+    expected = {record["issue_key"] for record in records}
+    if represented != expected:
+        missing = sorted(expected - represented)
+        raise ValueError(f"Review presentation omitted source issues: {missing}")
+
+    return ReviewPresentation(
+        inline_results=inline_results,
+        summarizer_results=deepcopy(inline_results) + deepcopy(summary_results),
+        summary_issue_comments=summary_issue_comments,
+    )
+
+
+def _materialize_result(record: dict[str, Any], anchors: list[dict], comment: str) -> dict:
+    return {
+        "section": record["section"],
+        "criterion_id": record["criterion_id"],
+        "criterion": record["criterion"],
+        "status": "issues_found",
+        "issues": [
+            {
+                "issue_id": record["issue_id"],
+                "risk_level": record["risk_level"],
+                "issue_comment": comment,
+                "anchors": anchors,
+                "reasoning": record["reasoning"],
+                "criterion": record["criterion"],
+                "check_point": record["check_point"],
+                "source_issue_keys": [record["issue_key"]],
+            }
+        ],
     }
 
-    for decision in normalized.get("issue_decisions") or []:
-        source_records = [
-            record_by_key[key]
-            for key in decision.get("source_issue_keys") or []
-            if key in record_by_key
-        ]
-        selected = []
-        seen_ranges: set[tuple[str, str, str]] = set()
-        for annotation in decision.get("selected_anchors") or []:
-            anchor = anchor_by_key.get(annotation.get("anchor_key", ""))
-            if anchor is None:
-                continue
-            range_key = (
-                str(anchor.get("xml_anchor_type") or ""),
-                str(anchor.get("xml_anchor_id") or ""),
-                str(anchor.get("quoted_text") or "").strip(),
-            )
-            if range_key in seen_ranges:
-                continue
-            seen_ranges.add(range_key)
-            selected.append(annotation)
-        decision["selected_anchors"] = selected
 
-        context = " ".join(
-            [str(decision.get("merged_comment") or "")]
-            + [
-                " ".join(
-                    str(record.get(field) or "")
-                    for field in ("criterion", "check_point", "issue_comment")
-                )
-                for record in source_records
-            ]
-        )
-        if len(selected) >= 3 and any(term in context for term in _GLOBAL_STRUCTURE_TERMS):
-            decision["output_scope"] = "summary_only"
-            decision["selected_anchors"] = []
-            continue
-
-        if len(source_records) == 1 and decision.get("output_scope") in {"inline", "both"}:
-            fixed_text = _extract_fixed_instruction(source_records[0])
-            if fixed_text and selected:
-                decision["merged_comment"] = fixed_text
-                selected[0]["comment_text"] = fixed_text
-                decision["selected_anchors"] = selected[:1]
-
-    return normalized
+def _is_summary_only(record: dict[str, Any]) -> bool:
+    anchors = record.get("anchors") or []
+    if not anchors:
+        return True
+    context = " ".join(
+        str(record.get(field) or "")
+        for field in ("criterion", "check_point", "issue_comment")
+    )
+    if any(term in context for term in _DURATION_SUMMARY_TERMS):
+        return True
+    return len(anchors) >= 3 and any(term in context for term in _GLOBAL_STRUCTURE_TERMS)
 
 
 def _extract_fixed_instruction(record: dict[str, Any]) -> str | None:
-    source = " ".join(
-        str(record.get(field) or "")
-        for field in ("criterion", "check_point")
-    )
+    """Extract prescribed wording only from the current check point."""
+    source = str(record.get("check_point") or "")
     candidates = [
         value.strip()
         for value in _QUOTED_TEXT_PATTERN.findall(source)
         if value.strip().startswith(("注意：", "补充"))
     ]
     return max(candidates, key=len) if candidates else None
+
+
+def _valid_anchor(anchor: dict) -> bool:
+    return bool(
+        str(anchor.get("xml_anchor_type") or "").strip()
+        and str(anchor.get("xml_anchor_id") or "").strip()
+        and str(anchor.get("quoted_text") or "").strip()
+    )
+
+
+def _annotation_key(anchor: dict, comment: str) -> tuple[str, str, str, str]:
+    replacement = _REPLACEMENT_PATTERN.search(comment)
+    action = replacement.group(1) if replacement else comment
+    return (
+        str(anchor.get("xml_anchor_type") or "").strip(),
+        str(anchor.get("xml_anchor_id") or "").strip(),
+        _normalize_text(str(anchor.get("quoted_text") or "")),
+        _normalize_text(action),
+    )
+
+
+def _find_duplicate_annotation(
+    annotations: dict[tuple[str, str, str, str], dict],
+    candidate: tuple[str, str, str, str],
+) -> dict | None:
+    exact = annotations.get(candidate)
+    if exact is not None:
+        return exact
+    candidate_range = candidate[:3]
+    candidate_action = candidate[3]
+    for existing_key, issue in annotations.items():
+        if existing_key[:3] != candidate_range:
+            continue
+        existing_action = existing_key[3]
+        if (
+            len(candidate_action) >= 4
+            and len(existing_action) >= 4
+            and (
+                candidate_action in existing_action
+                or existing_action in candidate_action
+            )
+        ):
+            return issue
+    return None
+
+
+def _normalize_text(value: str) -> str:
+    value = re.sub(r"^(?:建议|请)", "", value.strip())
+    return re.sub(r"[\s，。：；、“”\"']", "", value)

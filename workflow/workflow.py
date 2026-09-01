@@ -26,11 +26,7 @@ from agents.base_agent import Settings
 from agents.planner import PlannerAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.summarizer import SummarizerAgent
-from agents.review_presentation import (
-    add_summary_issue_comments,
-    apply_issue_decisions,
-    normalize_issue_decisions,
-)
+from agents.review_presentation import build_review_presentation
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
@@ -162,17 +158,38 @@ class ContractReviewWorkflow:
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
                 async with self.trace.span("phase.summarize", run_type="phase", inputs={"result_count": len(results)}) as span:
-                    final_review = normalize_issue_decisions(
-                        results,
-                        await self._phase_summarize(results),
+                    presentation = build_review_presentation(results)
+                    final_review = await self._phase_summarize(
+                        presentation.summarizer_results
                     )
-                    final_review = add_summary_issue_comments(final_review)
-                    presentation_results = apply_issue_decisions(results, final_review)
+                    final_review["summary_issue_comments"] = (
+                        presentation.summary_issue_comments
+                    )
+                    presentation_results = presentation.inline_results
                     span.set_outputs(
                         {
                             "summary_section_count": len(final_review),
+                            "raw_issue_count": sum(
+                                len(result.get("issues", [])) for result in results
+                            ),
+                            "canonical_issue_count": len(
+                                presentation.summarizer_results
+                            ),
                             "presentation_issue_count": sum(
                                 len(result.get("issues", [])) for result in presentation_results
+                            ),
+                            "presentation_anchor_count": sum(
+                                len(issue.get("anchors", []))
+                                for result in presentation_results
+                                for issue in result.get("issues", [])
+                            ),
+                            "inline_source_issue_keys": [
+                                issue.get("source_issue_keys", [])
+                                for result in presentation_results
+                                for issue in result.get("issues", [])
+                            ],
+                            "summary_issue_comments": (
+                                presentation.summary_issue_comments
                             ),
                         }
                     )

@@ -16,7 +16,7 @@
 | 2. 建索引 build_index | MCP `contract_build_index` | 按 `retrieval.backend` 为合同建立临时 LlamaIndex 或 docxindex 索引 |
 | 3. 规划 plan | `PlannerAgent.design_tasks` | 把审查标准 markdown 拆成结构化任务 `criteria_list` |
 | 4. 执行+反思 execute | `OrchestratorAgent.execute_criteria` | 逐条审查标准，产出 `results` |
-| 5. 最终整理 summarize | `SummarizerAgent.compile_summary_comment` | 同一次 LLM 调用生成总结，并对 `results` 做跨要点合并、去重和展示分流 |
+| 5. 最终整理 summarize | `build_review_presentation` + `SummarizerAgent.compile_summary_comment` | 程序确定性完成去重、锚点选择和展示分流；Summarizer 只生成总览 |
 | 6. 批注 generate | MCP `generate_docx_report` | 用整理后的 `presentation_results` + `final_review` 生成批注版 DOCX |
 
 每个阶段会通过 `progress_callback` 上报阶段名，便于前端展示进度：`ingesting`、`building_index`、`planning`、`reviewing`、`summarizing`、`generating_docx`、`completed`。
@@ -29,7 +29,7 @@
 | OrchestratorAgent | `agents/orchestrator.py` | 逐条派发 SubAgent，串联检索、反思、并发控制 | `criteria_list` | `results` |
 | SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准，可调用白名单允许的 MCP 工具 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues） |
 | ReflectorAgent | `agents/reflector.py` | 质量复核 SubAgent 输出 | criterion + subagent_output + 补充检索 | `{ status: PASS/REJECT, feedback }` |
-| SummarizerAgent | `agents/summarizer.py` | 在现有总结调用中生成总览，并决定问题进入总结、原文批注、两者或丢弃 | `results` | `{ overall_comment, priority_comments, issue_decisions }` |
+| SummarizerAgent | `agents/summarizer.py` | 根据程序整理后的完整问题清单生成总览，不拥有删除问题或选择锚点的权限 | `summarizer_results` | `{ overall_comment, priority_comments }` |
 
 基础设施：`agents/base_agent.py`（`Agent` 基类与 `Settings` 模型配置）、`agents/schemas.py`（结构化输出 schema）、`agents/prompts/cn_prompts.yaml`（所有提示词，含审查边界）。
 
@@ -73,17 +73,6 @@ class ReflectorOutput:
 class SummaryOutput:
     overall_comment: str = ""
     priority_comments: list[str] = []     # overall + priority 合计 <=200 字
-    issue_decisions: list[ReviewIssueDecision] = []
-
-class ReviewIssueDecision:
-    source_issue_keys: list[str]
-    output_scope: Literal["inline", "summary_only", "both", "discard"]
-    merged_comment: str                   # 1~200 字
-    selected_anchors: list[ReviewAnchorDecision]
-
-class ReviewAnchorDecision:
-    anchor_key: str
-    comment_text: str                     # 该锚点自己的直接修改文字
 ```
 
 ## 单条标准的执行与反思循环
@@ -136,14 +125,15 @@ results = await asyncio.gather(
 审查标准 DOCX -> ingest -> 审查标准 markdown -> Planner -> criteria_list
 合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引
 每条 criterion: 检索 context -> SubAgent(可调用白名单工具) -> (Reflector 反思循环) -> 单条结果
-所有单条结果 -> raw results -> Summarizer -> final_review
-raw results + final_review.issue_decisions -> presentation_results
+所有单条结果 -> raw results -> build_review_presentation
+build_review_presentation -> presentation_results + summarizer_results + summary_issue_comments
+summarizer_results -> Summarizer -> final_review
 presentation_results + final_review -> generate_docx_report -> 批注版 DOCX
 ```
 
-`raw results` 继续写入审查日志，保留各 criterion 的原始输出；`presentation_results` 只包含最终允许写入原文的批注。`summary_only` 的完整 `merged_comment` 由程序确定性加入总览，避免模型在 200 字概述中遗漏；`discard` 只允许处理事实错误或完全未被标准触发的无效结果，不能因风险低而删除。该调整复用原有 Summarizer 调用，不增加 LLM 调用次数。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
+`raw results` 继续写入审查日志，保留各 criterion 的原始输出；`presentation_results` 只包含最终写入原文的批注。没有有效锚点、合同整体期限问题，以及三个以上锚点共同描述的条款断号/标题顺序问题由程序放入 `summary_issue_comments`。每个原始 `issue_key` 必须进入一个规范化问题，否则程序直接报错，不能静默遗漏。Summarizer 只读取规范化问题，不再返回 discard 或锚点决策。该调整复用原有 Summarizer 调用，不增加 LLM 调用次数。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
 
-Finalizer 输出通过 schema 后还会执行确定性规范化：相同 `xml_anchor_type + xml_anchor_id + quoted_text` 只保留一次；三个以上锚点共同描述条款断号/标题顺序问题时强制改为 `summary_only`；单一审查问题包含“直接写明”的固定引号文字时，逐条批注只保留一个落点，并原样使用该固定文字。该步骤不调用模型。
+`build_review_presentation()` 的输入是 Orchestrator `results`，输出是 `ReviewPresentation`：`inline_results`、`summarizer_results`、`summary_issue_comments`。相同 XML 范围且修改动作相同的跨要点批注只保留一次，并在规范化 issue 的 `source_issue_keys` 中记录全部来源；当前 `check_point` 含“直接写明”的固定引号文字时，只保留一个落点并原样写入。该步骤不调用模型。
 
 ## 架构边界
 

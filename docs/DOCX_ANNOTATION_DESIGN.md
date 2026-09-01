@@ -15,30 +15,29 @@
 
 批注生成阶段同时使用两类最终结构化结果：
 
-- `presentation_results`：由 SummaryAgent 的 `issue_decisions` 对 Orchestrator 原始 `results` 做跨要点合并、去重和分流后生成，只保留允许写入原文的 `inline` / `both` 问题。
-- `final_review`：包含 `overall_comment`、`priority_comments` 和 `issue_decisions`；前两个字段生成文档开头总览批注，后一个字段决定每条原始问题的展示位置。
+- `presentation_results`：由 `build_review_presentation()` 对 Orchestrator 原始 `results` 做确定性去重、锚点选择和分流后生成，只保留写入原文的规范化问题。
+- `final_review`：只包含 Summarizer 返回的 `overall_comment`、`priority_comments`，以及程序追加的 `summary_issue_comments`；三者共同生成文档开头总览批注。
 
 因此，`results` 不是 SummaryAgent 的输出。真实数据流是：
 
 ```text
 SubAgentOutput
   -> Orchestrator 汇总成 raw results
-  -> SummaryAgent 读取 raw results
-  -> 同一次 LLM 调用输出 final_review
-  -> 程序按 issue_decisions 生成 presentation_results
+  -> build_review_presentation 生成 presentation_results、summarizer_results、summary_issue_comments
+  -> SummaryAgent 读取 summarizer_results
+  -> LLM 只输出 overall_comment、priority_comments
+  -> 程序把 summary_issue_comments 追加到 final_review
   -> DOCX 批注生成器使用 presentation_results 和 final_review
 ```
 
 其中：
 
-- `output_scope=inline` 只生成原文批注，`summary_only` 只进入总览，`both` 同时进入两处，`discard` 不输出。
-- SummaryAgent 只选择输入中已有的稳定 issue/anchor key；程序负责把 key 映射回原始 `quoted_text`，模型不能改写锚点。
-- `selected_anchors` 为每个保留锚点分别提供 `comment_text`，因此不同原文不会共用一段罗列其他位置问题的泛化批注。
-- 多个审查要点命中同一处相同问题时，一个 decision 可以合并多个 `source_issue_keys`；只有事实和原文都相同的批注才能合并。
-- `summary_only` / `both` 的完整 `merged_comment` 由程序派生到 `summary_issue_comments`，写入总览的“其他审查问题”，不依赖模型是否在 200 字概述中再次复述。
-- 写入前按 `xml_anchor_type + xml_anchor_id + quoted_text` 去重，同一 XML 范围即使由多个审查要点分别返回，也只生成一次批注。
-- 三个以上锚点共同描述条款断号或标题顺序问题时，确定性改为 `summary_only`；包含“直接写明”的单一固定提示语则原样复制标准引号文字，并只保留一个批注落点。
-- 该职责扩展复用原有 SummaryAgent 调用，不增加新的 LLM 调用。
+- 每个原始 issue 都有稳定 `issue_key`，必须进入正文批注或 `summary_issue_comments`；程序检测到漏项会直接报错。
+- 没有有效锚点、合同整体期限问题，以及三个以上锚点共同描述的条款断号或标题顺序问题进入总结，不借正常标题或相邻段落强行放置批注。
+- 写入前按 `xml_anchor_type + xml_anchor_id + quoted_text + 修改动作` 去重；同一 XML 范围由多个审查要点返回同一修改时只生成一次批注，并在 `source_issue_keys` 保留来源。
+- 当前 `check_point` 给出“直接写明”的固定引号文字时，程序原样复制该文字，并只保留一个批注落点；不会从同一 criterion 的其他检查点串入错误文字。
+- SummaryAgent 不再返回 `issue_decisions`，不能删除问题、改写锚点或决定展示位置。
+- 整体仍只调用一次 SummaryAgent，不增加新的 LLM 调用。
 
 ## 审查文本如何生成
 
