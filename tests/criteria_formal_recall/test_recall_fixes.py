@@ -11,7 +11,8 @@ from docx.oxml import OxmlElement
 
 from agents.orchestrator import OrchestratorAgent
 from agents.prompts.cn_prompts import load_prompts
-from agents.schemas import SubAgentOutput
+from agents.review_presentation import apply_issue_decisions, prompt_issue_records
+from agents.schemas import SubAgentOutput, SummaryOutput
 from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
@@ -124,6 +125,13 @@ class DocxAnchorRegressionTests(unittest.TestCase):
                 }],
                 str(output_path),
                 annotation_events_path=str(annotation_path),
+                region_boundaries={
+                    "body_content_end": {
+                        "xml_anchor_type": "paragraph",
+                        "xml_anchor_id": "path:body/p1",
+                        "quoted_text": "合同正文",
+                    }
+                },
             )
 
             self.assertEqual(result, str(output_path))
@@ -131,7 +139,39 @@ class DocxAnchorRegressionTests(unittest.TestCase):
             self.assertEqual(report["stats"]["missing_text_fallback"], 1)
             self.assertEqual(report["skipped_count"], 0)
             self.assertEqual(report["events"][0]["status"], "anchored")
-            self.assertEqual(report["events"][0]["match_strategy"], "document_end_missing_issue")
+            self.assertEqual(report["events"][0]["match_strategy"], "body_content_end_missing_issue")
+
+    def test_missing_body_boundary_does_not_fall_back_to_attachment_end(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "contract.docx"
+            output_path = Path(temp_dir) / "reviewed.docx"
+            annotation_path = Path(temp_dir) / "logs" / "annotation_events.json"
+            document = Document()
+            document.add_paragraph("合同正文")
+            document.add_paragraph("附件中的最后一段")
+            document.save(contract_path)
+
+            DocxReportGenerator.generate_annotated_docx(
+                str(contract_path),
+                [{
+                    "criterion_id": "TEST",
+                    "criterion": "正文结尾应有空白声明",
+                    "issues": [{
+                        "issue_id": "TEST.1",
+                        "risk_level": "low",
+                        "issue_comment": "建议在正文结尾补充空白声明。",
+                        "check_point": "正文结尾",
+                        "anchors": [],
+                    }],
+                }],
+                str(output_path),
+                annotation_events_path=str(annotation_path),
+            )
+
+            report = json.loads(annotation_path.read_text(encoding="utf-8"))
+            self.assertEqual(report["skipped_count"], 1)
+            self.assertEqual(report["events"][0]["status"], "unmatched")
+            self.assertEqual(report["events"][0]["match_strategy"], "body_content_end_unavailable")
 
 
 class PromptAuthorityTests(unittest.TestCase):
@@ -142,6 +182,9 @@ class PromptAuthorityTests(unittest.TestCase):
 
         self.assertIn("优先级高于本提示词中的通用风险筛选规则", prompts["SUB_AGENT_BASE_PROMPT"])
         self.assertIn("不得质疑标准本身的必要性", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("指定提示语", prompts["SUB_AGENT_BASE_PROMPT"])
+        self.assertIn("固定文字完整性", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("output_scope", prompts["SUMMARIZER_SYSTEM_PROMPT"])
 
     def test_runtime_prompt_makes_deterministic_absence_authoritative(self) -> None:
         source = inspect.getsource(OrchestratorAgent.execute_single_criterion)
@@ -172,6 +215,104 @@ class SubAgentSchemaNormalizationTests(unittest.TestCase):
 
         self.assertEqual(len(output.issues[0].issue_comment), 160)
         self.assertEqual(len(output.issues[0].anchors[0].comment_text), 100)
+
+
+class ReviewPresentationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.results = [
+            {
+                "criterion_id": "C12",
+                "section": "文字",
+                "criterion": "检查重复词",
+                "status": "issues_found",
+                "issues": [{
+                    "issue_id": "C12.1",
+                    "risk_level": "low",
+                    "issue_comment": "存在重复用词。",
+                    "anchors": [{
+                        "xml_anchor_type": "paragraph",
+                        "xml_anchor_id": "path:body/p1",
+                        "quoted_text": "因乙方原因原因",
+                        "comment_text": "删除重复文字。",
+                    }],
+                    "reasoning": "原因重复",
+                    "criterion": "检查重复词",
+                    "check_point": "重复词",
+                }],
+            },
+            {
+                "criterion_id": "C15",
+                "section": "语法",
+                "criterion": "检查语病",
+                "status": "issues_found",
+                "issues": [{
+                    "issue_id": "C15.1",
+                    "risk_level": "low",
+                    "issue_comment": "存在语病。",
+                    "anchors": [{
+                        "xml_anchor_type": "paragraph",
+                        "xml_anchor_id": "path:body/p1",
+                        "quoted_text": "因乙方原因原因",
+                        "comment_text": "修改语病。",
+                    }],
+                    "reasoning": "原因重复",
+                    "criterion": "检查语病",
+                    "check_point": "语病",
+                }],
+            },
+        ]
+
+    def test_prompt_records_expose_stable_issue_and_anchor_keys(self) -> None:
+        records = prompt_issue_records(self.results)
+
+        self.assertEqual(records[0]["issue_key"], "C12::C12.1")
+        self.assertEqual(records[0]["anchors"][0]["anchor_key"], "C12::C12.1#anchor_1")
+        self.assertNotIn("_issue", records[0])
+
+    def test_cross_criterion_duplicates_render_as_one_annotation(self) -> None:
+        final_review = {
+            "issue_decisions": [{
+                "source_issue_keys": ["C12::C12.1", "C15::C15.1"],
+                "output_scope": "inline",
+                "merged_comment": "删除重复的“原因”，修改为“因乙方原因”。",
+                "selected_anchor_keys": ["C12::C12.1#anchor_1"],
+            }],
+        }
+
+        rendered = apply_issue_decisions(self.results, final_review)
+
+        self.assertEqual(len(rendered), 1)
+        self.assertEqual(len(rendered[0]["issues"]), 1)
+        self.assertEqual(
+            rendered[0]["issues"][0]["anchors"][0]["comment_text"],
+            "删除重复的“原因”，修改为“因乙方原因”。",
+        )
+
+    def test_summary_only_issue_is_not_materialized_for_docx_writer(self) -> None:
+        records = prompt_issue_records(self.results)
+        final_review = {
+            "issue_decisions": [{
+                "source_issue_keys": [record["issue_key"] for record in records],
+                "output_scope": "summary_only",
+                "merged_comment": "合同存在重复用词，应统一修改。",
+                "selected_anchor_keys": [],
+            }],
+        }
+
+        self.assertEqual(apply_issue_decisions(self.results, final_review), [])
+
+    def test_summary_schema_rejects_inline_decision_without_anchor(self) -> None:
+        with self.assertRaises(ValueError):
+            SummaryOutput.model_validate({
+                "overall_comment": "总结",
+                "priority_comments": [],
+                "issue_decisions": [{
+                    "source_issue_keys": ["C12::C12.1"],
+                    "output_scope": "inline",
+                    "merged_comment": "修改重复词。",
+                    "selected_anchor_keys": [],
+                }],
+            })
 
 
 class PreparedContractValidationTests(unittest.TestCase):

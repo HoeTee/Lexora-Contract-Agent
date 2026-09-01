@@ -120,6 +120,7 @@ async def generate_docx_report(
     contract_path: str,
     results_json: str | list,
     summary_sections_json: str | dict | None = None,
+    region_boundaries_json: str | dict | None = None,
     output_dir: str | None = None,
     output_path: str | None = None,
     annotation_events_path: str | None = None,
@@ -135,12 +136,18 @@ async def generate_docx_report(
             if isinstance(summary_sections_json, str) and summary_sections_json
             else summary_sections_json
         )
+        region_boundaries = (
+            json.loads(region_boundaries_json)
+            if isinstance(region_boundaries_json, str) and region_boundaries_json
+            else region_boundaries_json
+        )
         with redirect_stdout(sys.stderr):
             path = ReportGenerator.generate_docx_report(
                 contract_name=contract_name,
                 contract_path=contract_path,
                 results=results,
                 summary_sections=summary_sections,
+                region_boundaries=region_boundaries,
                 output_dir=output_dir,
                 output_path=output_path,
                 annotation_events_path=annotation_events_path,

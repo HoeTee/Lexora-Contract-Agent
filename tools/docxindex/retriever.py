@@ -166,6 +166,7 @@ class DocxIndexRetriever:
             "num_nodes": len(document_index.get("nodes") or []),
             "num_anchors": len(document_index.get("anchor_map") or {}),
             "vector_items": len(vector_index.items) if vector_index is not None else 0,
+            "region_boundaries": document_index.get("region_boundaries") or {},
         }
 
     def _search_sync(self, query: str) -> str:

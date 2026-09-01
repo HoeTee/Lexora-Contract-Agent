@@ -7,6 +7,7 @@ import json
 from agents.base_agent import Agent
 from agents.json_utils import chat_until_valid_json
 from agents.prompts.cn_prompts import SUMMARIZER_SYSTEM_PROMPT
+from agents.review_presentation import prompt_issue_records
 from agents.schemas import SummaryContentOutput, SummaryOutput
 
 
@@ -16,6 +17,20 @@ SUMMARY_EXPECTED_JSON = """
   "priority_comments": [
     "优先修改建议1",
     "优先修改建议2"
+  ],
+  "issue_decisions": [
+    {
+      "source_issue_keys": ["C01::C01.1"],
+      "output_scope": "inline",
+      "merged_comment": "可直接写入 Word 的具体修改意见",
+      "selected_anchor_keys": ["C01::C01.1#anchor_1"]
+    },
+    {
+      "source_issue_keys": ["C02::C02.1", "C03::C03.1"],
+      "output_scope": "summary_only",
+      "merged_comment": "合并后的合同整体问题",
+      "selected_anchor_keys": []
+    }
   ]
 }
 """
@@ -33,19 +48,7 @@ class SummarizerAgent(Agent):
 
     async def compile_summary_comment(self, results: list[dict]) -> dict:
         """Generate the concise opening DOCX summary comment."""
-        issues = []
-        for result in results:
-            for issue in result.get("issues", []):
-                issues.append(
-                    {
-                        "section": result.get("section", ""),
-                        "criterion_id": result.get("criterion_id", ""),
-                        "criterion": result.get("criterion", ""),
-                        "risk_level": issue.get("risk_level", ""),
-                        "issue_comment": issue.get("issue_comment", ""),
-                        "anchors": issue.get("anchors", []),
-                    }
-                )
+        issues = prompt_issue_records(results)
 
         prompt_payload = {
             "criteria_count": len(results),
@@ -53,7 +56,7 @@ class SummarizerAgent(Agent):
             "issues": issues,
         }
         prompt = (
-            "请根据以下结构化审查问题，生成写入 Word 开头批注的简短总结：\n"
+            "请根据以下结构化审查问题，生成总体总结并完成最终批注分流：\n"
             + json.dumps(prompt_payload, ensure_ascii=False, indent=2)
         )
         parsed, _ = await chat_until_valid_json(

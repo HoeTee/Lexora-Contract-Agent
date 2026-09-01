@@ -352,7 +352,45 @@ def _finalize_index(
         structure_tree=[node.structure_view() for node in roots],
         anchor_map=build_anchor_map(items, flat_nodes),
         table_map=collect_table_map(items),
+        region_boundaries=_build_region_boundaries(items, regions),
     )
+
+
+def _build_region_boundaries(
+    items: list[BodyItem],
+    regions: DetectedRegions,
+) -> dict[str, dict[str, str]]:
+    """Expose paragraph anchors for report placement without leaking item indexes."""
+
+    def find_paragraph(start: int, end: int, *, reverse: bool) -> BodyItem | None:
+        indexes = range(end - 1, start - 1, -1) if reverse else range(start, end)
+        for index in indexes:
+            item = items[index]
+            text = item.text.strip()
+            if item.kind == "p" and len(text) >= 4 and any(char.isalnum() for char in text):
+                return item
+        return None
+
+    boundaries: dict[str, dict[str, str]] = {}
+    body_start = find_paragraph(
+        regions.body_start,
+        max(regions.body_content_end, regions.body_start + 1),
+        reverse=False,
+    )
+    body_end = find_paragraph(
+        regions.body_start,
+        regions.body_content_end,
+        reverse=True,
+    )
+    for name, item in (("body_start", body_start), ("body_content_end", body_end)):
+        if item is None:
+            continue
+        boundaries[name] = {
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": item.anchor,
+            "quoted_text": item.text,
+        }
+    return boundaries
 
 
 def _fill_key_items(nodes: list[DocumentNode]) -> None:

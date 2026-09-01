@@ -26,6 +26,7 @@ from agents.base_agent import Settings
 from agents.planner import PlannerAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.summarizer import SummarizerAgent
+from agents.review_presentation import apply_issue_decisions
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
@@ -126,7 +127,7 @@ class ContractReviewWorkflow:
                     f"Building temporary {RETRIEVAL_BACKEND} contract index",
                 )
                 async with self.trace.span("phase.build_index", run_type="phase"):
-                    await self._phase_build_index(contract_path)
+                    index_metadata = await self._phase_build_index(contract_path)
 
                 # Phase 3: Plan tasks
                 await self._emit_progress(progress_callback, "planning", "Extracting review criteria")
@@ -157,8 +158,16 @@ class ContractReviewWorkflow:
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
                 async with self.trace.span("phase.summarize", run_type="phase", inputs={"result_count": len(results)}) as span:
-                    summary_sections = await self._phase_summarize(results)
-                    span.set_outputs({"summary_section_count": len(summary_sections)})
+                    final_review = await self._phase_summarize(results)
+                    presentation_results = apply_issue_decisions(results, final_review)
+                    span.set_outputs(
+                        {
+                            "summary_section_count": len(final_review),
+                            "presentation_issue_count": sum(
+                                len(result.get("issues", [])) for result in presentation_results
+                            ),
+                        }
+                    )
 
                 token_stats = self._collect_token_stats(results)
                 total_tokens = token_stats["total"]
@@ -169,10 +178,11 @@ class ContractReviewWorkflow:
                 async with self.trace.span("phase.generate_docx", run_type="phase") as span:
                     annotated_docx_path = await self._phase_generate_annotated_docx(
                         contract_path=contract_path,
-                        results=results,
-                        summary_sections=summary_sections,
+                        results=presentation_results,
+                        summary_sections=final_review,
                         output_dir=output_dir,
                         output_path=output_path,
+                        region_boundaries=index_metadata.get("region_boundaries") or {},
                     )
                     span.set_outputs({
                         "annotated_docx_path": annotated_docx_path,
@@ -304,7 +314,7 @@ class ContractReviewWorkflow:
     async def _phase_build_index(
             self,
             contract_path: str
-    ) -> str:
+    ) -> dict[str, Any]:
         """Phase 2: Build the configured temporary contract retrieval index."""
         print(f"\n[Phase 2] Building temporary {RETRIEVAL_BACKEND} contract index...")
         start = time.time()
@@ -344,7 +354,7 @@ class ContractReviewWorkflow:
             )
 
         print(f"  Temporary index built in {round(time.time()-start,1)}s: {result[:200]}")
-        return result
+        return parsed
 
     async def _phase_plan(
             self,
@@ -491,6 +501,7 @@ class ContractReviewWorkflow:
         summary_sections: dict,
         output_dir: str | None = None,
         output_path: str | None = None,
+        region_boundaries: dict[str, dict[str, str]] | None = None,
     ) -> str:
         """Phase 6: Generate only the annotated original-contract DOCX."""
         print("\n[Phase 6] Generating annotated DOCX...")
@@ -501,6 +512,7 @@ class ContractReviewWorkflow:
             "contract_path": contract_path,
             "results_json": json.dumps(results, ensure_ascii=False),
             "summary_sections_json": json.dumps(summary_sections, ensure_ascii=False),
+            "region_boundaries_json": json.dumps(region_boundaries or {}, ensure_ascii=False),
         }
         if output_dir is not None:
             tool_args["output_dir"] = output_dir

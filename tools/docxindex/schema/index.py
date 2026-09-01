@@ -21,7 +21,7 @@ class AnchorRecord(BaseModel):
 class DocumentIndex(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: str = "docx-index-v4"
+    schema_version: str = "docx-index-v5"
     source_file: str
     top_regions: dict[str, str]
     settings: dict[str, Any]
@@ -29,6 +29,7 @@ class DocumentIndex(BaseModel):
     structure_tree: list[dict[str, Any]]
     anchor_map: dict[str, AnchorRecord]
     table_map: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    region_boundaries: dict[str, dict[str, str]] = Field(default_factory=dict)
 
     def to_json_dict(self) -> dict[str, Any]:
         return self.model_dump(mode="json")

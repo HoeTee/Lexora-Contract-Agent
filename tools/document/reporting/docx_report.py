@@ -457,6 +457,7 @@ class DocxReportGenerator:
         doc: Document,
         criterion: str,
         issue: dict,
+        region_boundaries: dict[str, dict[str, str]] | None = None,
     ) -> tuple[ParagraphAnchor | None, str]:
         """Choose a deterministic placement for issues caused by missing text."""
         placement_text = " ".join(
@@ -469,7 +470,17 @@ class DocxReportGenerator:
         )
         end_hints = ("正文最后", "正文结尾", "文末", "签署栏", "签字盖章", "以下无正文")
         if any(hint in placement_text for hint in end_hints):
-            return DocxReportGenerator._get_document_end_anchor(doc), "document_end_missing_issue"
+            boundary = (region_boundaries or {}).get("body_content_end")
+            if boundary:
+                matched = DocxReportGenerator._find_text_range_anchor_in_xml_anchor(
+                    doc,
+                    boundary.get("xml_anchor_type", "paragraph"),
+                    boundary.get("xml_anchor_id", ""),
+                    boundary.get("quoted_text", ""),
+                )
+                if matched:
+                    return matched, "body_content_end_missing_issue"
+            return None, "body_content_end_unavailable"
         return DocxReportGenerator._get_document_start_anchor(doc), "document_start_missing_issue"
 
     @staticmethod
@@ -752,6 +763,7 @@ class DocxReportGenerator:
         output_path: str,
         summary_sections: dict | None = None,
         annotation_events_path: str | None = None,
+        region_boundaries: dict[str, dict[str, str]] | None = None,
     ) -> str:
         """Generate the annotated DOCX report using the original contract as the base."""
 
@@ -781,7 +793,12 @@ class DocxReportGenerator:
 
                     if not anchors:
                         fallback_anchor, fallback_strategy = (
-                            DocxReportGenerator._select_missing_issue_anchor(doc, criterion, issue)
+                            DocxReportGenerator._select_missing_issue_anchor(
+                                doc,
+                                criterion,
+                                issue,
+                                region_boundaries,
+                            )
                         )
                         if fallback_anchor:
                             comments_data.append({
@@ -984,6 +1001,7 @@ class DocxReportGenerator:
         output_path: str,
         summary_sections: dict | None = None,
         annotation_events_path: str | None = None,
+        region_boundaries: dict[str, dict[str, str]] | None = None,
     ) -> str | None:
         """Generate only the annotated original-contract DOCX."""
         if not DocxReportGenerator._can_generate_annotated_docx(contract_path, results):
@@ -998,6 +1016,7 @@ class DocxReportGenerator:
             output_path,
             summary_sections=summary_sections,
             annotation_events_path=annotation_events_path,
+            region_boundaries=region_boundaries,
         )
 
 

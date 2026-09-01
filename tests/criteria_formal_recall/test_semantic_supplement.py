@@ -134,7 +134,7 @@ class RetrievalSchemaTests(unittest.TestCase):
 
         self.assertEqual(stored["nodes"], ["body/sec_001"])
         self.assertNotIn("children", stored)
-        self.assertEqual(DocumentIndex.model_fields["schema_version"].default, "docx-index-v4")
+        self.assertEqual(DocumentIndex.model_fields["schema_version"].default, "docx-index-v5")
         self.assertNotIn("root_nodes", DocumentIndex.model_fields)
 
 

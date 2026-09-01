@@ -270,6 +270,25 @@ Level 3: （一）（二）（三）
 
 `outlineLvl` 是强证据，但不是唯一条件。对于没有 outline 的合同，仍然要依赖编号形态和连续性识别章节。
 
+索引还输出 `region_boundaries`，用于把结构识别结果传递给 DOCX 报告写入阶段：
+
+```json
+{
+  "body_start": {
+    "xml_anchor_type": "paragraph",
+    "xml_anchor_id": "path:body/p12",
+    "quoted_text": "第一条 合同标的"
+  },
+  "body_content_end": {
+    "xml_anchor_type": "paragraph",
+    "xml_anchor_id": "path:body/p96",
+    "quoted_text": "正文最后一个有效段落"
+  }
+}
+```
+
+`body_content_end` 在附件区域之前，并排除已识别的合同末尾区域。报告写入器处理“正文结尾”类缺失问题时只使用该锚点；边界缺失时记录未匹配事件，不得把附件的最后一段当成正文结尾。
+
 标题置信度使用数字化字段：
 
 ```json

@@ -13,25 +13,28 @@
 
 ## 审查结果从哪里来
 
-批注生成阶段同时使用两类结构化结果：
+批注生成阶段同时使用两类最终结构化结果：
 
-- `results`：来自 Orchestrator 执行所有审查标准后的结果。每个 criterion 下包含 SubAgent/Reflector 最终确认的 `issues`，其中每个 issue 提供 `quoted_text` 和 `comment_text`。
-- `summary_sections`：来自 SummaryAgent 对 `results` 的再汇总，只用于生成文档开头的总览批注。
+- `presentation_results`：由 SummaryAgent 的 `issue_decisions` 对 Orchestrator 原始 `results` 做跨要点合并、去重和分流后生成，只保留允许写入原文的 `inline` / `both` 问题。
+- `final_review`：包含 `overall_comment`、`priority_comments` 和 `issue_decisions`；前两个字段生成文档开头总览批注，后一个字段决定每条原始问题的展示位置。
 
 因此，`results` 不是 SummaryAgent 的输出。真实数据流是：
 
 ```text
 SubAgentOutput
-  -> Orchestrator 汇总成 results
-  -> SummaryAgent 读取 results
-  -> 输出 summary_sections
-  -> DOCX 批注生成器同时使用 results 和 summary_sections
+  -> Orchestrator 汇总成 raw results
+  -> SummaryAgent 读取 raw results
+  -> 同一次 LLM 调用输出 final_review
+  -> 程序按 issue_decisions 生成 presentation_results
+  -> DOCX 批注生成器使用 presentation_results 和 final_review
 ```
 
 其中：
 
-- `results` 决定逐条问题批注的位置和正文。
-- `summary_sections` 决定文档开头的总览批注。SummaryAgent 不修改 `results`，不参与 `quoted_text` 定位，也不决定逐条问题批注是否高亮。
+- `output_scope=inline` 只生成原文批注，`summary_only` 只进入总览，`both` 同时进入两处，`discard` 不输出。
+- SummaryAgent 只选择输入中已有的稳定 issue/anchor key；程序负责把 key 映射回原始 `quoted_text`，模型不能改写锚点。
+- 多个审查要点命中同一问题时，一个 decision 可以合并多个 `source_issue_keys`，并只保留一个主锚点。
+- 该职责扩展复用原有 SummaryAgent 调用，不增加新的 LLM 调用。
 
 ## 审查文本如何生成
 
@@ -141,6 +144,7 @@ ParagraphTextView
 - 命中 run 添加 `w:highlight w:val="yellow"`。
 - 程序插入新的 `commentRangeStart`、`commentRangeEnd` 和 `commentReference`。
 - 原合同已有修订结构保留，AI 批注和黄色高亮叠加到命中位置上。
+- 索引阶段会把 `body_content_end` 的真实 XML 锚点传入写入器；“正文结尾”类问题只能使用该锚点，不能回退到附件或整个 DOCX 的最后一段。
 
 高亮代码逻辑：
 
@@ -194,10 +198,11 @@ DOCX 批注不是只在正文里插入一个标记。一个有效批注至少同
 
 总览批注保留文档开头批注设计，不要求高亮。
 
-逐条 issue 批注不再使用文档开头 fallback。原因是逐条问题批注必须对应合同原文中的具体高亮位置：
+缺少唯一问题原文的合同整体问题应由最终整理阶段标记为 `summary_only`。对于仍进入写入器的缺失类 issue：
 
 - 如果 issue 的 `quoted_text` 成功命中，生成 `TextAnchor`，写入 Word 批注并高亮原文。
-- 如果 issue 没有 `quoted_text`，或者 `quoted_text` 无法在临时匹配文本中命中，程序不会把它写成 Word 批注。
+- “正文结尾”类问题只有在索引提供有效 `body_content_end` 锚点时才允许确定性落点；正文边界不可用时不回退到附件末段。
+- 其他无 `quoted_text` 的历史兼容问题仍由现有缺失类落点逻辑处理；新输出应优先通过 `summary_only` 避免该路径。
 - 未锚定 issue 仍会记录到同名 `*_annotation_events.json`，用于排查 SubAgent 输出和 quoted_text 质量。
 
 因此，输出 DOCX 中除总览批注外，所有 AI 问题批注都必须有对应黄色高亮。

@@ -99,9 +99,36 @@ class ReflectorOutput(StrictOutputModel):
     feedback: str = ""
 
 
+class ReviewIssueDecision(StrictOutputModel):
+    """Final presentation decision for one or more raw review issues."""
+
+    source_issue_keys: list[str] = Field(min_length=1)
+    output_scope: Literal["inline", "summary_only", "both", "discard"]
+    merged_comment: str = Field(min_length=1, max_length=200)
+    selected_anchor_keys: list[str] = Field(default_factory=list)
+
+    @field_validator("source_issue_keys", "selected_anchor_keys")
+    @classmethod
+    def keys_not_blank(cls, value: list[str]) -> list[str]:
+        if any(not item.strip() for item in value):
+            raise ValueError("issue and anchor keys must not contain blank strings")
+        if len(value) != len(set(value)):
+            raise ValueError("issue and anchor keys must not contain duplicates")
+        return value
+
+    @model_validator(mode="after")
+    def validate_scope_anchors(self):
+        if self.output_scope in {"summary_only", "discard"} and self.selected_anchor_keys:
+            raise ValueError(f"{self.output_scope} decisions must not select anchors")
+        if self.output_scope in {"inline", "both"} and not self.selected_anchor_keys:
+            raise ValueError(f"{self.output_scope} decisions must select at least one anchor")
+        return self
+
+
 class SummaryContentOutput(StrictOutputModel):
     overall_comment: str = "" # 总体审查总结
     priority_comments: list[str] = Field(default_factory=list) # 优先修改建议；使用 default_factory 来确保 priority_comments 字段默认为一个空列表，而不是 None
+    issue_decisions: list[ReviewIssueDecision] = Field(default_factory=list)
 
     @field_validator("priority_comments") # 字段验证
     @classmethod # 在实例方法创建前检验某字段
