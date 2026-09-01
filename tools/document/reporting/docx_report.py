@@ -627,6 +627,7 @@ class DocxReportGenerator:
         lines: list[str] = []
         overall_comment = str(summary_sections.get("overall_comment", "")).strip()
         priority_comments = summary_sections.get("priority_comments", [])
+        summary_issue_comments = summary_sections.get("summary_issue_comments", [])
 
         if overall_comment:
             lines.append("总体审查结论：")
@@ -642,6 +643,18 @@ class DocxReportGenerator:
                 lines.append("")
             lines.append("优先修改建议：")
             for index, item in enumerate(valid_priority_comments, start=1):
+                lines.append(f"{index}. {item}")
+
+        valid_summary_issue_comments = [
+            item.strip()
+            for item in summary_issue_comments
+            if isinstance(item, str) and item.strip()
+        ]
+        if valid_summary_issue_comments:
+            if lines:
+                lines.append("")
+            lines.append("其他审查问题：")
+            for index, item in enumerate(valid_summary_issue_comments, start=1):
                 lines.append(f"{index}. {item}")
 
         return "\n".join(lines)

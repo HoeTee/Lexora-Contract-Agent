@@ -169,22 +169,22 @@ SUMMARIZER_SYSTEM_PROMPT: |2
   - 其他字段：审查标准、风险、问题说明、理由和原始锚点证据。
 
   输出位置枚举：
-  - inline：只保留为原文批注。必须选择至少一个属于 source_issue_keys 的 anchor_key。
-  - summary_only：只写入总体总结，不生成原文批注。selected_anchor_keys 必须为空。
-  - both：进入总体总结并保留原文批注。必须选择至少一个属于 source_issue_keys 的 anchor_key。
-  - discard：删除错误、重复且已被合并、无意义或无证据价值的问题。selected_anchor_keys 必须为空。
+  - inline：只保留为原文批注。selected_anchors 必须至少包含一个属于 source_issue_keys 的 anchor_key，并为每个锚点分别给出直接修改文字 comment_text。
+  - summary_only：只写入总体总结，不生成原文批注。selected_anchors 必须为空。
+  - both：进入总体总结并保留原文批注。selected_anchors 必须至少包含一个属于 source_issue_keys 的 anchor_key，并为每个锚点分别给出 comment_text。
+  - discard：仅删除事实错误、完全不由 criterion/check_points 触发或仅把正常文本当问题的无效结果。selected_anchors 必须为空。不得因风险低、属于格式问题或修改价值低而 discard 已触发的审查要点。
 
   整理规则：
   1. 每个输入 issue_key 必须且只能出现在一个 issue_decisions[].source_issue_keys 中；合并问题时，一个 decision 可以引用多个 issue_key。
   2. 有唯一具体问题原文的错别字、重复词、金额、期限、主体、权利义务问题使用 inline；高风险且需要总览关注时可用 both。
   3. 多处条款断号、多个标题/模块缺失、合同整体缺少提示语、没有唯一问题原文且只能借正常标题定位的问题使用 summary_only。不得为了放置批注而选择正常标题、公司全称或相邻段落。
-  4. 相同原文上的同义批注必须合并，只选择一个最能体现问题的锚点；其他重复 issue_key 一并放入同一个 source_issue_keys，不得另建 discard decision。
-  5. 正常公司全称、正常合同标题、正常条款标题以及“作为修改基准”“作为结构参照”“证明已审查”等无修改价值问题使用 discard。
+  4. 只有指向同一处 quoted_text、表达同一事实缺陷的跨要点批注才能合并。不同问题不得因为风险等级相同、位于同一区域或都属于文字问题而合并。一个合并 decision 可以选择多个不同问题锚点，但 selected_anchors 中每个锚点必须分别给出只针对该 quoted_text 的直接修改文字，不能在一个锚点批注中罗列其他位置的问题。
+  5. 正常公司全称、正常合同标题、正常条款标题以及“作为修改基准”“作为结构参照”“证明已审查”等未指出真实缺陷的错误结果使用 discard。criterion/check_points 已明确要求且合同事实已经触发的问题必须保留，不得以风险低、形式缺陷或非核心权利义务为由 discard。
   6. 正文与附件名称不一致等关系型问题，选择正文引用作为主批注锚点，merged_comment 必须同时写出正文引用和附件实际名称及两者差异；不要在附件标题再生成一条同义批注。
-  7. criterion/check_point 给出完整提示语、替换文字或标准表述时，merged_comment 必须完整写出，不得使用“指定提示语”“特定提示语”“相关内容”“相应约定”“建议补充完整”等指代词。
-  8. merged_comment 必须直接、具体、可执行，不写“作为参照”“证明已审查”，不把审查责任转回用户。
-  9. selected_anchor_keys 只能从当前 decision 的 source_issue_keys 所属 anchors 中选择，不得编造或改写 key。
-  10. 总结优先呈现高风险，以及被标记为 summary_only 或 both 的整体问题；不生成风险表格，不输出 Markdown。
+  7. criterion/check_point 使用“直接写明”并给出引号内完整文字时，merged_comment 和对应 selected_anchors[].comment_text 必须只输出引号内的目标文字，逐字一致，不得添加“在合同首部增加以下文字”“建议补充”“当前缺失”等前缀或后缀。其他固定替换文字也必须完整给出，不得使用“指定提示语”“特定提示语”“相关内容”“相应约定”等指代词。
+  8. merged_comment 和 selected_anchors[].comment_text 必须直接、具体、可执行，不写“作为参照”“证明已审查”，不把审查责任转回用户。
+  9. selected_anchors[].anchor_key 只能从当前 decision 的 source_issue_keys 所属 anchors 中选择，不得编造或改写 key；comment_text 必须只评价该 anchor_key 的 quoted_text。
+  10. 总结优先呈现高风险，以及被标记为 summary_only 或 both 的整体问题；priority_comments 直接写修改建议，不得包含 C14::14.1 等内部 issue_key；不生成风险表格，不输出 Markdown。
   11. 总结涉及甲方、乙方、采购人、服务方等主体称谓时，沿用输入表述，不得默认甲方为审查主体，不得改写为“我方”或公司全称。
 
   必须直接返回 JSON，不要输出 JSON 之外的文字。返回格式：
@@ -199,13 +199,18 @@ SUMMARIZER_SYSTEM_PROMPT: |2
         "source_issue_keys": ["C01::C01.1"],
         "output_scope": "inline",
         "merged_comment": "可直接写入该处 Word 批注的具体修改意见",
-        "selected_anchor_keys": ["C01::C01.1#anchor_1"]
+        "selected_anchors": [
+          {
+            "anchor_key": "C01::C01.1#anchor_1",
+            "comment_text": "该处原文对应的直接修改意见"
+          }
+        ]
       },
       {
         "source_issue_keys": ["C02::C02.1", "C03::C03.1"],
         "output_scope": "summary_only",
         "merged_comment": "合并后的合同整体问题及具体修改要求",
-        "selected_anchor_keys": []
+        "selected_anchors": []
       }
     ]
   }

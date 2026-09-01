@@ -95,12 +95,13 @@ def apply_issue_decisions(results: list[dict], final_review: dict) -> list[dict]
         source_records = [record_by_key[key] for key in source_keys]
         source_key_set = set(source_keys)
         selected_anchors = []
-        for anchor_key in decision.get("selected_anchor_keys") or []:
+        for annotation in decision.get("selected_anchors") or []:
+            anchor_key = annotation.get("anchor_key", "")
             mapped = anchor_by_key.get(anchor_key)
             if mapped is None or mapped[0]["issue_key"] not in source_key_set:
                 continue
             anchor = deepcopy(mapped[1])
-            anchor["comment_text"] = decision.get("merged_comment", "")
+            anchor["comment_text"] = annotation.get("comment_text", "")
             selected_anchors.append(anchor)
 
         scope = decision.get("output_scope")
@@ -145,3 +146,15 @@ def apply_issue_decisions(results: list[dict], final_review: dict) -> list[dict]
         fallback_result["issues"] = [deepcopy(record["_issue"])]
         rendered.append(fallback_result)
     return rendered
+
+
+def add_summary_issue_comments(final_review: dict) -> dict:
+    """Derive complete summary-only text so the renderer cannot omit routed issues."""
+    enriched = deepcopy(final_review)
+    enriched["summary_issue_comments"] = [
+        decision.get("merged_comment", "").strip()
+        for decision in final_review.get("issue_decisions") or []
+        if decision.get("output_scope") in {"summary_only", "both"}
+        and decision.get("merged_comment", "").strip()
+    ]
+    return enriched

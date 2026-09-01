@@ -11,7 +11,11 @@ from docx.oxml import OxmlElement
 
 from agents.orchestrator import OrchestratorAgent
 from agents.prompts.cn_prompts import load_prompts
-from agents.review_presentation import apply_issue_decisions, prompt_issue_records
+from agents.review_presentation import (
+    add_summary_issue_comments,
+    apply_issue_decisions,
+    prompt_issue_records,
+)
 from agents.schemas import SubAgentOutput, SummaryOutput
 from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
@@ -173,6 +177,16 @@ class DocxAnchorRegressionTests(unittest.TestCase):
             self.assertEqual(report["events"][0]["status"], "unmatched")
             self.assertEqual(report["events"][0]["match_strategy"], "body_content_end_unavailable")
 
+    def test_summary_comment_includes_complete_summary_only_issues(self) -> None:
+        text = DocxReportGenerator._build_summary_comment_text({
+            "overall_comment": "总体概述。",
+            "priority_comments": [],
+            "summary_issue_comments": ["缺失第六、九、十四、十五条。"],
+        })
+
+        self.assertIn("其他审查问题：", text)
+        self.assertIn("缺失第六、九、十四、十五条。", text)
+
 
 class PromptAuthorityTests(unittest.TestCase):
     def test_explicit_criteria_are_authoritative_for_review_and_reflection(self) -> None:
@@ -275,7 +289,10 @@ class ReviewPresentationTests(unittest.TestCase):
                 "source_issue_keys": ["C12::C12.1", "C15::C15.1"],
                 "output_scope": "inline",
                 "merged_comment": "删除重复的“原因”，修改为“因乙方原因”。",
-                "selected_anchor_keys": ["C12::C12.1#anchor_1"],
+                "selected_anchors": [{
+                    "anchor_key": "C12::C12.1#anchor_1",
+                    "comment_text": "删除重复的“原因”，修改为“因乙方原因”。",
+                }],
             }],
         }
 
@@ -295,7 +312,7 @@ class ReviewPresentationTests(unittest.TestCase):
                 "source_issue_keys": [record["issue_key"] for record in records],
                 "output_scope": "summary_only",
                 "merged_comment": "合同存在重复用词，应统一修改。",
-                "selected_anchor_keys": [],
+                "selected_anchors": [],
             }],
         }
 
@@ -310,9 +327,61 @@ class ReviewPresentationTests(unittest.TestCase):
                     "source_issue_keys": ["C12::C12.1"],
                     "output_scope": "inline",
                     "merged_comment": "修改重复词。",
-                    "selected_anchor_keys": [],
+                    "selected_anchors": [],
                 }],
             })
+
+    def test_summary_only_comments_are_derived_for_deterministic_rendering(self) -> None:
+        final_review = {
+            "overall_comment": "总体概述。",
+            "priority_comments": [],
+            "issue_decisions": [{
+                "source_issue_keys": ["C13::C13.1"],
+                "output_scope": "summary_only",
+                "merged_comment": "缺失第六、九、十四、十五条。",
+                "selected_anchors": [],
+            }],
+        }
+
+        enriched = add_summary_issue_comments(final_review)
+
+        self.assertEqual(
+            enriched["summary_issue_comments"],
+            ["缺失第六、九、十四、十五条。"],
+        )
+
+    def test_selected_anchors_keep_distinct_comment_text(self) -> None:
+        results = [self.results[0]]
+        results[0]["issues"][0]["anchors"].append({
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "path:body/p2",
+            "quoted_text": "产品范围保持一致一致",
+            "comment_text": "删除重复文字。",
+        })
+        final_review = {
+            "issue_decisions": [{
+                "source_issue_keys": ["C12::C12.1"],
+                "output_scope": "inline",
+                "merged_comment": "存在两处重复词。",
+                "selected_anchors": [
+                    {
+                        "anchor_key": "C12::C12.1#anchor_1",
+                        "comment_text": "删除重复的“原因”。",
+                    },
+                    {
+                        "anchor_key": "C12::C12.1#anchor_2",
+                        "comment_text": "删除重复的“一致”。",
+                    },
+                ],
+            }],
+        }
+
+        anchors = apply_issue_decisions(results, final_review)[0]["issues"][0]["anchors"]
+
+        self.assertEqual(
+            [anchor["comment_text"] for anchor in anchors],
+            ["删除重复的“原因”。", "删除重复的“一致”。"],
+        )
 
 
 class PreparedContractValidationTests(unittest.TestCase):

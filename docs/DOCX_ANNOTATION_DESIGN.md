@@ -33,7 +33,9 @@ SubAgentOutput
 
 - `output_scope=inline` 只生成原文批注，`summary_only` 只进入总览，`both` 同时进入两处，`discard` 不输出。
 - SummaryAgent 只选择输入中已有的稳定 issue/anchor key；程序负责把 key 映射回原始 `quoted_text`，模型不能改写锚点。
-- 多个审查要点命中同一问题时，一个 decision 可以合并多个 `source_issue_keys`，并只保留一个主锚点。
+- `selected_anchors` 为每个保留锚点分别提供 `comment_text`，因此不同原文不会共用一段罗列其他位置问题的泛化批注。
+- 多个审查要点命中同一处相同问题时，一个 decision 可以合并多个 `source_issue_keys`；只有事实和原文都相同的批注才能合并。
+- `summary_only` / `both` 的完整 `merged_comment` 由程序派生到 `summary_issue_comments`，写入总览的“其他审查问题”，不依赖模型是否在 200 字概述中再次复述。
 - 该职责扩展复用原有 SummaryAgent 调用，不增加新的 LLM 调用。
 
 ## 审查文本如何生成

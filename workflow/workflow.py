@@ -26,7 +26,7 @@ from agents.base_agent import Settings
 from agents.planner import PlannerAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.summarizer import SummarizerAgent
-from agents.review_presentation import apply_issue_decisions
+from agents.review_presentation import add_summary_issue_comments, apply_issue_decisions
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
@@ -158,7 +158,7 @@ class ContractReviewWorkflow:
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
                 async with self.trace.span("phase.summarize", run_type="phase", inputs={"result_count": len(results)}) as span:
-                    final_review = await self._phase_summarize(results)
+                    final_review = add_summary_issue_comments(await self._phase_summarize(results))
                     presentation_results = apply_issue_decisions(results, final_review)
                     span.set_outputs(
                         {

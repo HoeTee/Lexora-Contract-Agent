@@ -79,7 +79,11 @@ class ReviewIssueDecision:
     source_issue_keys: list[str]
     output_scope: Literal["inline", "summary_only", "both", "discard"]
     merged_comment: str                   # 1~200 字
-    selected_anchor_keys: list[str]
+    selected_anchors: list[ReviewAnchorDecision]
+
+class ReviewAnchorDecision:
+    anchor_key: str
+    comment_text: str                     # 该锚点自己的直接修改文字
 ```
 
 ## 单条标准的执行与反思循环
@@ -137,7 +141,7 @@ raw results + final_review.issue_decisions -> presentation_results
 presentation_results + final_review -> generate_docx_report -> 批注版 DOCX
 ```
 
-`raw results` 继续写入审查日志，保留各 criterion 的原始输出；`presentation_results` 只包含最终允许写入原文的批注。`summary_only` 不进入逐条批注，`discard` 不进入任何用户可见产物。该调整复用原有 Summarizer 调用，不增加 LLM 调用次数。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
+`raw results` 继续写入审查日志，保留各 criterion 的原始输出；`presentation_results` 只包含最终允许写入原文的批注。`summary_only` 的完整 `merged_comment` 由程序确定性加入总览，避免模型在 200 字概述中遗漏；`discard` 只允许处理事实错误或完全未被标准触发的无效结果，不能因风险低而删除。该调整复用原有 Summarizer 调用，不增加 LLM 调用次数。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
 
 ## 架构边界
 

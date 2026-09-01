@@ -23,13 +23,18 @@ SUMMARY_EXPECTED_JSON = """
       "source_issue_keys": ["C01::C01.1"],
       "output_scope": "inline",
       "merged_comment": "可直接写入 Word 的具体修改意见",
-      "selected_anchor_keys": ["C01::C01.1#anchor_1"]
+      "selected_anchors": [
+        {
+          "anchor_key": "C01::C01.1#anchor_1",
+          "comment_text": "该锚点对应的直接修改意见"
+        }
+      ]
     },
     {
       "source_issue_keys": ["C02::C02.1", "C03::C03.1"],
       "output_scope": "summary_only",
       "merged_comment": "合并后的合同整体问题",
-      "selected_anchor_keys": []
+      "selected_anchors": []
     }
   ]
 }
