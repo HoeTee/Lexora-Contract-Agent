@@ -377,6 +377,20 @@ class ReviewPresentationTests(unittest.TestCase):
             ["条款序号存在多处断号。"],
         )
 
+    def test_numbering_issue_is_summary_only_even_with_one_anchor(self) -> None:
+        result = self.results[0]
+        result["criterion"] = "检查标题顺序是否杂乱"
+        issue = result["issues"][0]
+        issue["issue_comment"] = "合同条款序号缺失第六条。"
+
+        presentation = build_review_presentation([result])
+
+        self.assertEqual(presentation.inline_results, [])
+        self.assertEqual(
+            presentation.summary_issue_comments,
+            ["合同条款序号缺失第六条。"],
+        )
+
     def test_missing_contract_framework_is_summary_only_with_two_anchors(self) -> None:
         result = self.results[0]
         result["criterion"] = "合同框架需要具备至少以下必备标题"
@@ -404,6 +418,21 @@ class ReviewPresentationTests(unittest.TestCase):
             "xml_anchor_id": "path:body/p2",
             "quoted_text": "附件一：服务清单",
             "comment_text": "此处为附件一实际标题，作为正文引用的修正基准。",
+        })
+
+        presentation = build_review_presentation([self.results[0]])
+        anchors = presentation.inline_results[0]["issues"][0]["anchors"]
+
+        self.assertEqual(len(anchors), 1)
+        self.assertEqual(anchors[0]["xml_anchor_id"], "path:body/p1")
+
+    def test_attachment_heading_reference_is_removed_for_alternate_wording(self) -> None:
+        issue = self.results[0]["issues"][0]
+        issue["anchors"].append({
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "path:body/p2",
+            "quoted_text": "附件一：服务清单",
+            "comment_text": "此处标题为服务清单，请与正文中的附件名称保持一致。",
         })
 
         presentation = build_review_presentation([self.results[0]])

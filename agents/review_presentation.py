@@ -16,6 +16,7 @@ _PRESCRIBED_TEXT_PATTERN = re.compile(r"(?:写明|写入)[“\"](.+)[”\"]")
 _REPLACEMENT_PATTERN = re.compile(r"(?:修改|改)为[：:]?[“\"]?([^”\"。；]+)")
 _REFERENCE_ONLY_TERMS = ("作为修正基准", "作为正文引用的修正基准", "作为对比", "用于对比", "此处为正确", "此处为附件")
 _TEXT_QUALITY_TERMS = ("错别字", "语病", "重复")
+_ATTACHMENT_HEADING_PATTERN = re.compile(r"^附件[一二三四五六七八九十\d]+[：:]")
 
 
 @dataclass(frozen=True)
@@ -219,7 +220,7 @@ def _is_summary_only(record: dict[str, Any]) -> bool:
         return True
     if "缺失" in context and any(term in context for term in _MISSING_STRUCTURE_TERMS):
         return True
-    return len(anchors) >= 3 and any(term in context for term in _GLOBAL_STRUCTURE_TERMS)
+    return any(term in context for term in _GLOBAL_STRUCTURE_TERMS)
 
 
 def _extract_fixed_instruction(record: dict[str, Any]) -> str | None:
@@ -250,7 +251,14 @@ def _valid_anchor(anchor: dict) -> bool:
 
 def _is_reference_only_anchor(anchor: dict) -> bool:
     comment = str(anchor.get("comment_text") or "")
-    return any(term in comment for term in _REFERENCE_ONLY_TERMS)
+    quoted_text = str(anchor.get("quoted_text") or "").strip()
+    return (
+        any(term in comment for term in _REFERENCE_ONLY_TERMS)
+        or (
+            bool(_ATTACHMENT_HEADING_PATTERN.match(quoted_text))
+            and "正文" in comment
+        )
+    )
 
 
 def _summary_comment(record: dict[str, Any]) -> str:
