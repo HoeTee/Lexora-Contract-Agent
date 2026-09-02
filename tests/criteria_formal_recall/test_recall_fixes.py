@@ -21,6 +21,7 @@ from agents.summarizer import (
     SUMMARIZER_MAX_PROMPT_TOKENS,
     SummarizerAgent,
     conservative_message_token_upper_bound,
+    normalize_summary_output,
 )
 from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
@@ -519,6 +520,15 @@ class ReviewPresentationTests(unittest.TestCase):
 
 
 class SummarizerPromptBudgetTests(unittest.TestCase):
+    def test_summary_output_replaces_internal_numbering_jargon(self) -> None:
+        summary = normalize_summary_output({
+            "overall_comment": "合同条款断号严重。",
+            "priority_comments": ["修正序号断号。"],
+        })
+
+        self.assertEqual(summary["overall_comment"], "合同条款编号多处不连续。")
+        self.assertEqual(summary["priority_comments"], ["修正编号不连续。"])
+
     def test_conservative_bound_accepts_small_prompt(self) -> None:
         bound = conservative_message_token_upper_bound([
             {"role": "system", "content": "总结合同"},

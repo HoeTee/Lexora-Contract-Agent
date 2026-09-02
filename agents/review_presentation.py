@@ -260,16 +260,19 @@ def _append_summary_comment(
     if not comment:
         return
     target = opening_notices if _is_opening_notice(record) else global_issues
-    rendered = comment if target is opening_notices else _user_friendly_global_issue(comment)
+    rendered = comment if target is opening_notices else normalize_user_facing_review_text(comment)
     if rendered not in target:
         target.append(rendered)
 
 
-def _user_friendly_global_issue(comment: str) -> str:
+def normalize_user_facing_review_text(comment: str) -> str:
     """Replace internal review jargon in user-facing summary text."""
     replacements = (
         ("合同条款序号存在多处断号", "合同条款编号多处不连续"),
         ("条款序号存在多处断号", "条款编号多处不连续"),
+        ("合同条款断号严重", "合同条款编号多处不连续"),
+        ("条款断号严重", "条款编号多处不连续"),
+        ("断号严重", "编号多处不连续"),
         ("序号断号", "编号不连续"),
         ("断号", "编号不连续"),
     )

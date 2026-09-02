@@ -5,7 +5,10 @@ import json
 from agents.base_agent import Agent
 from agents.json_utils import chat_until_valid_json
 from agents.prompts.cn_prompts import SUMMARIZER_SYSTEM_PROMPT
-from agents.review_presentation import prompt_summary_records
+from agents.review_presentation import (
+    normalize_user_facing_review_text,
+    prompt_summary_records,
+)
 from agents.schemas import SummaryContentOutput, SummaryOutput
 
 
@@ -31,6 +34,19 @@ def conservative_message_token_upper_bound(messages: list[dict]) -> int:
         for message in messages
     )
     return content_bytes + len(messages) * _CHAT_MESSAGE_OVERHEAD_TOKENS
+
+
+def normalize_summary_output(summary: dict) -> dict:
+    """Normalize LLM wording before it reaches the user-facing DOCX comment."""
+    return {
+        "overall_comment": normalize_user_facing_review_text(
+            str(summary.get("overall_comment", ""))
+        ),
+        "priority_comments": [
+            normalize_user_facing_review_text(str(item))
+            for item in summary.get("priority_comments", [])
+        ],
+    }
 
 
 class SummarizerAgent(Agent):
@@ -72,7 +88,7 @@ class SummarizerAgent(Agent):
             SUMMARY_EXPECTED_JSON,
             final_attempt_schema=SummaryContentOutput,
         )
-        return parsed
+        return normalize_summary_output(parsed)
 
     async def compile_report(self, results: list[dict]) -> dict:
         """Backward-compatible wrapper for callers not yet renamed."""
