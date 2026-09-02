@@ -17,6 +17,11 @@ from agents.review_presentation import (
     prompt_summary_records,
 )
 from agents.schemas import SubAgentOutput, SummaryOutput
+from agents.summarizer import (
+    SUMMARIZER_MAX_PROMPT_TOKENS,
+    SummarizerAgent,
+    conservative_message_token_upper_bound,
+)
 from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
@@ -181,10 +186,13 @@ class DocxAnchorRegressionTests(unittest.TestCase):
         text = DocxReportGenerator._build_summary_comment_text({
             "overall_comment": "总体概述。",
             "priority_comments": [],
-            "summary_issue_comments": ["缺失第六、九、十四、十五条。"],
+            "opening_notices": ["注意：补充固定提示语。"],
+            "global_issues": ["缺失第六、九、十四、十五条。"],
         })
 
-        self.assertIn("其他审查问题：", text)
+        self.assertIn("合同首部需补充的提示：", text)
+        self.assertIn("注意：补充固定提示语。", text)
+        self.assertIn("全局审查问题：", text)
         self.assertIn("缺失第六、九、十四、十五条。", text)
 
 
@@ -200,6 +208,7 @@ class PromptAuthorityTests(unittest.TestCase):
         self.assertIn("固定文字完整性", prompts["REFLECTOR_SYSTEM_PROMPT"])
         self.assertNotIn("output_scope 枚举", prompts["SUMMARIZER_SYSTEM_PROMPT"])
         self.assertIn("不得输出 issue_decisions", prompts["SUMMARIZER_SYSTEM_PROMPT"])
+        self.assertIn("不得使用“断号”", prompts["SUMMARIZER_SYSTEM_PROMPT"])
         self.assertIn("付款计划数量必须按", prompts["SUB_AGENT_BASE_PROMPT"])
         self.assertIn("付款节点计数", prompts["REFLECTOR_SYSTEM_PROMPT"])
 
@@ -341,7 +350,8 @@ class ReviewPresentationTests(unittest.TestCase):
         presentation = build_review_presentation([self.results[0]])
 
         self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(presentation.summary_issue_comments, ["存在重复用词。"])
+        self.assertEqual(presentation.global_issues, ["存在重复用词。"])
+        self.assertEqual(presentation.opening_notices, [])
         self.assertEqual(len(presentation.summarizer_results), 1)
 
     def test_multi_anchor_numbering_issue_is_summary_only(self) -> None:
@@ -373,8 +383,8 @@ class ReviewPresentationTests(unittest.TestCase):
 
         self.assertEqual(presentation.inline_results, [])
         self.assertEqual(
-            presentation.summary_issue_comments,
-            ["条款序号存在多处断号。"],
+            presentation.global_issues,
+            ["条款编号多处不连续。"],
         )
 
     def test_numbering_issue_is_summary_only_even_with_one_anchor(self) -> None:
@@ -387,7 +397,7 @@ class ReviewPresentationTests(unittest.TestCase):
 
         self.assertEqual(presentation.inline_results, [])
         self.assertEqual(
-            presentation.summary_issue_comments,
+            presentation.global_issues,
             ["合同条款序号缺失第六条。"],
         )
 
@@ -407,7 +417,7 @@ class ReviewPresentationTests(unittest.TestCase):
 
         self.assertEqual(presentation.inline_results, [])
         self.assertEqual(
-            presentation.summary_issue_comments,
+            presentation.global_issues,
             ["合同框架缺失多项必备标题：保密条款、争议解决。"],
         )
 
@@ -441,7 +451,7 @@ class ReviewPresentationTests(unittest.TestCase):
         self.assertEqual(len(anchors), 1)
         self.assertEqual(anchors[0]["xml_anchor_id"], "path:body/p1")
 
-    def test_fixed_instruction_comes_from_current_check_point_only(self) -> None:
+    def test_keyword_triggered_fixed_instruction_is_routed_to_opening_summary(self) -> None:
         results = [{
             "criterion_id": "FIXED",
             "criterion": "如果标题出现采购，就直接在合同首部写明“注意：完整固定文字”。",
@@ -463,13 +473,26 @@ class ReviewPresentationTests(unittest.TestCase):
         }]
 
         presentation = build_review_presentation(results)
-        issue = presentation.inline_results[0]["issues"][0]
-
-        self.assertEqual(issue["issue_comment"], "注意：当前检查点固定文字")
+        self.assertEqual(presentation.inline_results, [])
         self.assertEqual(
-            issue["anchors"][0]["comment_text"],
-            "注意：当前检查点固定文字",
+            presentation.opening_notices,
+            ["注意：当前检查点固定文字"],
         )
+
+    def test_missing_content_fixed_instruction_remains_inline(self) -> None:
+        result = self.results[0]
+        result["criterion"] = (
+            "检查联系信息，如无则在合同首部写明“注意：请补充合同基本信息”。"
+        )
+        issue = result["issues"][0]
+        issue["check_point"] = (
+            "如无联系地址，在合同首部写明“注意：请补充合同基本信息”"
+        )
+
+        presentation = build_review_presentation([result])
+
+        self.assertEqual(len(presentation.inline_results), 1)
+        self.assertEqual(presentation.opening_notices, [])
 
     def test_duration_issue_is_routed_to_summary(self) -> None:
         self.results[0]["issues"][0]["check_point"] = "补充合同履行期限"
@@ -477,7 +500,7 @@ class ReviewPresentationTests(unittest.TestCase):
         presentation = build_review_presentation([self.results[0]])
 
         self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(presentation.summary_issue_comments, ["存在重复用词。"])
+        self.assertEqual(presentation.global_issues, ["存在重复用词。"])
 
     def test_nested_prescribed_text_is_complete_in_summary(self) -> None:
         issue = self.results[0]["issues"][0]
@@ -490,9 +513,33 @@ class ReviewPresentationTests(unittest.TestCase):
         presentation = build_review_presentation([self.results[0]])
 
         self.assertEqual(
-            presentation.summary_issue_comments,
+            presentation.global_issues,
             ["注意：补充“以下为合同签署栏”或“以下无正文”"],
         )
+
+
+class SummarizerPromptBudgetTests(unittest.TestCase):
+    def test_conservative_bound_accepts_small_prompt(self) -> None:
+        bound = conservative_message_token_upper_bound([
+            {"role": "system", "content": "总结合同"},
+            {"role": "user", "content": "问题列表"},
+        ])
+
+        self.assertLess(bound, SUMMARIZER_MAX_PROMPT_TOKENS)
+
+    def test_conservative_bound_rejects_prompt_above_hard_limit(self) -> None:
+        messages = [
+            {"role": "user", "content": "x" * SUMMARIZER_MAX_PROMPT_TOKENS},
+        ]
+        bound = conservative_message_token_upper_bound(messages)
+
+        self.assertGreater(bound, SUMMARIZER_MAX_PROMPT_TOKENS)
+        summarizer = SummarizerAgent.__new__(SummarizerAgent)
+        summarizer.messages = messages
+        summarizer.MAX_CONTEXT_TOKENS = 254_000
+        summarizer.debug = False
+        with self.assertRaisesRegex(ValueError, "90000-token safety limit"):
+            summarizer._check_context_limits()
 
 
 class PreparedContractValidationTests(unittest.TestCase):

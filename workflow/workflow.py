@@ -162,9 +162,8 @@ class ContractReviewWorkflow:
                     final_review = await self._phase_summarize(
                         presentation.summarizer_results
                     )
-                    final_review["summary_issue_comments"] = (
-                        presentation.summary_issue_comments
-                    )
+                    final_review["opening_notices"] = presentation.opening_notices
+                    final_review["global_issues"] = presentation.global_issues
                     presentation_results = presentation.inline_results
                     span.set_outputs(
                         {
@@ -188,9 +187,8 @@ class ContractReviewWorkflow:
                                 for result in presentation_results
                                 for issue in result.get("issues", [])
                             ],
-                            "summary_issue_comments": (
-                                presentation.summary_issue_comments
-                            ),
+                            "opening_notices": presentation.opening_notices,
+                            "global_issues": presentation.global_issues,
                         }
                     )
 

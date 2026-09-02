@@ -19,6 +19,19 @@ SUMMARY_EXPECTED_JSON = """
 }
 """
 
+SUMMARIZER_MAX_PROMPT_TOKENS = 90_000
+_CHAT_MESSAGE_OVERHEAD_TOKENS = 64
+
+
+def conservative_message_token_upper_bound(messages: list[dict]) -> int:
+    """Return a byte-based upper bound for one chat request's prompt tokens."""
+    content_bytes = sum(
+        len(str(message.get("role", "")).encode("utf-8"))
+        + len(str(message.get("content", "")).encode("utf-8"))
+        for message in messages
+    )
+    return content_bytes + len(messages) * _CHAT_MESSAGE_OVERHEAD_TOKENS
+
 
 class SummarizerAgent(Agent):
     """Summarizes canonical review issues for the DOCX opening comment."""
@@ -29,6 +42,15 @@ class SummarizerAgent(Agent):
             name="Summarizer",
             **kwargs,
         )
+
+    def _check_context_limits(self):
+        super()._check_context_limits()
+        upper_bound = conservative_message_token_upper_bound(self.messages)
+        if upper_bound > SUMMARIZER_MAX_PROMPT_TOKENS:
+            raise ValueError(
+                "Summarizer prompt exceeds the 90000-token safety limit "
+                f"(conservative upper bound: {upper_bound})."
+            )
 
     async def compile_summary_comment(self, results: list[dict]) -> dict:
         """Generate overall_comment and priority_comments from canonical issues."""

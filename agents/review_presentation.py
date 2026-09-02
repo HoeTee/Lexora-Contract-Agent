@@ -25,7 +25,8 @@ class ReviewPresentation:
 
     inline_results: list[dict]
     summarizer_results: list[dict]
-    summary_issue_comments: list[str]
+    opening_notices: list[str]
+    global_issues: list[str]
 
 
 def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
@@ -105,7 +106,8 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
     records = collect_issue_records(results)
     inline_results: list[dict] = []
     summary_results: list[dict] = []
-    summary_issue_comments: list[str] = []
+    opening_notices: list[str] = []
+    global_issues: list[str] = []
     represented: set[str] = set()
     annotations: dict[tuple[str, str, str, str], dict] = {}
 
@@ -114,8 +116,7 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
         if _is_summary_only(record):
             comment = _summary_comment(record)
             summary_results.append(_materialize_result(record, [], comment))
-            if comment and comment not in summary_issue_comments:
-                summary_issue_comments.append(comment)
+            _append_summary_comment(record, comment, opening_notices, global_issues)
             represented.add(issue_key)
             continue
 
@@ -159,8 +160,7 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
             else:
                 comment = _summary_comment(record)
                 summary_results.append(_materialize_result(record, [], comment))
-                if comment and comment not in summary_issue_comments:
-                    summary_issue_comments.append(comment)
+                _append_summary_comment(record, comment, opening_notices, global_issues)
                 represented.add(issue_key)
             continue
 
@@ -183,7 +183,8 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
     return ReviewPresentation(
         inline_results=inline_results,
         summarizer_results=deepcopy(inline_results) + deepcopy(summary_results),
-        summary_issue_comments=summary_issue_comments,
+        opening_notices=opening_notices,
+        global_issues=global_issues,
     )
 
 
@@ -212,6 +213,8 @@ def _is_summary_only(record: dict[str, Any]) -> bool:
     anchors = record.get("anchors") or []
     if not anchors:
         return True
+    if _is_keyword_triggered_opening_notice(record):
+        return True
     context = " ".join(
         str(record.get(field) or "")
         for field in ("criterion", "check_point", "issue_comment")
@@ -221,6 +224,59 @@ def _is_summary_only(record: dict[str, Any]) -> bool:
     if "缺失" in context and any(term in context for term in _MISSING_STRUCTURE_TERMS):
         return True
     return any(term in context for term in _GLOBAL_STRUCTURE_TERMS)
+
+
+def _is_keyword_triggered_opening_notice(record: dict[str, Any]) -> bool:
+    """Identify fixed opening notices triggered only by a title keyword."""
+    if not _extract_fixed_instruction(record):
+        return False
+    context = " ".join(
+        str(record.get(field) or "")
+        for field in ("criterion", "check_point")
+    )
+    return (
+        "出现" in context
+        and "首部" in context
+        and any(term in context for term in ("合同名称", "合同目录", "标题"))
+    )
+
+
+def _is_opening_notice(record: dict[str, Any]) -> bool:
+    if not _extract_fixed_instruction(record):
+        return False
+    context = " ".join(
+        str(record.get(field) or "")
+        for field in ("criterion", "check_point")
+    )
+    return "首部" in context
+
+
+def _append_summary_comment(
+    record: dict[str, Any],
+    comment: str,
+    opening_notices: list[str],
+    global_issues: list[str],
+) -> None:
+    if not comment:
+        return
+    target = opening_notices if _is_opening_notice(record) else global_issues
+    rendered = comment if target is opening_notices else _user_friendly_global_issue(comment)
+    if rendered not in target:
+        target.append(rendered)
+
+
+def _user_friendly_global_issue(comment: str) -> str:
+    """Replace internal review jargon in user-facing summary text."""
+    replacements = (
+        ("合同条款序号存在多处断号", "合同条款编号多处不连续"),
+        ("条款序号存在多处断号", "条款编号多处不连续"),
+        ("序号断号", "编号不连续"),
+        ("断号", "编号不连续"),
+    )
+    rendered = comment
+    for source, replacement in replacements:
+        rendered = rendered.replace(source, replacement)
+    return rendered
 
 
 def _extract_fixed_instruction(record: dict[str, Any]) -> str | None:

@@ -627,7 +627,8 @@ class DocxReportGenerator:
         lines: list[str] = []
         overall_comment = str(summary_sections.get("overall_comment", "")).strip()
         priority_comments = summary_sections.get("priority_comments", [])
-        summary_issue_comments = summary_sections.get("summary_issue_comments", [])
+        opening_notices = summary_sections.get("opening_notices", [])
+        global_issues = summary_sections.get("global_issues", [])
 
         if overall_comment:
             lines.append("总体审查结论：")
@@ -645,16 +646,28 @@ class DocxReportGenerator:
             for index, item in enumerate(valid_priority_comments, start=1):
                 lines.append(f"{index}. {item}")
 
-        valid_summary_issue_comments = [
+        valid_opening_notices = [
             item.strip()
-            for item in summary_issue_comments
+            for item in opening_notices
             if isinstance(item, str) and item.strip()
         ]
-        if valid_summary_issue_comments:
+        if valid_opening_notices:
             if lines:
                 lines.append("")
-            lines.append("其他审查问题：")
-            for index, item in enumerate(valid_summary_issue_comments, start=1):
+            lines.append("合同首部需补充的提示：")
+            for index, item in enumerate(valid_opening_notices, start=1):
+                lines.append(f"{index}. {item}")
+
+        valid_global_issues = [
+            item.strip()
+            for item in global_issues
+            if isinstance(item, str) and item.strip()
+        ]
+        if valid_global_issues:
+            if lines:
+                lines.append("")
+            lines.append("全局审查问题：")
+            for index, item in enumerate(valid_global_issues, start=1):
                 lines.append(f"{index}. {item}")
 
         return "\n".join(lines)
