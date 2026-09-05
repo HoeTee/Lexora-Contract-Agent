@@ -34,7 +34,7 @@ def configure(variant):
         value["redis_url"] = "redis://127.0.0.1:6380/0"
     config.QUEUE_ENABLED = False
     config.DATA_DIR = str(ROOT / "data" / "api" / f"docxindex_ablation_{variant}")
-    config.MCP_SERVER_TARGET = "module:tests.docxindex_ablation.service"
+    config.MCP_SERVER_TARGET = f"module:tests.docxindex_ablation.{variant}_server"
     os.environ["DOCXINDEX_ABLATION_VARIANT"] = variant
     return config
 
@@ -45,7 +45,14 @@ def serve_mcp(variant):
         f"[Ablation] variant={variant}; production workflow; isolated intervention process", file=sys.stderr, flush=True
     )
     if variant == "baseline":
-        importlib.import_module("mcp_service.server.server").mcp.run()
+        original = retrieval.DocxIndexRetriever._build_index_sync
+
+        def baseline_build(engine, path):
+            append_model_event("docxindex_ablation", variant="baseline", operation="installed")
+            return original(engine, path)
+
+        with patch.object(retrieval.DocxIndexRetriever, "_build_index_sync", baseline_build):
+            importlib.import_module("mcp_service.server.server").mcp.run()
         return
     # One permanent patch set per MCP process. No per-query global patch races.
     original_build = retrieval.DocxIndexRetriever._build_index_sync
@@ -54,6 +61,7 @@ def serve_mcp(variant):
     indices = {}
 
     def build(engine, path):
+        append_model_event("docxindex_ablation", variant="safe", operation="installed")
         result = original_build(engine, path)
         index = engine._index
         indices[id(index)] = (index, {n["node_id"]: n for n in index["nodes"]}, IndexedFormatter(index))

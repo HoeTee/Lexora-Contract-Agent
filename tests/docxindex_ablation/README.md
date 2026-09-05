@@ -53,7 +53,7 @@ python -m tests.docxindex_ablation.report --output $experiment
 使用新结果目录重采该合同。原失败记录保留，不覆盖。`live` 的续跑只能使用同一捕获目录。
 
 正式任务失败后默认停止。调查原因后，如保持相同模型和配置重试，可显式使用 `formal --retry-failed`；
-旧失败记录保存到 `formal/<variant>/attempts/`，原 API task_id 不被覆盖，汇总保留失败尝试。
+旧失败记录保存到 `formal_verified/<variant>/attempts/`，原 API task_id 不被覆盖，汇总保留失败尝试。
 
 ## 正式主程序对照
 
@@ -69,7 +69,6 @@ python -m tests.docxindex_ablation.service --api --variant safe --port 5102
 
 ```powershell
 python -m tests.docxindex_ablation.formal --output $experiment
-python -m tests.docxindex_ablation.judge --output $experiment
 python -m tests.docxindex_ablation.report --output $experiment
 ```
 
@@ -79,9 +78,24 @@ python -m tests.docxindex_ablation.report --output $experiment
 - 测试进程禁用 Celery 入队，使用原 API 已有的进程内执行分支；审查 workflow 不变。
 - Redis 使用 Docker 发布端口 `127.0.0.1:6380`，保留现有全局模型限额和 key；Redis 容器必须已启动。
 - 真实 API 任务存入 `data/api/docxindex_ablation_<variant>/api/<task_id>/`，不会在启动时扫描或改写原服务任务。
-- 批注 DOCX 和评测结果复制到 `tests/docxindex_ablation/results/<run>/formal/<variant>/`。
+- 批注 DOCX 和评测结果复制到 `tests/docxindex_ablation/results/<run>/formal_verified/<variant>/`。
 - 两种配置按合同交替执行顺序，各一遍；这是配对筛查，不足以消除全部模型随机性。不能宣称显著提速。
 - 结束后关闭两个测试终端；不要停止用户原有服务或 Redis。
+
+### 干预生效校验与本轮纠正
+
+MCP SDK 不会默认继承全部环境变量。早期 `formal/safe/` 中的任务虽然带有候选标签，
+但子进程实际运行了基线；这些任务不能作为候选对照，保留原始文件并列入
+`invalid_treatment_runs.json`，不参与新报告。早期基线任务通过启动器源码审计确认后复用，
+其记录明确标注 `legacy baseline source/launcher audit; no runtime marker`，不伪造日志。
+
+新入口使用 `baseline_server` / `safe_server` 显式模块选择，不依赖环境变量传递。
+每次实际建索引会在本任务 `events.log` 写入 `docxindex_ablation variant=... operation=installed`；
+缺少、错误或混合标签都不能通过实验有效性校验。单候选跳过另记录 `skip_single_rerank`。
+可用 `--variants safe --contracts D01` 先验证单份，再扩大范围。
+
+旧 `judge` 输出包含无效候选标签，而且事实抽检失败，仅保留为失败的自动评判尝试；
+新报告不导入这些召回率/准确率数字，质量结论须审阅实际 DOCX 后确认。
 
 ## 结果口径
 

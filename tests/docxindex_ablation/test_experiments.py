@@ -2,10 +2,13 @@
 
 from copy import deepcopy
 import json
+import os
 from pathlib import Path
+import runpy
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import zipfile
 
 from pydantic import ValidationError
@@ -15,6 +18,7 @@ from tools.docxindex.llm.schemas import RerankResponse
 from tools.docxindex.retrieval import content
 from tests.docxindex_ablation.run import anchor_texts
 from tests.docxindex_ablation.judge import new_ai_comments, validated_schema
+from tests.docxindex_ablation.formal import verify_intervention
 from tests.docxindex_ablation.variants import (
     IndexedFormatter,
     ORIGINAL_RERANK,
@@ -150,6 +154,27 @@ class ExperimentTests(unittest.TestCase):
         )
         self.assertEqual((duplicates, added), (1, 0))
         self.assertNotEqual(json.dumps(before), json.dumps(after))
+
+
+class InterventionProvenanceTests(unittest.TestCase):
+    def test_explicit_entrypoints_ignore_wrong_inherited_variant(self):
+        for variant, wrong in (("safe", "baseline"), ("baseline", "safe")):
+            with patch.dict(os.environ, {"DOCXINDEX_ABLATION_VARIANT": wrong}):
+                with patch("tests.docxindex_ablation.service.serve_mcp") as serve:
+                    runpy.run_module(f"tests.docxindex_ablation.{variant}_server", run_name="__main__")
+                serve.assert_called_once_with(variant)
+
+    def test_missing_wrong_and_mixed_markers_are_rejected(self):
+        with TemporaryDirectory() as folder:
+            path = Path(folder) / "events.log"
+            self.assertFalse(verify_intervention(path, "safe"))
+            path.write_text("docxindex_ablation variant=baseline operation=installed\n", encoding="utf-8")
+            self.assertFalse(verify_intervention(path, "safe"))
+            path.write_text("docxindex_ablation variant=safe operation=installed\n", encoding="utf-8")
+            self.assertTrue(verify_intervention(path, "safe"))
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write("docxindex_ablation variant=baseline operation=installed\n")
+            self.assertFalse(verify_intervention(path, "safe"))
 
 
 if __name__ == "__main__":

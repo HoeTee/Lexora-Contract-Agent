@@ -126,9 +126,9 @@ def judge(args):
         expected = list(csv.DictReader(handle))
     recalls, verdicts = [], []
     for variant in ("baseline", "safe"):
-        for task_file in sorted((args.output / "formal" / variant).glob("D[0-9][0-9].json")):
+        for task_file in sorted((args.output / "formal_verified" / variant).glob("D[0-9][0-9].json")):
             task = read_json(task_file)
-            if task["status"] != "succeeded":
+            if task["status"] != "succeeded" or not task.get("experiment_valid"):
                 continue
             contract = task["contract_id"]
             index = read_json(args.output / contract / "index.json")
@@ -173,7 +173,7 @@ EXPECTED_JSON（仅示例形状；recall必须恰好18条且criterion_id为1到1
             )
             if estimate_tokens(prompt) > 90000:
                 raise ValueError(f"Judge input exceeds 90k; no silent truncation: {contract} {variant}")
-            filename = args.output / "judgements_v3" / f"{contract}-{variant}.json"
+            filename = args.output / "judgements_verified_draft" / f"{contract}-{variant}-{task['task_id']}.json"
             schema = validated_schema(by_id)
             result = None
             effective_prompt = prompt

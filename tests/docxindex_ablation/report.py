@@ -73,10 +73,12 @@ def report(output):
     formal = []
     failed_attempts = {}
     phases, criterion_traces = [], []
-    recalls = csv_rows(output / "recall_judgements.csv")
-    comments = csv_rows(output / "comment_judgements.csv")
+    # Old model judgements include mislabeled treatments and failed factual checks.
+    # They remain archived but must not enter verified experiment statistics.
+    recalls = []
+    comments = []
     for variant in ("baseline", "safe"):
-        for file in sorted((output / "formal" / variant / "attempts").glob("*.json")):
+        for file in sorted((output / "formal_verified" / variant / "attempts").glob("*.json")):
             task = read_json(file)
             if task["status"] != "succeeded":
                 failed_attempts[task["task_id"]] = {
@@ -87,8 +89,21 @@ def report(output):
                     "seconds": task["duration_seconds"],
                     "error": task["error"],
                 }
-        for file in sorted((output / "formal" / variant).glob("D[0-9][0-9].json")):
+        for file in sorted((output / "formal_verified" / variant).glob("D[0-9][0-9].json")):
             task = read_json(file)
+            if not task.get("experiment_valid"):
+                continue
+            events_path = (
+                ROOT
+                / "data"
+                / "api"
+                / f"docxindex_ablation_{variant}"
+                / "api"
+                / task["task_id"]
+                / "logs"
+                / "events.log"
+            )
+            events = events_path.read_text(encoding="utf-8") if events_path.exists() else ""
             if task["status"] != "succeeded":
                 failed_attempts[task["task_id"]] = {
                     "contract_id": task["contract_id"],
@@ -157,6 +172,8 @@ def report(output):
                     "status": task["status"],
                     "seconds": task["duration_seconds"],
                     "docx": task["output_docx"],
+                    "verification": task.get("verification", "runtime intervention marker"),
+                    "single_reranks_skipped": events.count("operation=skip_single_rerank"),
                     "llm_draft_recall": round(recalled / 18, 4) if len(expected_rows) == 18 else "",
                     "llm_draft_precision": round(correct / (correct + incorrect), 4) if correct + incorrect else "",
                     "recalled_of_18": recalled if expected_rows else "",
@@ -179,6 +196,8 @@ def report(output):
             "status",
             "seconds",
             "docx",
+            "verification",
+            "single_reranks_skipped",
             "llm_draft_recall",
             "llm_draft_precision",
             "recalled_of_18",
@@ -239,6 +258,7 @@ def report(output):
         "variable_baseline_calls": sum(r["distinct_baseline_anchor_sets"] > 1 for r in noise),
         "formal_tasks": len(formal),
         "formal_successes": sum(r["status"] == "succeeded" for r in formal),
+        "formal_single_reranks_skipped": sum(r["single_reranks_skipped"] for r in formal),
     }
     summary["formal_failed_attempts_including_retried"] = len(failed_attempts)
     write_json(output / "summary.json", summary)
@@ -299,6 +319,7 @@ def report(output):
         "采用原 app/API → workflow → MCP → reviewer/reflector/summarizer → DOCX 写入；测试启动器只注入实验差异。",
         "隔离端口 5101/5102，队列改为进程内调度，Redis 指向 Docker 发布端口 6380；未修改运行中的服务。",
         "safe 组合为 E01/E05/E06/E07/E08，不含 E02/E03/E04 或提示词字段删除。",
+        "本轮候选组因修复启动器而补跑，未与早期基线交错执行；时间受模型波动及外部服务负载影响，不作因果提速结论。",
         "未判定的质量字段留空；完成 judge 的行是模型初判，不是人工准确率。",
         "抽检已发现自动评判存在事实误判，例如 D01-C10 对签署栏名称的判断；因此 llm_draft_* 仅作人工审阅草稿，不用于判定本轮质量提升或下降。",
         "召回按 18 条固定期望计算，错误或存疑期望另列；准确率=正确普通批注/(正确+错误普通批注)，存疑批注另列，总结不进该分母。",
@@ -310,7 +331,8 @@ def report(output):
         "- local_rerank.csv / concurrency.json：真实重排函数本地操作及共享限流测试。",
         "- live_summary.csv / live/：真实配对的提示词、响应及最终证据。",
         "- content_boundary_diffs.csv：单节点构造的边界探针，不冒充实际查询预算违规。",
-        "- formal/<variant>/annotated/：正式主程序生成的批注合同。",
+        "- formal_verified/<variant>/annotated/：正式主程序生成的有效对照批注合同。",
+        "- invalid_treatment_runs.json：旧候选标签未传入 MCP 子进程的无效对照清单；原始 formal/ 保留但不参与本报告。",
         "",
     ]
     (output / "recommendations.md").write_text("\n".join(lines), encoding="utf-8")
