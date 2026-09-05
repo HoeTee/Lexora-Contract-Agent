@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#14213d">
+    <title>{% block title %}合同智能审核系统{% endblock %}</title>
+    <link rel="stylesheet" href="/static/app.css?v=20260905-responsive-redesign">
+    <script src="/static/app.js?v=20260905-responsive-redesign" defer></script>
+  </head>
+  <body class="app-page" data-auth-check="true">
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <button class="nav-overlay" type="button" data-nav-close aria-label="关闭导航"></button>
+
+    <div class="app-shell">
+      <aside class="sidebar" id="app-sidebar" aria-label="{{ '管理员导航' if nav_scope == 'admin' else '主导航' }}">
+        <div class="sidebar-brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M6.5 3.5h7.7l3.8 3.8v13.2H6.5z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M14 3.9v4h3.8M9.2 12h6M9.2 15.5h4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </span>
+          <span class="brand-copy">
+            <strong>{{ "管理控制台" if nav_scope == "admin" else "Lexora 审查" }}</strong>
+            <small>合同智能审核系统</small>
+          </span>
+          <button class="sidebar-close" type="button" data-nav-close aria-label="关闭导航">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>
+          </button>
+        </div>
+
+        <nav class="nav-list">
+          {% if nav_scope == "admin" %}
+          <a class="nav-item {{ 'active' if active_nav == 'dashboard' else '' }}" href="/web/admin?ctx={{ ctx }}" {% if active_nav == "dashboard" %}aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h7V4H4zm0 7h7v-4H4zm10 0h6v-9h-6zm0-16v4h6V4z"/></svg>
+            <span>后台首页</span>
+          </a>
+          <a class="nav-item {{ 'active' if active_nav == 'users' else '' }}" href="/web/admin/users?ctx={{ ctx }}" {% if active_nav == "users" %}aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 20v-1.7c0-2.1-1.8-3.8-4-3.8H7c-2.2 0-4 1.7-4 3.8V20m6.5-9A3.5 3.5 0 1 0 9.5 4a3.5 3.5 0 0 0 0 7zm7.2 3.7c2 .3 3.3 1.7 3.3 3.6V20m-3-15.8a3.5 3.5 0 0 1 0 6.6"/></svg>
+            <span>用户管理</span>
+          </a>
+          {% else %}
+          <a class="nav-item {{ 'active' if active_nav == 'work' else '' }}" href="/web/work?ctx={{ ctx }}" {% if active_nav == "work" %}aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5M5 14v5h14v-5"/></svg>
+            <span>上传审核</span>
+          </a>
+          <a class="nav-item {{ 'active' if active_nav == 'history' else '' }}" href="/web/history?ctx={{ ctx }}" {% if active_nav == "history" %}aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.6M4 4v4.6h4.6M12 8v4l2.8 1.8"/></svg>
+            <span>审核历史</span>
+          </a>
+          <a class="nav-item {{ 'active' if active_nav == 'settings' else '' }}" href="/web/settings?ctx={{ ctx }}" {% if active_nav == "settings" %}aria-current="page"{% endif %}>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zm7-3.2 1.5-1.2-1.8-3.1-1.9.8a7 7 0 0 0-1.7-1L15 5.4h-3.6l-.3 2.1a7 7 0 0 0-1.7 1l-1.9-.8-1.8 3.1L7 12a7 7 0 0 0 0 2l-1.5 1.2 1.8 3.1 1.9-.8a7 7 0 0 0 1.7 1l.3 2.1h3.6l.3-2.1a7 7 0 0 0 1.7-1l1.9.8 1.8-3.1L19 14a7 7 0 0 0 0-2z"/></svg>
+            <span>用户设置</span>
+          </a>
+          {% endif %}
+        </nav>
+
+        <div class="sidebar-context">
+          <span>当前租户</span>
+          <strong>{{ tenant_name }}</strong>
+          <small>{{ tenant_id }}</small>
+        </div>
+      </aside>
+
+      <div class="main-area">
+        <header class="topbar">
+          <div class="topbar-leading">
+            <button class="nav-toggle" type="button" data-nav-toggle aria-controls="app-sidebar" aria-expanded="false" aria-label="打开导航">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+            </button>
+            <div class="page-heading">
+              <p class="eyebrow">{% block eyebrow %}工作台{% endblock %}</p>
+              <h1>{% block heading %}合同智能审核{% endblock %}</h1>
+            </div>
+          </div>
+
+          <div class="topbar-actions">
+            {% block header_actions %}{% endblock %}
+            <div class="account-chip" title="{{ tenant_name }} · {{ username }}">
+              <span class="account-avatar" aria-hidden="true">{{ (display_name or username or "U")[:1] }}</span>
+              <span class="account-copy">
+                <strong>{{ display_name }}</strong>
+                <small>{{ username }}</small>
+              </span>
+            </div>
+            <form method="post" action="/web/logout?ctx={{ ctx }}" class="user-action-form">
+              <button type="submit" class="icon-button" title="退出登录" aria-label="退出登录">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5m5-3 4-4-4-4m4 4H9"/></svg>
+              </button>
+            </form>
+          </div>
+        </header>
+
+        <main class="page-content {% block content_class %}{% endblock %}" id="main-content">
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+    </div>
+  </body>
+</html>

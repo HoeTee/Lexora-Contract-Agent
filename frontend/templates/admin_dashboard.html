@@ -1,103 +1,59 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>管理员后台 - 合同智能审核系统</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260601-admin-ui">
-    <script src="/static/app.js?v=20260720-no-auto-reload" defer></script>
-  </head>
-  <body class="app-page" data-auth-check="true">
-    <div class="app-frame">
-      <aside class="sidebar" aria-label="管理员导航">
-        <div class="sidebar-brand">
-          <span class="brand-icon small" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M7 3.5h7.2L18.5 7.8v12.7H7z" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M14 4v4h4" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M9.6 12.1h5M9.6 15.5h5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <div>
-            <strong>管理后台</strong>
-            <span>审查控制台</span>
-          </div>
-        </div>
-        <nav class="nav-list">
-          <a class="nav-item active" href="/web/admin?ctx={{ ctx }}">后台首页</a>
-          <a class="nav-item" href="/web/admin/users?ctx={{ ctx }}">用户管理</a>
-        </nav>
-      </aside>
+{% extends "base.html" %}
+{% set nav_scope = "admin" %}
+{% set active_nav = "dashboard" %}
 
-      <div class="main-area">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">管理员</p>
-            <h1>后台首页</h1>
-          </div>
-          <div class="user-box">
-            <div class="user-summary">
-              <span>{{ tenant_name }}</span>
-              <span>当前管理员</span>
-              <strong>{{ display_name }} · {{ username }}</strong>
-            </div>
-            <form method="post" action="/web/logout?ctx={{ ctx }}" class="user-action-form">
-              <button type="submit" class="secondary-button compact-button">退出登录</button>
-            </form>
-          </div>
-        </header>
+{% block title %}管理后台 · 合同智能审核系统{% endblock %}
+{% block eyebrow %}管理控制台{% endblock %}
+{% block heading %}运行概览{% endblock %}
+{% block header_actions %}
+  <a class="secondary-button compact-button header-action" href="/web/admin/users?ctx={{ ctx }}">管理用户</a>
+{% endblock %}
 
-        <main class="content-grid single admin-console">
-          <section class="panel admin-hero-panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">概览</p>
-                <h2>运行摘要</h2>
-              </div>
-              <a class="secondary-button compact-button user-link-button" href="/web/admin/users?ctx={{ ctx }}">管理用户</a>
-            </div>
-            <div class="summary-grid admin-summary-grid">
-              <div><span>用户总数</span><strong>{{ summary.user_count }}</strong></div>
-              <div><span>管理员</span><strong>{{ summary.admin_count }}</strong></div>
-              <div><span>禁用用户</span><strong>{{ summary.disabled_count }}</strong></div>
-              <div><span>成功审查</span><strong>{{ summary.review_count }}</strong></div>
-            </div>
-          </section>
+{% block content %}
+  <section class="metric-grid" aria-label="运行摘要">
+    <article class="metric-card">
+      <span class="metric-label">用户总数</span><strong>{{ summary.user_count }}</strong><small>当前租户全部账号</small>
+    </article>
+    <article class="metric-card">
+      <span class="metric-label">管理员</span><strong>{{ summary.admin_count }}</strong><small>具有后台访问权限</small>
+    </article>
+    <article class="metric-card">
+      <span class="metric-label">禁用用户</span><strong>{{ summary.disabled_count }}</strong><small>当前无法登录</small>
+    </article>
+    <article class="metric-card metric-card-accent">
+      <span class="metric-label">成功审查</span><strong>{{ summary.review_count }}</strong><small>累计完成任务</small>
+    </article>
+  </section>
 
-          <section class="panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">最近任务</p>
-                <h2>最近审查用户</h2>
-              </div>
-            </div>
-            <div class="table-frame admin-table-frame">
-              <table>
-                <thead>
-                  <tr>
-                    <th>用户</th>
-                    <th>显示名</th>
-                    <th>最近审查时间</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for item in summary.recent_reviews %}
-                  <tr>
-                    <td>{{ item.username }}</td>
-                    <td>{{ item.display_name }}</td>
-                    <td>{{ item.latest_review_at }}</td>
-                    <td><a class="table-action" href="/web/admin/users/{{ item.username }}?ctx={{ ctx }}">查看</a></td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="4" class="empty-state">暂无审查记录</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </main>
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">最近活动</p>
+        <h2>最近提交审核的用户</h2>
+        <p class="section-copy">展示当前租户最近产生审核结果的账号。</p>
       </div>
     </div>
-  </body>
-</html>
+
+    {% if summary.recent_reviews %}
+    <div class="table-frame">
+      <table class="responsive-table">
+        <thead><tr><th>用户</th><th>显示名称</th><th>最近审查时间</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for item in summary.recent_reviews %}
+          <tr>
+            <td data-label="用户"><span class="table-primary">{{ item.username }}</span></td>
+            <td data-label="显示名称">{{ item.display_name }}</td>
+            <td data-label="最近审查">{{ item.latest_review_at }}</td>
+            <td data-label="操作"><a class="secondary-button compact-button table-action" href="/web/admin/users/{{ item.username }}?ctx={{ ctx }}">查看用户</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state large-empty">
+      <strong>暂无审查活动</strong><span>用户完成审核后，最近活动会显示在这里。</span>
+    </div>
+    {% endif %}
+  </section>
+{% endblock %}

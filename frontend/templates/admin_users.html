@@ -1,138 +1,64 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>用户管理 - 合同智能审核系统</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260601-admin-ui">
-    <script src="/static/app.js?v=20260720-no-auto-reload" defer></script>
-  </head>
-  <body class="app-page" data-auth-check="true">
-    <div class="app-frame">
-      <aside class="sidebar" aria-label="管理员导航">
-        <div class="sidebar-brand">
-          <span class="brand-icon small" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M7 3.5h7.2L18.5 7.8v12.7H7z" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M14 4v4h4" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M9.6 12.1h5M9.6 15.5h5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <div>
-            <strong>管理后台</strong>
-            <span>审查控制台</span>
-          </div>
-        </div>
-        <nav class="nav-list">
-          <a class="nav-item" href="/web/admin?ctx={{ ctx }}">后台首页</a>
-          <a class="nav-item active" href="/web/admin/users?ctx={{ ctx }}">用户管理</a>
-        </nav>
-      </aside>
+{% extends "base.html" %}
+{% set nav_scope = "admin" %}
+{% set active_nav = "users" %}
 
-      <div class="main-area">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">管理员</p>
-            <h1>用户管理</h1>
-          </div>
-          <div class="user-box">
-            <div class="user-summary">
-              <span>{{ tenant_name }}</span>
-              <span>当前管理员</span>
-              <strong>{{ display_name }} · {{ username }}</strong>
-            </div>
-            <form method="post" action="/web/logout?ctx={{ ctx }}" class="user-action-form">
-              <button type="submit" class="secondary-button compact-button">退出登录</button>
-            </form>
-          </div>
-        </header>
+{% block title %}用户管理 · 合同智能审核系统{% endblock %}
+{% block eyebrow %}租户成员{% endblock %}
+{% block heading %}用户管理{% endblock %}
 
-        <main class="content-grid single admin-console">
-          {% if error %}
-          <div class="alert" role="alert">{{ error }}</div>
-          {% endif %}
+{% block content %}
+  {% if error %}<div class="alert page-notice" role="alert">{{ error }}</div>{% endif %}
+  {% if success %}<div class="success page-notice" role="status">{{ success }}</div>{% endif %}
 
-          {% if success %}
-          <div class="success" role="status">{{ success }}</div>
-          {% endif %}
-
-          <section class="panel admin-create-panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">新建账号</p>
-                <h2>创建用户</h2>
-              </div>
-              <span class="admin-panel-note">账号创建后会自动初始化用户目录和默认审查要点。</span>
-            </div>
-            <form method="post" action="/web/admin/users/create?ctx={{ ctx }}" class="admin-form-grid">
-              <label>
-                <span>用户名</span>
-                <input name="username" type="text" required>
-              </label>
-              <label>
-                <span>显示名称</span>
-                <input name="display_name" type="text">
-              </label>
-              <label>
-                <span>初始密码</span>
-                <input name="password" type="password" required>
-              </label>
-              <label>
-                <span>角色</span>
-                <select name="role">
-                  <option value="user">user</option>
-                  <option value="admin">admin</option>
-                </select>
-              </label>
-              <button type="submit">创建用户</button>
-            </form>
-          </section>
-
-          <section class="panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">账号清单</p>
-                <h2>全部用户</h2>
-              </div>
-              <span class="admin-panel-note">点击查看后可管理角色、密码、状态、审查要点和日志。</span>
-            </div>
-            <div class="table-frame admin-table-frame">
-              <table>
-                <thead>
-                  <tr>
-                    <th>用户名</th>
-                    <th>显示名</th>
-                    <th>角色</th>
-                    <th>状态</th>
-                    <th>历史数</th>
-                    <th>最近审查</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for item in users %}
-                  <tr>
-                    <td>{{ item.username }}</td>
-                    <td>{{ item.display_name }}</td>
-                    <td><span class="status-pill role-{{ item.role }}">{{ item.role }}</span></td>
-                    <td>
-                      <span class="status-pill {{ 'status-enabled' if item.enabled else 'status-disabled' }}">
-                        {{ "启用" if item.enabled else "禁用" }}
-                      </span>
-                    </td>
-                    <td>{{ item.history_count }}</td>
-                    <td>{{ item.latest_review_at }}</td>
-                    <td><a class="table-action" href="/web/admin/users/{{ item.username }}?ctx={{ ctx }}">管理</a></td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="7" class="empty-state">暂无用户</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </main>
+  <section class="panel create-user-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">新增成员</p>
+        <h2>创建用户账号</h2>
+        <p class="section-copy">创建后会自动初始化用户目录和默认审查要点。</p>
       </div>
     </div>
-  </body>
-</html>
+    <form method="post" action="/web/admin/users/create?ctx={{ ctx }}" class="admin-form-grid">
+      <label class="field-group"><span>用户名</span><input name="username" type="text" autocomplete="off" required></label>
+      <label class="field-group"><span>显示名称</span><input name="display_name" type="text" autocomplete="off"></label>
+      <label class="field-group"><span>初始密码</span><input name="password" type="password" autocomplete="new-password" required></label>
+      <label class="field-group">
+        <span>角色</span>
+        <select name="role"><option value="user">普通用户</option><option value="admin">管理员</option></select>
+      </label>
+      <button type="submit" class="primary-button create-user-button">创建用户</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">账号清单</p>
+        <h2>全部用户</h2>
+        <p class="section-copy">共 {{ users|length }} 个账号。进入详情可管理权限、审查要点与任务日志。</p>
+      </div>
+    </div>
+
+    {% if users %}
+    <div class="table-frame">
+      <table class="responsive-table users-table">
+        <thead><tr><th>用户</th><th>角色</th><th>状态</th><th>审核记录</th><th>最近审查</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for item in users %}
+          <tr>
+            <td data-label="用户"><span class="table-primary">{{ item.display_name }}</span><span class="table-secondary">{{ item.username }}</span></td>
+            <td data-label="角色"><span class="status-pill role-{{ item.role }}">{{ "管理员" if item.role == "admin" else "普通用户" }}</span></td>
+            <td data-label="状态"><span class="status-pill {{ 'status-enabled' if item.enabled else 'status-disabled' }}">{{ "启用" if item.enabled else "禁用" }}</span></td>
+            <td data-label="审核记录">{{ item.history_count }}</td>
+            <td data-label="最近审查">{{ item.latest_review_at }}</td>
+            <td data-label="操作"><a class="secondary-button compact-button table-action" href="/web/admin/users/{{ item.username }}?ctx={{ ctx }}">管理</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state large-empty"><strong>暂无用户</strong><span>使用上方表单创建当前租户的第一个账号。</span></div>
+    {% endif %}
+  </section>
+{% endblock %}

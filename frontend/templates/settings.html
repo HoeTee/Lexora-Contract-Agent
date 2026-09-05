@@ -1,89 +1,42 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>用户设置 - 合同智能审核系统</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260603-criteria-block">
-    <script src="/static/app.js?v=20260720-no-auto-reload" defer></script>
-  </head>
-  <body class="app-page" data-auth-check="true">
-    <div class="app-frame">
-      <aside class="sidebar" aria-label="主导航">
-        <div class="sidebar-brand">
-          <span class="brand-icon small" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M7 3.5h7.2L18.5 7.8v12.7H7z" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M14 4v4h4" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M9.6 12.1h5M9.6 15.5h5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <div>
-            <strong>合同审核</strong>
-            <span>审查控制台</span>
-          </div>
+{% extends "base.html" %}
+{% set nav_scope = "user" %}
+{% set active_nav = "settings" %}
+
+{% block title %}用户设置 · 合同智能审核系统{% endblock %}
+{% block eyebrow %}账户设置{% endblock %}
+{% block heading %}个人资料{% endblock %}
+
+{% block content %}
+  {% if error %}<div class="alert page-notice" role="alert">{{ error }}</div>{% endif %}
+  {% if success %}<div class="success page-notice" role="status">{{ success }}</div>{% endif %}
+
+  <div class="settings-layout">
+    <section class="panel settings-panel" aria-labelledby="settings-title">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">显示信息</p>
+          <h2 id="settings-title">修改显示名称</h2>
+          <p class="section-copy">该名称会显示在工作台顶部，不会改变登录账号。</p>
         </div>
-        <nav class="nav-list">
-          <a class="nav-item" href="/web/work?ctx={{ ctx }}">上传审核</a>
-          <a class="nav-item" href="/web/history?ctx={{ ctx }}">审核历史</a>
-          <a class="nav-item active" href="/web/settings?ctx={{ ctx }}">用户设置</a>
-        </nav>
-      </aside>
-
-      <div class="main-area">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">账户信息</p>
-            <h1>用户设置</h1>
-          </div>
-          <div class="user-box">
-            <div class="user-summary">
-              <span>{{ tenant_name }}</span>
-              <strong>{{ display_name }} · {{ username }}</strong>
-            </div>
-            <form method="post" action="/web/logout?ctx={{ ctx }}" class="user-action-form">
-              <button type="submit" class="secondary-button compact-button">退出登录</button>
-            </form>
-          </div>
-        </header>
-
-        <main class="content-grid single user-console">
-          <section class="panel settings-panel" aria-labelledby="settings-title">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">个人资料</p>
-                <h2 id="settings-title">账户资料</h2>
-              </div>
-            </div>
-            <div class="settings-summary">
-              <div>
-                <span>用户名</span>
-                <strong>{{ username }}</strong>
-              </div>
-              <div>
-                <span>当前名称</span>
-                <strong>{{ display_name }}</strong>
-              </div>
-            </div>
-
-            <form method="post" action="/web/profile/display-name?ctx={{ ctx }}" class="form-stack settings-form">
-              <label>
-                <span>显示名称</span>
-                <input name="display_name" type="text" value="{{ display_name }}" maxlength="40" required>
-              </label>
-              <button type="submit">保存设置</button>
-            </form>
-
-            {% if error %}
-            <div class="alert" role="alert">{{ error }}</div>
-            {% endif %}
-
-            {% if success %}
-            <div class="success" role="status">{{ success }}</div>
-            {% endif %}
-          </section>
-        </main>
       </div>
-    </div>
-  </body>
-</html>
+      <form method="post" action="/web/profile/display-name?ctx={{ ctx }}" class="form-stack settings-form">
+        <label class="field-group">
+          <span>显示名称</span>
+          <input name="display_name" type="text" value="{{ display_name }}" maxlength="40" required>
+          <small class="field-note">最多 40 个字符。</small>
+        </label>
+        <div class="form-actions"><button type="submit" class="primary-button">保存修改</button></div>
+      </form>
+    </section>
+
+    <aside class="panel account-panel" aria-label="当前账户信息">
+      <span class="account-hero-avatar" aria-hidden="true">{{ (display_name or username)[:1] }}</span>
+      <div class="account-hero-copy"><h2>{{ display_name }}</h2><p>{{ username }}</p></div>
+      <dl class="account-details">
+        <div><dt>登录账号</dt><dd>{{ username }}</dd></div>
+        <div><dt>所属租户</dt><dd>{{ tenant_name }}</dd></div>
+        <div><dt>租户 ID</dt><dd>{{ tenant_id }}</dd></div>
+      </dl>
+    </aside>
+  </div>
+{% endblock %}

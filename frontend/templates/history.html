@@ -1,96 +1,55 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>审核历史 - 合同智能审核系统</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260603-criteria-block">
-    <script src="/static/app.js?v=20260720-no-auto-reload" defer></script>
-  </head>
-  <body class="app-page" data-auth-check="true">
-    <div class="app-frame">
-      <aside class="sidebar" aria-label="主导航">
-        <div class="sidebar-brand">
-          <span class="brand-icon small" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M7 3.5h7.2L18.5 7.8v12.7H7z" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M14 4v4h4" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M9.6 12.1h5M9.6 15.5h5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <div>
-            <strong>合同审核</strong>
-            <span>审查控制台</span>
-          </div>
-        </div>
-        <nav class="nav-list">
-          <a class="nav-item" href="/web/work?ctx={{ ctx }}">上传审核</a>
-          <a class="nav-item active" href="/web/history?ctx={{ ctx }}">审核历史</a>
-          <a class="nav-item" href="/web/settings?ctx={{ ctx }}">用户设置</a>
-        </nav>
-      </aside>
+{% extends "base.html" %}
+{% set nav_scope = "user" %}
+{% set active_nav = "history" %}
 
-      <div class="main-area">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">历史记录</p>
-            <h1>审核历史</h1>
-          </div>
-          <div class="user-box">
-            <div class="user-summary">
-              <span>{{ tenant_name }}</span>
-              <strong>{{ display_name }} · {{ username }}</strong>
-            </div>
-            <a class="secondary-button compact-button user-link-button" href="/web/work?ctx={{ ctx }}">返回工作台</a>
-            <form method="post" action="/web/logout?ctx={{ ctx }}" class="user-action-form">
-              <button type="submit" class="secondary-button compact-button">退出登录</button>
-            </form>
-          </div>
-        </header>
+{% block title %}审核历史 · 合同智能审核系统{% endblock %}
+{% block eyebrow %}任务记录{% endblock %}
+{% block heading %}审核历史{% endblock %}
+{% block header_actions %}
+  <a class="secondary-button compact-button header-action" href="/web/work?ctx={{ ctx }}">发起新审核</a>
+{% endblock %}
 
-        <main class="content-grid single user-console">
-          <section class="panel history-panel full-width">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">全部结果</p>
-                <h2>历史输出</h2>
-              </div>
-            </div>
-            <div class="table-frame user-table-frame">
-              <table>
-                <thead>
-                  <tr>
-                    <th>输入文件</th>
-                    <th>输入大小</th>
-                    <th>上传时间</th>
-                    <th>审查要点</th>
-                    <th>输出文件</th>
-                    <th>输出大小</th>
-                    <th>输出时间</th>
-                    <th>操作</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for item in history %}
-                  <tr>
-                    <td>{{ item.contract_display_name or "-" }}</td>
-                    <td>{{ item.contract_size }}</td>
-                    <td>{{ item.contract_uploaded_at or "-" }}</td>
-                    <td class="criteria-cell"><span class="status-pill role-user criteria-pill">{{ item.criteria_label }}</span></td>
-                    <td>{{ item.report_display_name or "-" }}</td>
-                    <td>{{ item.report_size }}</td>
-                    <td>{{ item.report_created_at or "-" }}</td>
-                    <td><a class="table-action" href="/web/download/{{ item.download_name }}?ctx={{ ctx }}">下载</a></td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="8" class="empty-state">暂无审核结果</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </main>
+{% block content %}
+  <section class="panel history-panel">
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">全部结果</p>
+        <h2>已完成的合同审核</h2>
+        <p class="section-copy">共 {{ history|length }} 条记录，点击下载可获取对应批注合同。</p>
       </div>
     </div>
-  </body>
-</html>
+
+    {% if history %}
+    <div class="table-frame">
+      <table class="responsive-table history-table">
+        <thead>
+          <tr><th>合同文件</th><th>审查配置</th><th>完成结果</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          {% for item in history %}
+          <tr>
+            <td data-label="合同文件">
+              <span class="table-primary file-title">{{ item.contract_display_name or "-" }}</span>
+              <span class="table-secondary">{{ item.contract_size }} · {{ item.contract_uploaded_at or "-" }}</span>
+            </td>
+            <td data-label="审查配置"><span class="status-pill role-user criteria-pill">{{ item.criteria_label }}</span></td>
+            <td data-label="完成结果">
+              <span class="table-primary file-title">{{ item.report_display_name or "-" }}</span>
+              <span class="table-secondary">{{ item.report_size }} · {{ item.report_created_at or "-" }}</span>
+            </td>
+            <td data-label="操作"><a class="secondary-button compact-button table-action" href="/web/download/{{ item.download_name }}?ctx={{ ctx }}">下载结果</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state large-empty">
+      <span class="empty-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 3.5h7l4 4v13H7zM14 4v4h4M9.5 13h5M9.5 16h3.5"/></svg></span>
+      <strong>暂无审核记录</strong>
+      <span>上传第一份合同后，任务结果会保存在这里。</span>
+      <a class="primary-button button-link" href="/web/work?ctx={{ ctx }}">发起审核</a>
+    </div>
+    {% endif %}
+  </section>
+{% endblock %}

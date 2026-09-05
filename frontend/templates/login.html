@@ -3,46 +3,68 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>合同智能审核系统 - 登录</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260525-ui3">
+    <meta name="theme-color" content="#14213d">
+    <title>登录 · 合同智能审核系统</title>
+    <link rel="stylesheet" href="/static/app.css?v=20260905-responsive-redesign">
   </head>
   <body class="auth-page">
-    <main class="auth-shell">
-      <section class="auth-card" aria-labelledby="login-title">
+    <main class="auth-shell" aria-labelledby="login-title">
+      <section class="auth-intro">
         <div class="auth-brand">
-          <span class="brand-icon" aria-hidden="true">
+          <span class="brand-mark auth-brand-mark" aria-hidden="true">
             <svg viewBox="0 0 24 24">
-              <path d="M7 3.5h7.2L18.5 7.8v12.7H7z" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M14 4v4h4" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M9.6 12.1h5M9.6 15.5h5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
+              <path d="M6.5 3.5h7.7l3.8 3.8v13.2H6.5z" fill="none" stroke="currentColor" stroke-width="1.8"/>
+              <path d="M14 3.9v4h3.8M9.2 12h6M9.2 15.5h4.6" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
             </svg>
           </span>
-          <div>
-            <p class="eyebrow">内部业务系统</p>
-            <h1 id="login-title">合同智能审核系统</h1>
-          </div>
+          <span class="brand-copy">
+            <strong>Lexora 审查</strong>
+            <small>合同智能审核系统</small>
+          </span>
+        </div>
+
+        <div class="auth-message">
+          <p class="auth-kicker">面向合同业务的审查工作台</p>
+          <h1>让每一次合同审查<br>都有据可循</h1>
+          <p>统一管理审查要点、任务过程和批注结果，让团队更专注于真正需要判断的风险。</p>
+        </div>
+
+        <ul class="auth-features" aria-label="系统能力">
+          <li><span aria-hidden="true">01</span>按租户隔离账号与审查数据</li>
+          <li><span aria-hidden="true">02</span>自动生成可下载的批注合同</li>
+          <li><span aria-hidden="true">03</span>完整保留任务历史与执行状态</li>
+        </ul>
+      </section>
+
+      <section class="auth-card">
+        <div class="auth-card-heading">
+          <p class="eyebrow">欢迎回来</p>
+          <h2 id="login-title">登录工作台</h2>
+          <p>请输入所属租户及个人账号信息。</p>
         </div>
 
         <form method="post" action="/web/login" class="form-stack">
           {% set login_tokens = request.session.get("login_tokens") or [] %}
           <input name="login_token" type="hidden" value="{{ login_token or (login_tokens[-1] if login_tokens else '') }}">
-          <label>
+          <label class="field-group">
             <span>租户 ID</span>
-            <input name="tenant_id" type="text" value="{{ tenant_id or '' }}" autocomplete="organization" required>
+            <input name="tenant_id" type="text" value="{{ tenant_id or '' }}" autocomplete="organization" placeholder="例如：demo" required>
           </label>
-          <label>
+          <label class="field-group">
             <span>账号</span>
-            <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" required>
+            <input name="username" type="text" value="{{ username or '' }}" autocomplete="username" placeholder="请输入账号" required>
           </label>
-          <label>
+          <label class="field-group">
             <span>密码</span>
-            <input name="password" type="password" autocomplete="current-password" required>
+            <input name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
           </label>
           {% if error %}
           <div class="alert" role="alert">{{ error }}</div>
           {% endif %}
-          <button type="submit">登录</button>
+          <button type="submit" class="primary-button auth-submit">登录</button>
         </form>
+
+        <p class="auth-help">无法登录时，请联系当前租户的系统管理员。</p>
       </section>
     </main>
   </body>

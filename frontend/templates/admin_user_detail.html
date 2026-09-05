@@ -1,237 +1,126 @@
-<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>用户详情 - 合同智能审核系统</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260601-admin-ui">
-    <script src="/static/app.js?v=20260720-no-auto-reload" defer></script>
-  </head>
-  <body class="app-page" data-auth-check="true">
-    <div class="app-frame">
-      <aside class="sidebar" aria-label="管理员导航">
-        <div class="sidebar-brand">
-          <span class="brand-icon small" aria-hidden="true">
-            <svg viewBox="0 0 24 24">
-              <path d="M7 3.5h7.2L18.5 7.8v12.7H7z" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M14 4v4h4" fill="none" stroke="currentColor" stroke-width="1.9"/>
-              <path d="M9.6 12.1h5M9.6 15.5h5" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/>
-            </svg>
-          </span>
-          <div>
-            <strong>管理后台</strong>
-            <span>审查控制台</span>
-          </div>
-        </div>
-        <nav class="nav-list">
-          <a class="nav-item" href="/web/admin?ctx={{ ctx }}">后台首页</a>
-          <a class="nav-item active" href="/web/admin/users?ctx={{ ctx }}">用户管理</a>
-        </nav>
-      </aside>
+{% extends "base.html" %}
+{% set nav_scope = "admin" %}
+{% set active_nav = "users" %}
 
-      <div class="main-area">
-        <header class="topbar">
-          <div>
-            <p class="eyebrow">用户详情</p>
-            <h1>{{ target_user.display_name }} · {{ target_user.username }}</h1>
-          </div>
-          <div class="user-box">
-            <div class="user-summary">
-              <span>{{ tenant_name }}</span>
-              <strong>{{ display_name }} · {{ username }}</strong>
-            </div>
-            <a class="secondary-button compact-button user-link-button" href="/web/admin/users?ctx={{ ctx }}">返回用户列表</a>
-            <form method="post" action="/web/logout?ctx={{ ctx }}" class="user-action-form">
-              <button type="submit" class="secondary-button compact-button">退出登录</button>
-            </form>
-          </div>
-        </header>
+{% block title %}{{ target_user.display_name }} · 用户详情{% endblock %}
+{% block eyebrow %}用户详情{% endblock %}
+{% block heading %}{{ target_user.display_name }}{% endblock %}
+{% block header_actions %}
+  <a class="secondary-button compact-button header-action" href="/web/admin/users?ctx={{ ctx }}">返回用户列表</a>
+{% endblock %}
 
-        <main class="content-grid single admin-console">
-          {% if error %}
-          <div class="alert" role="alert">{{ error }}</div>
-          {% endif %}
+{% block content %}
+  {% if error %}<div class="alert page-notice" role="alert">{{ error }}</div>{% endif %}
+  {% if success %}<div class="success page-notice" role="status">{{ success }}</div>{% endif %}
 
-          {% if success %}
-          <div class="success" role="status">{{ success }}</div>
-          {% endif %}
+  <section class="profile-overview">
+    <div class="profile-identity">
+      <span class="account-hero-avatar" aria-hidden="true">{{ target_user.display_name[:1] }}</span>
+      <div><h2>{{ target_user.display_name }}</h2><p>{{ target_user.username }}</p></div>
+    </div>
+    <div class="profile-badges">
+      <span class="status-pill role-{{ target_user.role }}">{{ "管理员" if target_user.role == "admin" else "普通用户" }}</span>
+      <span class="status-pill {{ 'status-enabled' if target_user.enabled else 'status-disabled' }}">{{ "账号启用" if target_user.enabled else "账号禁用" }}</span>
+    </div>
+  </section>
 
-          <section class="panel admin-user-overview">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">账号管理</p>
-                <h2>用户状态</h2>
-              </div>
-            </div>
-            <div class="summary-grid admin-summary-grid">
-              <div><span>用户名</span><strong>{{ target_user.username }}</strong></div>
-              <div><span>角色</span><strong><span class="status-pill role-{{ target_user.role }}">{{ target_user.role }}</span></strong></div>
-              <div>
-                <span>状态</span>
-                <strong>
-                  <span class="status-pill {{ 'status-enabled' if target_user.enabled else 'status-disabled' }}">
-                    {{ "启用" if target_user.enabled else "禁用" }}
-                  </span>
-                </strong>
-              </div>
-              <div><span>显示名</span><strong>{{ target_user.display_name }}</strong></div>
-            </div>
-            <div class="admin-management-grid">
-              <div class="admin-control-group">
-                <h3>身份与访问</h3>
-                <form method="post" action="/web/admin/users/{{ target_user.username }}/role?ctx={{ ctx }}" class="admin-inline-form">
-                  <label>
-                    <span>角色</span>
-                    <select name="role">
-                      <option value="user" {% if target_user.role == "user" %}selected{% endif %}>user</option>
-                      <option value="admin" {% if target_user.role == "admin" %}selected{% endif %}>admin</option>
-                    </select>
-                  </label>
-                  <button type="submit" class="secondary-button compact-button">更新角色</button>
-                </form>
+  <div class="admin-detail-grid">
+    <section class="panel" aria-labelledby="access-title">
+      <div class="section-head"><div><p class="eyebrow">身份与访问</p><h2 id="access-title">账号权限</h2></div></div>
+      <div class="stacked-controls">
+        <form method="post" action="/web/admin/users/{{ target_user.username }}/role?ctx={{ ctx }}" class="inline-control-form">
+          <label class="field-group">
+            <span>用户角色</span>
+            <select name="role"><option value="user" {% if target_user.role == "user" %}selected{% endif %}>普通用户</option><option value="admin" {% if target_user.role == "admin" %}selected{% endif %}>管理员</option></select>
+          </label>
+          <button type="submit" class="secondary-button compact-button">更新角色</button>
+        </form>
+        <form method="post" action="/web/admin/users/{{ target_user.username }}/password?ctx={{ ctx }}" class="inline-control-form">
+          <label class="field-group"><span>新密码</span><input name="password" type="password" autocomplete="new-password" required></label>
+          <button type="submit" class="secondary-button compact-button">重置密码</button>
+        </form>
+      </div>
+    </section>
 
-                <form method="post" action="/web/admin/users/{{ target_user.username }}/password?ctx={{ ctx }}" class="admin-inline-form">
-                  <label>
-                    <span>新密码</span>
-                    <input name="password" type="password" required>
-                  </label>
-                  <button type="submit" class="secondary-button compact-button">重置密码</button>
-                </form>
-              </div>
+    <section class="panel danger-panel" aria-labelledby="status-title">
+      <div class="section-head"><div><p class="eyebrow danger-eyebrow">账号状态</p><h2 id="status-title">访问控制</h2></div></div>
+      <p class="section-copy">禁用会阻止账号继续登录；删除账号属于不可逆操作。</p>
+      <div class="danger-actions">
+        {% if target_user.enabled %}
+        <form method="post" action="/web/admin/users/{{ target_user.username }}/disable?ctx={{ ctx }}"><button type="submit" class="secondary-button compact-button">禁用用户</button></form>
+        {% else %}
+        <form method="post" action="/web/admin/users/{{ target_user.username }}/enable?ctx={{ ctx }}"><button type="submit" class="secondary-button compact-button">启用用户</button></form>
+        {% endif %}
+        <form method="post" action="/web/admin/users/{{ target_user.username }}/delete?ctx={{ ctx }}" class="delete-form" data-confirm-delete="true" data-confirm-username="{{ target_user.username }}">
+          <label class="checkbox-label"><input name="keep_data" type="checkbox" value="true" checked><span>保留用户数据</span></label>
+          <button type="submit" class="secondary-button compact-button danger-button">删除用户</button>
+        </form>
+      </div>
+    </section>
+  </div>
 
-              <div class="admin-control-group admin-danger-zone">
-                <h3>账号状态</h3>
-                <div class="admin-actions">
-                  {% if target_user.enabled %}
-                  <form method="post" action="/web/admin/users/{{ target_user.username }}/disable?ctx={{ ctx }}">
-                    <button type="submit" class="secondary-button compact-button">禁用用户</button>
-                  </form>
-                  {% else %}
-                  <form method="post" action="/web/admin/users/{{ target_user.username }}/enable?ctx={{ ctx }}">
-                    <button type="submit" class="secondary-button compact-button">启用用户</button>
-                  </form>
-                  {% endif %}
-                </div>
-                <form method="post" action="/web/admin/users/{{ target_user.username }}/delete?ctx={{ ctx }}" class="admin-inline-form admin-delete-form" data-confirm-delete="true" data-confirm-username="{{ target_user.username }}">
-                  <label class="checkbox-label">
-                    <input name="keep_data" type="checkbox" value="true" checked>
-                    <span>保留用户数据</span>
-                  </label>
-                  <button type="submit" class="secondary-button compact-button danger-button">删除用户</button>
-                </form>
-              </div>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">审查要点</p>
-                <h2>默认审查要点</h2>
-              </div>
-            </div>
-            <div class="admin-actions criteria-actions">
-              <span class="criteria-summary">
-                <span class="status-pill {{ 'status-enabled' if criteria.exists else 'status-disabled' }}">
-                  {{ "存在" if criteria.exists else "缺失" }}
-                </span>
-                大小：{{ criteria.size }} · 更新时间：{{ criteria.updated_at }}
-              </span>
-              {% if criteria.exists %}
-              <a class="secondary-button compact-button" href="/web/admin/users/{{ target_user.username }}/criteria/download?ctx={{ ctx }}">下载</a>
-              {% endif %}
-              <form method="post" action="/web/admin/users/{{ target_user.username }}/criteria/restore?ctx={{ ctx }}">
-                <button type="submit" class="secondary-button compact-button">恢复系统默认</button>
-              </form>
-            </div>
-            <form method="post" action="/web/admin/users/{{ target_user.username }}/criteria/upload?ctx={{ ctx }}" enctype="multipart/form-data" class="upload-form admin-upload-form">
-              <label>
-                <span>上传覆盖审查要点</span>
-                <input name="criteria_file" type="file" accept=".docx" required>
-              </label>
-              <button type="submit">上传并覆盖</button>
-            </form>
-          </section>
-
-          <section class="panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">审查历史</p>
-                <h2>成功任务</h2>
-              </div>
-            </div>
-            <div class="table-frame admin-table-frame">
-              <table>
-                <thead>
-                  <tr>
-                    <th>输入文件</th>
-                    <th>上传时间</th>
-                    <th>输出文件</th>
-                    <th>输出时间</th>
-                    <th>输出状态</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for item in history %}
-                  <tr>
-                    <td>{{ item.contract_display_name }}</td>
-                    <td>{{ item.contract_uploaded_at or "-" }}</td>
-                    <td>{{ item.report_display_name }}</td>
-                    <td>{{ item.report_created_at or "-" }}</td>
-                    <td>
-                      <span class="status-pill {{ 'status-enabled' if item.report_exists else 'status-disabled' }}">
-                        {{ "存在" if item.report_exists else "缺失" }}
-                      </span>
-                    </td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="5" class="empty-state">暂无审查历史</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section class="panel">
-            <div class="section-head">
-              <div>
-                <p class="eyebrow">任务日志</p>
-                <h2>日志目录</h2>
-              </div>
-            </div>
-            <div class="table-frame admin-table-frame">
-              <table>
-                <thead>
-                  <tr>
-                    <th>日期</th>
-                    <th>任务</th>
-                    <th>更新时间</th>
-                    <th>API 事件</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for item in logs %}
-                  <tr>
-                    <td>{{ item.date }}</td>
-                    <td>{{ item.task_name }}</td>
-                    <td>{{ item.updated_at }}</td>
-                    <td>
-                      {% if item.has_api_events %}
-                      <a class="table-action" href="/web/admin/users/{{ target_user.username }}/logs/{{ item.date }}/{{ item.task_name }}/api-events?ctx={{ ctx }}">查看</a>
-                      {% else %}
-                      -
-                      {% endif %}
-                    </td>
-                  </tr>
-                  {% else %}
-                  <tr><td colspan="4" class="empty-state">暂无日志目录</td></tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        </main>
+  <section class="panel">
+    <div class="section-head">
+      <div><p class="eyebrow">审查要点</p><h2>默认审查要点</h2><p class="section-copy">管理该用户未上传临时审查要点时使用的默认文件。</p></div>
+      <span class="status-pill {{ 'status-enabled' if criteria.exists else 'status-disabled' }}">{{ "文件正常" if criteria.exists else "文件缺失" }}</span>
+    </div>
+    <div class="criteria-toolbar">
+      <div class="criteria-meta"><span>文件大小 <strong>{{ criteria.size }}</strong></span><span>更新时间 <strong>{{ criteria.updated_at }}</strong></span></div>
+      <div class="toolbar-actions">
+        {% if criteria.exists %}<a class="secondary-button compact-button" href="/web/admin/users/{{ target_user.username }}/criteria/download?ctx={{ ctx }}">下载</a>{% endif %}
+        <form method="post" action="/web/admin/users/{{ target_user.username }}/criteria/restore?ctx={{ ctx }}"><button type="submit" class="secondary-button compact-button">恢复系统默认</button></form>
       </div>
     </div>
-  </body>
-</html>
+    <form method="post" action="/web/admin/users/{{ target_user.username }}/criteria/upload?ctx={{ ctx }}" enctype="multipart/form-data" class="criteria-upload-form">
+      <label class="compact-file-picker">
+        <input name="criteria_file" type="file" accept=".docx" required data-file-input>
+        <span class="secondary-button compact-button">选择 DOCX 文件</span>
+        <span class="compact-file-name" data-file-name>未选择文件</span>
+      </label>
+      <button type="submit" class="primary-button">上传并覆盖</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">审查历史</p><h2>成功任务</h2><p class="section-copy">共 {{ history|length }} 条成功记录。</p></div></div>
+    {% if history %}
+    <div class="table-frame">
+      <table class="responsive-table">
+        <thead><tr><th>输入合同</th><th>上传时间</th><th>输出合同</th><th>完成时间</th><th>文件状态</th></tr></thead>
+        <tbody>
+          {% for item in history %}
+          <tr>
+            <td data-label="输入合同"><span class="file-title">{{ item.contract_display_name }}</span></td>
+            <td data-label="上传时间">{{ item.contract_uploaded_at or "-" }}</td>
+            <td data-label="输出合同"><span class="file-title">{{ item.report_display_name }}</span></td>
+            <td data-label="完成时间">{{ item.report_created_at or "-" }}</td>
+            <td data-label="文件状态"><span class="status-pill {{ 'status-enabled' if item.report_exists else 'status-disabled' }}">{{ "存在" if item.report_exists else "缺失" }}</span></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty-state"><strong>暂无审查历史</strong></div>{% endif %}
+  </section>
+
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">任务日志</p><h2>日志目录</h2><p class="section-copy">按任务查看当前用户的 API 事件记录。</p></div></div>
+    {% if logs %}
+    <div class="table-frame">
+      <table class="responsive-table">
+        <thead><tr><th>日期</th><th>任务</th><th>更新时间</th><th>API 事件</th></tr></thead>
+        <tbody>
+          {% for item in logs %}
+          <tr>
+            <td data-label="日期">{{ item.date }}</td>
+            <td data-label="任务"><span class="file-title">{{ item.task_name }}</span></td>
+            <td data-label="更新时间">{{ item.updated_at }}</td>
+            <td data-label="API 事件">{% if item.has_api_events %}<a class="secondary-button compact-button table-action" href="/web/admin/users/{{ target_user.username }}/logs/{{ item.date }}/{{ item.task_name }}/api-events?ctx={{ ctx }}">查看日志</a>{% else %}<span class="muted">暂无</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}<div class="empty-state"><strong>暂无日志目录</strong></div>{% endif %}
+  </section>
+{% endblock %}
