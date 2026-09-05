@@ -783,7 +783,6 @@ retrieval:
       enabled: true
       score_threshold: 0.45
       probe_limit: 20
-      auto_build: true
     semantic:
       structure_candidate_limit: 12
       max_selected_nodes: 10

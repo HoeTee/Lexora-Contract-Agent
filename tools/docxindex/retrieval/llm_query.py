@@ -11,7 +11,7 @@ from tools.docxindex.llm import LLMClient
 from tools.docxindex.llm.cache import JsonlCache, cache_key, text_hash
 from tools.docxindex.llm.schemas import QueryResponse
 
-QUERY_PROMPT_VERSION = "docx_query_v3"
+QUERY_PROMPT_VERSION = "docx_query_v4"
 STRUCTURE_QUERY_BUDGET_TOKENS = 20000
 
 
@@ -150,8 +150,8 @@ def _query_prompt(query: str, structure_json: str) -> str:
 
 选择规则：
 - 只能返回结构树中真实存在的 node_id。
-- 结构树字段含义：nodes 是子节点；start_index/end_index 是 DOCX w:body 子节点范围；summary/key_items 用于判断节点内容。
-- 优先返回 title、summary 或 key_items 直接相关的 node。
+- 输入是精简结构树：node_id 是节点标识；title 是标题；node_type 是节点类型；summary 是摘要；token_estimate 是节点内容的估算 token 数；nodes 是子节点（叶节点可省略）。
+- 优先返回 title 或 summary 直接相关的 node，结合 nodes 判断层级和上下文；不要假定输入还包含其他节点字段。
 - 如果父节点和子节点都相关，优先返回更具体的子节点；只有需要完整章节上下文时才返回父节点。
 - 如果问题需要跨章节比对，可以返回多个 node。
 - 不要返回 body 或 attachments 这类人工区域节点；应选择它们下面的具体业务节点。

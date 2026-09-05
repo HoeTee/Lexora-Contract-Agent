@@ -17,7 +17,6 @@ class VectorRetrievalConfig(BaseModel):
     enabled: bool = True
     score_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
     probe_limit: int = Field(default=20, ge=1)
-    auto_build: bool = True
 
 
 class SemanticRetrievalConfig(BaseModel):
