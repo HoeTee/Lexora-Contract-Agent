@@ -83,6 +83,37 @@ class SemanticSupplementTests(unittest.TestCase):
         self.assertEqual(duplicates, 1)
         self.assertEqual(added, 1)
 
+    def test_single_structure_node_still_gets_vector_supplement_and_rerank(self) -> None:
+        retriever = self._retriever()
+        retriever.retrieval_config.rerank.enabled = True
+        with (
+            patch("tools.docxindex.retriever.llm_query", return_value=[_candidate(1)]),
+            patch("tools.docxindex.retriever.vector_search", return_value=[_candidate(2)]) as vector,
+            patch("tools.docxindex.retriever.rerank_matches", side_effect=lambda i, q, matches, *a, **kw: matches) as rerank,
+            patch("tools.docxindex.retriever._route_event"),
+        ):
+            result = retriever._semantic_matches({"nodes": []}, "金额", None, scope="global")
+        vector.assert_called_once()
+        rerank.assert_called_once()
+        self.assertEqual(len(result), 2)
+
+    def test_single_merged_candidate_skips_only_rerank(self) -> None:
+        retriever = self._retriever()
+        retriever.retrieval_config.rerank.enabled = True
+        with (
+            patch("tools.docxindex.retriever.llm_query", return_value=[_candidate(1)]),
+            patch("tools.docxindex.retriever.vector_search", return_value=[_candidate(1, score=0.9)]) as vector,
+            patch("tools.docxindex.retriever.rerank_matches") as rerank,
+            patch("tools.docxindex.retriever._route_event") as event,
+        ):
+            result = retriever._semantic_matches({"nodes": []}, "金额", None, scope="global")
+        vector.assert_called_once()
+        rerank.assert_not_called()
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["sources"], ["structure", "vector"])
+        self.assertEqual(result[0]["vector_score"], 0.9)
+        self.assertTrue(event.call_args.kwargs["single_candidate_rerank_skipped"])
+
 
 class RetrievalSchemaTests(unittest.TestCase):
     def test_project_config_uses_one_vector_threshold_and_ten_selected_nodes(self) -> None:

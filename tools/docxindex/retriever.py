@@ -340,7 +340,9 @@ class DocxIndexRetriever:
             max_unique_nodes=max_selected_nodes if vector_matches else None,
         )
         candidate_count_before_rerank = len(matches)
-        if config.rerank.enabled and matches:
+        # Vector supplementation and deduplication must finish before this check.
+        rerank_triggered = config.rerank.enabled and len(matches) > 1
+        if rerank_triggered:
             matches = rerank_matches(
                 index,
                 query,
@@ -363,6 +365,8 @@ class DocxIndexRetriever:
             vector_duplicate_count=vector_duplicate_count,
             vector_added_count=vector_added_count,
             candidate_count_before_rerank=candidate_count_before_rerank,
+            rerank_triggered=rerank_triggered,
+            single_candidate_rerank_skipped=config.rerank.enabled and candidate_count_before_rerank == 1,
             selected_node_count=len(selected),
             selected_node_ids=[item.get("node_id") for item in selected],
         )
