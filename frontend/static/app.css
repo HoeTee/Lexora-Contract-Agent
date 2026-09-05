@@ -1,3 +1,11 @@
+@font-face {
+  font-family: "Allura";
+  src: url("/static/fonts/Allura-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   color-scheme: light;
   --page: #f4f6f4;
@@ -245,6 +253,13 @@ button[disabled]:hover { transform: none; }
 .brand-mark svg { width: 26px; height: 26px; }
 .brand-copy { min-width: 0; display: grid; line-height: 1.2; }
 .brand-copy strong { font-size: 17px; letter-spacing: 0.01em; }
+.brand-copy .brand-wordmark {
+  font-family: "Allura", "Segoe Script", cursive;
+  font-size: 31px;
+  font-weight: 400;
+  line-height: 0.85;
+  letter-spacing: 0.015em;
+}
 .brand-copy small { margin-top: 5px; color: rgba(255, 255, 255, 0.62); font-size: 12px; }
 
 .auth-message {

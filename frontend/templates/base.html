@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#14213d">
     <title>{% block title %}合同智能审核系统{% endblock %}</title>
-    <link rel="stylesheet" href="/static/app.css?v=20260905-responsive-redesign">
+    <link rel="stylesheet" href="/static/app.css?v=20260905-lexora-wordmark">
     <script src="/static/app.js?v=20260905-responsive-redesign" defer></script>
   </head>
   <body class="app-page" data-auth-check="true">
@@ -22,7 +22,11 @@
             </svg>
           </span>
           <span class="brand-copy">
-            <strong>{{ "管理控制台" if nav_scope == "admin" else "Lexora 审查" }}</strong>
+            {% if nav_scope == "admin" %}
+            <strong>管理控制台</strong>
+            {% else %}
+            <strong class="brand-wordmark">Lexora</strong>
+            {% endif %}
             <small>合同智能审核系统</small>
           </span>
           <button class="sidebar-close" type="button" data-nav-close aria-label="关闭导航">
