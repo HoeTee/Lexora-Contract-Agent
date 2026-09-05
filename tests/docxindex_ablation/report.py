@@ -177,10 +177,12 @@ def report(output):
                     "llm_draft_recall": round(recalled / 18, 4) if len(expected_rows) == 18 else "",
                     "llm_draft_precision": round(correct / (correct + incorrect), 4) if correct + incorrect else "",
                     "recalled_of_18": recalled if expected_rows else "",
-                    "correct_comments": correct,
-                    "incorrect_comments": incorrect,
-                    "uncertain_comments": sum(r["verdict"] == "uncertain" for r in comment_rows),
-                    "invalid_or_uncertain_expected": sum(r["expected_case"] != "valid" for r in expected_rows),
+                    "correct_comments": correct if comment_rows else "",
+                    "incorrect_comments": incorrect if comment_rows else "",
+                    "uncertain_comments": sum(r["verdict"] == "uncertain" for r in comment_rows) if comment_rows else "",
+                    "invalid_or_uncertain_expected": sum(r["expected_case"] != "valid" for r in expected_rows)
+                    if expected_rows
+                    else "",
                     "quality_status": "UNVERIFIED LLM draft; factual spot-check failed; do not use as quality gate"
                     if expected_rows
                     else "requires criterion-and-fact adjudication",
