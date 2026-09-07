@@ -23,7 +23,7 @@ from config import (
 from loggers.workflow_logger import WorkflowLogger, save_review_outputs_json
 from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_trace
 from agents.base_agent import Settings
-from agents.planner import PlannerAgent
+from agents.planner import PlannerAgent, assemble_tasks, split_criteria_from_docx
 from agents.orchestrator import OrchestratorAgent
 from agents.summarizer import SummarizerAgent
 from agents.review_presentation import build_review_presentation
@@ -132,7 +132,7 @@ class ContractReviewWorkflow:
                 # Phase 3: Plan tasks
                 await self._emit_progress(progress_callback, "planning", "Extracting review criteria")
                 async with self.trace.span("phase.plan", run_type="phase", inputs={"criteria_chars": len(criteria_md)}) as span:
-                    criteria_list = await self._phase_plan(criteria_md)
+                    criteria_list = await self._phase_plan(criteria_md, criteria_path)
                     self._save_plan_state(criteria_list)
                     span.set_outputs({"criteria_count": len(criteria_list)})
 
@@ -381,9 +381,10 @@ class ContractReviewWorkflow:
 
     async def _phase_plan(
             self,
-            criteria_md: str
+            criteria_md: str,
+            criteria_path: str,
     ) -> list[dict]:
-        """Phase 3: Planner designs structured tasks from criteria."""
+        """Phase 3: split criteria deterministically, then extract per-criterion strategies."""
         print("\n[Phase 3] Planning tasks...")
         start = time.time()
 
@@ -404,16 +405,16 @@ class ContractReviewWorkflow:
                 print(f"    {c['id']}: {c['criterion']}")
             return criteria_list
 
+        skeletons = split_criteria_from_docx(criteria_path)
         planner = PlannerAgent(settings=self.settings)
-        plan_result = await planner.design_tasks(criteria_md)
-
-        criteria_list = plan_result.get("criteria", [])
+        strategies = await planner.extract_strategies(skeletons)
+        criteria_list = assemble_tasks(skeletons, strategies)
         self._planner_tokens = planner.token_usage.get("total_tokens", 0)
         self.logger.log(
             phase="Planning", sender="Workflow", receiver="Planner",
-            action="design_tasks",
+            action="extract_strategies",
             input_summary=f"{len(criteria_md)} chars criteria",
-            output_summary=f"{len(criteria_list)} criteria extracted",
+            output_summary=f"{len(criteria_list)} criteria extracted with routes",
             tokens=self._planner_tokens,
             duration=round(time.time() - start, 2)
         )

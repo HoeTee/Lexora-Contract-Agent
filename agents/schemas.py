@@ -29,6 +29,61 @@ class PlannerOutput(StrictOutputModel):
     criteria: list[PlannerCriterion] = Field(min_length=1)
 
 
+class ExtractedRouteStep(StrictOutputModel):
+    """Single retrieval step planned by the planner strategy extraction."""
+
+    method: Literal["title", "region", "rule", "scan", "subtree"]
+    terms: list[str] = Field(default_factory=list)
+    regions: list[Literal["frontmatter", "body", "tail", "attachments"]] = Field(default_factory=list)
+    all_titles: bool = False
+    anchor_terms: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_method_fields(self) -> "ExtractedRouteStep":
+        if self.method == "region" and len(self.regions) != 1:
+            raise ValueError("region route requires exactly one regions value")
+        if self.method != "region" and self.regions:
+            raise ValueError(f"{self.method} route must not set regions")
+        if self.method == "rule" and not self.terms:
+            raise ValueError("rule route requires at least one term")
+        if self.method == "title" and not (self.terms or self.all_titles):
+            raise ValueError("title route requires terms or all_titles=true")
+        if self.method == "subtree" and not self.anchor_terms:
+            raise ValueError("subtree route requires at least one anchor term")
+        if self.method == "scan" and self.terms:
+            raise ValueError("scan route must not set terms")
+        if self.method != "subtree" and self.anchor_terms:
+            raise ValueError(f"{self.method} route must not set anchor_terms")
+        return self
+
+
+class ExtractedRoute(StrictOutputModel):
+    """Deterministic retrieval plan executed by docxindex instead of LLM routing."""
+
+    steps: list[ExtractedRouteStep] = Field(min_length=1, max_length=5)
+    fallback: bool = False
+
+
+class ExtractedPlacement(StrictOutputModel):
+    """Where the review findings of one criterion should be written."""
+
+    target: Literal["summary", "inline", "inline_at_title", "tail", "merged_by_party", "body_end"]
+    note: str = ""
+
+
+class CriterionStrategy(StrictOutputModel):
+    """Planner-extracted execution strategy for one criterion."""
+
+    id: str = Field(min_length=1)
+    review_instruction: str = ""
+    route: ExtractedRoute
+    placement: ExtractedPlacement
+
+
+class StrategyExtractionOutput(StrictOutputModel):
+    strategies: list[CriterionStrategy] = Field(min_length=1)
+
+
 class SubAgentAnchor(StrictOutputModel):
     xml_anchor_type: Literal["paragraph", "table"]
     xml_anchor_id: str = Field(min_length=1)
