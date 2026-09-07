@@ -61,6 +61,7 @@ def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
                     "section": result.get("section", ""),
                     "criterion_id": criterion_id,
                     "criterion": result.get("criterion", ""),
+                    "placement": result.get("placement"),
                     "issue_id": issue_id,
                     "risk_level": issue.get("risk_level", ""),
                     "issue_comment": issue.get("issue_comment", ""),
@@ -193,6 +194,7 @@ def _materialize_result(record: dict[str, Any], anchors: list[dict], comment: st
         "section": record["section"],
         "criterion_id": record["criterion_id"],
         "criterion": record["criterion"],
+        "placement": record.get("placement"),
         "status": "issues_found",
         "issues": [
             {
@@ -210,6 +212,9 @@ def _materialize_result(record: dict[str, Any], anchors: list[dict], comment: st
 
 
 def _is_summary_only(record: dict[str, Any]) -> bool:
+    placement = record.get("placement") or {}
+    if placement.get("target") == "summary":
+        return True
     anchors = record.get("anchors") or []
     if not anchors:
         return True

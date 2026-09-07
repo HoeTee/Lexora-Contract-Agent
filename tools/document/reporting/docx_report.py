@@ -484,6 +484,93 @@ class DocxReportGenerator:
         return DocxReportGenerator._get_document_start_anchor(doc), "document_start_missing_issue"
 
     @staticmethod
+    def _add_merged_party_comments(
+        doc: Document,
+        result: dict,
+        comments_data: list,
+        annotation_events: list[dict],
+        annotation_stats: dict,
+    ) -> bool:
+        """Aggregate a criterion's issue anchors into one comment per contract party.
+
+        Returns True when at least one party group was anchored; the caller
+        then skips the per-issue loop for this result. Returns False when no
+        anchor matches, so the caller falls back to regular handling.
+        """
+        groups: dict[str, list[tuple[dict, str, str, str]]] = {}
+        for issue in result.get('issues', []):
+            risk_level = issue.get('risk_level', '')
+            for anchor_item in issue.get('anchors') or []:
+                quoted = str(anchor_item.get('quoted_text') or '')
+                comment = str(anchor_item.get('comment_text') or issue.get('issue_comment') or '').strip()
+                party = "甲方" if "甲方" in quoted else ("乙方" if "乙方" in quoted else "其他")
+                groups.setdefault(party, []).append(
+                    (anchor_item, comment, risk_level, str(issue.get('issue_id') or ''))
+                )
+        if not groups:
+            return False
+
+        cid = result.get('criterion_id', '')
+        criterion = result.get('criterion', '')
+        anchored_any = False
+        for party, items in groups.items():
+            seen_comments: list[str] = []
+            for _, comment, _, _ in items:
+                if comment and comment not in seen_comments:
+                    seen_comments.append(comment)
+            if not seen_comments:
+                continue
+            matched_anchor = None
+            matched_issue_id = ""
+            matched_risk = ""
+            for anchor_item, _, risk_level, issue_id in items:
+                matched_anchor = DocxReportGenerator._find_text_range_anchor_in_xml_anchor(
+                    doc,
+                    anchor_item.get('xml_anchor_type', ''),
+                    anchor_item.get('xml_anchor_id', ''),
+                    anchor_item.get('quoted_text', ''),
+                )
+                if matched_anchor:
+                    matched_issue_id = issue_id
+                    matched_risk = risk_level
+                    break
+            if not matched_anchor:
+                annotation_stats["unmatched"] += 1
+                annotation_events.append({
+                    "event": "annotation_anchor_unmatched",
+                    "criterion_id": cid,
+                    "issue_id": matched_issue_id,
+                    "placement": "merged_by_party",
+                    "status": "unmatched",
+                    "reason": "merged_party_anchor_match_failed",
+                    "comment_text": "；".join(seen_comments),
+                })
+                continue
+            comment_body = DocxReportGenerator._build_issue_comment_text(
+                f"{party}相关问题：" + "；".join(seen_comments),
+                matched_risk,
+                criterion=criterion,
+            )
+            comments_data.append({
+                'anchor': matched_anchor,
+                'comment_text': comment_body,
+                'author': REVIEW_COMMENT_AUTHOR,
+            })
+            annotation_stats["xml_anchor_matched"] += 1
+            annotation_events.append({
+                "event": "annotation_anchor_resolved",
+                "criterion_id": cid,
+                "issue_id": matched_issue_id,
+                "placement": "merged_by_party",
+                "status": "anchored",
+                "match_strategy": "merged_by_party",
+                "paragraph_path": matched_anchor.path,
+                "comment_text": comment_body,
+            })
+            anchored_any = True
+        return anchored_any
+
+    @staticmethod
     def _paragraph_content_start_index(para_element) -> int:
         """Return the first valid child index after paragraph properties."""
         if len(para_element) and para_element[0].tag == qn('w:pPr'):
@@ -810,6 +897,18 @@ class DocxReportGenerator:
             for result in results:
                 criterion = result.get('criterion', '')
                 cid = result.get('criterion_id', '')
+                placement = result.get('placement') or {}
+                placement_target = placement.get('target', '')
+
+                if placement_target == 'merged_by_party':
+                    if DocxReportGenerator._add_merged_party_comments(
+                        doc,
+                        result,
+                        comments_data,
+                        annotation_events,
+                        annotation_stats,
+                    ):
+                        continue
 
                 for issue in result.get('issues', []):
                     annotation_stats["total_issues"] += 1
@@ -818,14 +917,30 @@ class DocxReportGenerator:
                     anchors = issue.get('anchors') or []
 
                     if not anchors:
-                        fallback_anchor, fallback_strategy = (
-                            DocxReportGenerator._select_missing_issue_anchor(
-                                doc,
-                                criterion,
-                                issue,
-                                region_boundaries,
+                        if placement_target == 'body_end':
+                            boundary = (region_boundaries or {}).get("body_content_end") or {}
+                            fallback_anchor = (
+                                DocxReportGenerator._find_text_range_anchor_in_xml_anchor(
+                                    doc,
+                                    boundary.get("xml_anchor_type", "paragraph"),
+                                    boundary.get("xml_anchor_id", ""),
+                                    boundary.get("quoted_text", ""),
+                                )
+                                if boundary
+                                else None
                             )
-                        )
+                            fallback_strategy = (
+                                "body_content_end_missing_issue" if fallback_anchor else "body_content_end_unavailable"
+                            )
+                        else:
+                            fallback_anchor, fallback_strategy = (
+                                DocxReportGenerator._select_missing_issue_anchor(
+                                    doc,
+                                    criterion,
+                                    issue,
+                                    region_boundaries,
+                                )
+                            )
                         if fallback_anchor:
                             comments_data.append({
                                 'anchor': fallback_anchor,
@@ -851,6 +966,7 @@ class DocxReportGenerator:
                             "event": "annotation_missing_text",
                             "criterion_id": cid,
                             "issue_id": issue_id,
+                            "placement": placement_target or None,
                             "status": "anchored" if fallback_anchor else "unmatched",
                             "reason": "anchors_empty",
                             "match_strategy": fallback_strategy,
