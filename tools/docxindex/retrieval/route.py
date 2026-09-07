@@ -20,6 +20,7 @@ from tools.docxindex.llm.schemas import RouteResponse
 DEFAULT_ROUTE_CONFIG = Path(__file__).resolve().parents[4] / "config.yaml"
 ROUTE_PROMPT_VERSION = "docx_route_v7"
 ROUTE_TITLE_MAX_DEPTH = 2
+ROUTE_TITLE_ATTACHMENT_MAX_DEPTH = 4
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 NUMBERED_CRITERION = re.compile(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)(.+)$", re.S)
 
@@ -133,7 +134,8 @@ def _titles(
     parent_id: str | None = None,
     region: str | None = None,
 ) -> list[dict[str, Any]]:
-    if depth > ROUTE_TITLE_MAX_DEPTH:
+    max_depth = ROUTE_TITLE_ATTACHMENT_MAX_DEPTH if region == "attachments" else ROUTE_TITLE_MAX_DEPTH
+    if depth > max_depth:
         return []
     result: list[dict[str, Any]] = []
     for node in nodes:
