@@ -11,6 +11,7 @@ from loggers.model_event_context import append_model_event
 from tools.docxindex import build_document_index
 from tools.docxindex.indexing.config import IndexingConfig
 from tools.docxindex.llm import LLMClient, LLMSettings
+from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.retrieval import (
     RetrievalConfig,
     RouteConfig,
@@ -20,6 +21,7 @@ from tools.docxindex.retrieval import (
     rerank_matches,
     rule_matches,
     scan_matches,
+    subtree_matches,
     title_matches,
 )
 from tools.docxindex.vector import (
@@ -97,12 +99,17 @@ class DocxIndexRetriever:
                 ensure_ascii=False,
             )
 
-    async def search(self, query: str) -> str:
+    async def search(
+        self,
+        query: str,
+        route_override: str | None = None,
+        criterion_id: str | None = None,
+    ) -> str:
         """Retrieve review-ready, DOCX-anchor-aware text for one query."""
         started_at = time.monotonic()
         _terminal(f"[DocxIndex] Searching temporary index: query_chars={len(query)}")
         try:
-            result = await asyncio.to_thread(self._search_sync, query)
+            result = await asyncio.to_thread(self._search_sync, query, route_override, criterion_id)
             _terminal(
                 "[DocxIndex] Search complete: "
                 f"result_chars={len(result)}, elapsed={round(time.monotonic() - started_at, 2)}s"
@@ -169,22 +176,37 @@ class DocxIndexRetriever:
             "region_boundaries": document_index.get("region_boundaries") or {},
         }
 
-    def _search_sync(self, query: str) -> str:
+    def _search_sync(
+        self,
+        query: str,
+        route_override: str | None = None,
+        criterion_id: str | None = None,
+    ) -> str:
         if self._index is None:
             raise RuntimeError("docxindex_build_index must be called before docxindex_search")
 
         index = self._index
         config = self.retrieval_config
         route = self.route_config
-        route_plan = plan_route(
-            index,
-            query,
-            self.llm_client,
-            route,
-            cache_dir=None,
-            criterion_text=query,
+        if route_override:
+            route_plan = RouteResponse.model_validate(json.loads(route_override))
+            route_source = "extracted"
+        else:
+            route_plan = plan_route(
+                index,
+                query,
+                self.llm_client,
+                route,
+                cache_dir=None,
+                criterion_text=query,
+            )
+            route_source = "llm"
+        _route_event(
+            "plan",
+            plan=route_plan.model_dump(mode="json"),
+            criterion_id=criterion_id,
+            route_source=route_source,
         )
-        _route_event("plan", plan=route_plan.model_dump(mode="json"))
         step_groups: list[list[dict[str, Any]]] = []
         complete_title_matches: list[dict[str, Any]] = []
         deterministic_notices: list[str] = []
@@ -226,6 +248,8 @@ class DocxIndexRetriever:
                     None,
                     scope="global",
                 )
+            elif step.method == "subtree":
+                current = subtree_matches(index, step)
             else:
                 raise ValueError(f"Unsupported docxindex route method: {step.method}")
             current = _add_route_source(current, step.method)

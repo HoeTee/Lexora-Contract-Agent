@@ -223,12 +223,21 @@ async def docxindex_build_index(docx_path: str, api_events_path: str | None = No
         reset_model_event_path(token)
 
 
-async def docxindex_search(query: str, api_events_path: str | None = None) -> str:
+async def docxindex_search(
+    query: str,
+    api_events_path: str | None = None,
+    route_override: str | None = None,
+    criterion_id: str | None = None,
+) -> str:
     """Search the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
     try:
         with redirect_stdout(sys.stderr):
-            return await _get_docxindex_retriever().search(query)
+            return await _get_docxindex_retriever().search(
+                query,
+                route_override=route_override,
+                criterion_id=criterion_id,
+            )
     finally:
         reset_model_event_path(token)
 
@@ -240,10 +249,20 @@ async def contract_build_index(docx_path: str, api_events_path: str | None = Non
     return await llamaindex_build_index(docx_path, api_events_path)
 
 
-async def contract_search(query: str, api_events_path: str | None = None) -> str:
+async def contract_search(
+    query: str,
+    api_events_path: str | None = None,
+    route_override: str | None = None,
+    criterion_id: str | None = None,
+) -> str:
     """Search the configured temporary contract retrieval index."""
     if RETRIEVAL_BACKEND == "docxindex":
-        return await docxindex_search(query, api_events_path)
+        return await docxindex_search(
+            query,
+            api_events_path,
+            route_override=route_override,
+            criterion_id=criterion_id,
+        )
     return await llamaindex_search(query, api_events_path)
 
 

@@ -25,6 +25,15 @@ from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_inf
 from loggers.trace_logger import get_current_trace
 
 
+_PLACEMENT_DIRECTIVES = {
+    "summary": "本标准发现的问题一律使用 anchors=[] 输出；系统会将 issue_comment 汇总进入文首审查总结，不得挂到具体条款。",
+    "inline_at_title": "本标准发现的问题，批注锚点必须指向相关标题所在段落。",
+    "tail": "本标准发现的问题，批注锚点必须指向合同末尾签署栏区域的段落。",
+    "merged_by_party": "本标准针对合同首部主体信息：按甲方、乙方分别输出问题，锚点指向首部对应主体信息所在段落。",
+    "body_end": "本标准发现的问题使用 anchors=[] 输出；系统会将批注挂到正文结尾处。",
+}
+
+
 SUB_AGENT_EXPECTED_JSON = """
 {
   "status": "compliant 或 issues_found 或 not_applicable",
@@ -108,18 +117,23 @@ class OrchestratorAgent:
         criterion_text: str,
         check_points_text: str,
         start: float,
+        route_override: str | None = None,
     ) -> tuple[str, int]:
         """Unified retrieval: returns (context_text, retrieval_tokens)."""
         search_query = f"{criterion_text}\n检查要点：{check_points_text}"
         retrieval_tokens = 0
 
         print(f"[Orchestrator] {cid}: Searching contract via temporary {RETRIEVAL_BACKEND} index...")
+        search_payload = {
+            "query": search_query,
+            "api_events_path": self.api_events_path,
+        }
+        if route_override:
+            search_payload["route_override"] = route_override
+            search_payload["criterion_id"] = cid
         search_result = await self.mcp_client.call_tool(
             "contract_search",
-            {
-                "query": search_query,
-                "api_events_path": self.api_events_path,
-            },
+            search_payload,
         )
         if isinstance(search_result, str) and search_result.startswith("Error"):
             raise classify_model_call_error(
@@ -382,16 +396,25 @@ class OrchestratorAgent:
         """
         cid = criterion["id"]
         criterion_text = criterion["criterion"]
-        check_points = criterion.get("check_points", [])
+        check_points = criterion.get("check_points") or [criterion_text]
         check_points_text = "\n".join(f"- {cp}" for cp in check_points)
         start = time.time()
         evidence_tokens = 0
+
+        route_override = None
+        if criterion.get("route") and not criterion.get("fallback_llm_route"):
+            route_override = json.dumps(criterion["route"], ensure_ascii=False)
+        placement = criterion.get("placement") if isinstance(criterion.get("placement"), dict) else {}
+        placement_target = placement.get("target", "inline")
+        placement_note = placement.get("note", "")
+        review_instruction = (criterion.get("review_instruction") or "").strip()
 
         # Step 1: Retrieve relevant contract sections
         context, evidence_tokens = await self._retrieve_context(
             cid,
             criterion_text,
-            check_points_text, start
+            check_points_text, start,
+            route_override=route_override,
         )
 
         # Step 2: Create sub-agent with retrieved context
@@ -418,6 +441,15 @@ class OrchestratorAgent:
             "必须按该标准输出 issue，不得再以风险较低、已有相关实体条款或一般完善建议为由跳过。\n\n"
             f"以下是合同原文中与此标准相关的内容：\n\n{context}\n\n"
         )
+        if review_instruction:
+            task_prompt = (
+                task_prompt
+                + f"触发指令：{review_instruction}\n"
+                + "触发条件成立时，issue_comment 必须逐字使用指令中的固定文字，不得改写。\n\n"
+            )
+        placement_directive = _PLACEMENT_DIRECTIVES.get(placement_target)
+        if placement_directive:
+            task_prompt += f"批注去向约束：{placement_directive}\n\n"
         parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
             sub_agent,
             task_prompt,
@@ -445,6 +477,7 @@ class OrchestratorAgent:
                 "section": criterion.get("section", "其他"),
                 "issues": parsed_opinion["issues"],
                 "status": "COMPLIANT",
+                "placement": placement or None,
                 "applicability_reason": parsed_opinion.get("applicability_reason", ""),
                 "tokens": sub_agent.token_usage.get("total_tokens", 0) + evidence_tokens,
                 "error_message": None,
@@ -512,6 +545,7 @@ class OrchestratorAgent:
             "section": criterion.get("section", "其他"),
             "issues": parsed_opinion["issues"],
             "status": final_status,
+            "placement": placement or None,
             "applicability_reason": parsed_opinion.get("applicability_reason", ""),
             "tokens": total_tokens,
             "error_message": None,

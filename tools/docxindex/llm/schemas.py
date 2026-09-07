@@ -111,10 +111,11 @@ class RerankResponse(BaseModel):
 class RouteStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    method: Literal["title", "region", "rule", "scan", "hybrid"]
+    method: Literal["title", "region", "rule", "scan", "hybrid", "subtree"]
     terms: list[str] = Field(default_factory=list)
     regions: list[Literal["frontmatter", "body", "tail", "attachments"]] = Field(default_factory=list)
     all_titles: bool = False
+    anchor_terms: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_method_fields(self) -> "RouteStep":
@@ -128,6 +129,10 @@ class RouteStep(BaseModel):
             raise ValueError("title route requires terms or all_titles=true")
         if self.method == "scan" and self.terms:
             raise ValueError("scan route must not set terms")
+        if self.method == "subtree" and not self.anchor_terms:
+            raise ValueError("subtree route requires at least one anchor term")
+        if self.method != "subtree" and self.anchor_terms:
+            raise ValueError(f"{self.method} route must not set anchor_terms")
         return self
 
 

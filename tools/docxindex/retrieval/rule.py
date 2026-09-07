@@ -69,3 +69,32 @@ def _scan_nodes(index: dict[str, Any]) -> list[dict[str, Any]]:
         if not children and node.get("node_type") not in {"body", "attachments"}:
             result.append(node)
     return sorted(result, key=lambda item: (item.get("start_index") is None, item.get("start_index") or 0))
+
+
+def subtree_matches(index: dict[str, Any], step: RouteStep) -> list[dict[str, Any]]:
+    """Locate heading nodes via anchor_terms and include their whole subtree.
+
+    Used for criteria like "检索某标题下的内容" where the review scope is the
+    section below a specific heading rather than a fixed region.
+    """
+    terms = [term.strip() for term in step.anchor_terms if term.strip()]
+    if not terms:
+        return []
+    nodes = index.get("nodes") or []
+    root_ids: list[str] = []
+    for node in nodes:
+        title = str(node.get("title") or "").strip()
+        node_type = str(node.get("node_type") or "")
+        node_id = str(node.get("node_id") or "")
+        if not title or not node_id or node_type in {"frontmatter", "body", "tail", "attachments"}:
+            continue
+        if any(term in title for term in terms):
+            root_ids.append(node_id)
+    result: list[dict[str, Any]] = []
+    for root_id in root_ids:
+        prefix = f"{root_id}/"
+        for node in nodes:
+            node_id = str(node.get("node_id") or "")
+            if node_id == root_id or node_id.startswith(prefix):
+                result.append(_candidate(node, "subtree"))
+    return result
