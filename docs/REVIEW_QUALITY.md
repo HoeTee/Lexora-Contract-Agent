@@ -17,11 +17,11 @@
 | `xml_anchor_type / xml_anchor_id / quoted_text` | 保持原有 XML 定位契约，原文必须连续、逐字匹配。 |
 | `anchors[].comment_text` | edit 必须有具体修改意见，最多 300 字符；evidence 必须为空。超长通过校验重试，禁止静默截断。 |
 | `issue_comment` | 完整问题概述，最多 600 字符；不能以概括替代真实字段对应的修改位置。 |
-| `Reflector.removals[]` | 每项为 `finding_id` 和非空 `reason`；解释撤回发现的事实或标准依据，或合并到了哪个保留发现。 |
+| `Reflector.finding_decisions[]` | 每项为 `finding_id`、`decision(confirm/revise/remove)` 和非空 `reason`；每条 finding 必须独立决定。 |
 | `quality_status` | `passed`：当前输出通过反思及发现完整性检查；`pending_review`：未通过、模型异常或存在未解释丢失；`not_required`：初次无问题，沿用已有短路流程，不能解释为已反思。 |
 | `quality_history` | 逐轮结果快照和反思反馈，供日志诊断；不交给 Summarizer。 |
-| `finding_removals` | 已说明的撤回决定。语义理由仍由 LLM 判断，程序不声称已确定性证明理由正确。 |
-| `unresolved_issues` | 之前发现但最终缺失、且没有有效撤回说明的事项，保留原文位置进入待复核。 |
+| `finding_decisions` | 逐条确认、修改或撤回决定；语义理由仍由 LLM 判断。 |
+| `unresolved_issues` | 尚未确认的问题，仅供任务状态和日志诊断，不进入 Summarizer 或 DOCX。 |
 
 内部发现指纹由原文位置、引用及缺陷类型生成，不按评论措辞生成；无锚点发现使用检查点与问题文本。模型使用同一审查项内稳定的 F001 等短编号，不自行生成 ID。current_findings 仅是位置索引，不是完整证据；完整结果由 subagent_output 提供。引用粒度改变也会触发撤回核对，不能把这一保守检查等同于语义完备性证明。
 
@@ -31,11 +31,11 @@
 
 1. SubAgent 检查当前标准覆盖的全部字段，不设置 1—2 个真实问题上限。
 2. 已有反思调用接收检索证据、当前发现和先前未保留的发现；不新增复核 Agent。
-3. 只有 PASS 且无未解释丢失、无未知撤回 ID、无仍被保留的撤回项，才能通过。最后一轮 REJECT 不再产生一版未复核的改写后直接输出。
-4. pending_review 不写成确定性原文修改批注；总结明确列为未确认的待复核事项，并保留字段原文及位置。不得将转待复核当作提高准确率。
+3. Reflector 对每条 finding 返回 confirm/revise/remove。一个 finding 需修改不会连带屏蔽同一 criterion 中已确认的问题。
+4. pending_review 只写入 API 状态和日志；不得进入 AI 审查总结，不得暴露 criterion/finding 编号或 XML path。
 5. edit 位置逐处写入；evidence 永不产生批注。删除 merged_by_party 聚合器。旧结果含该 placement 时也按普通位置处理，不恢复聚合行为。
 6. 同一原文位置的 missing_value 去重；同段不同问题不因为同属文字类标准就合并。不使用模糊相似度阈值批量删除。
-7. 保留输入 DOCX 已有全部批注，不改造其批注 XML 模型。Summarizer 只写总结，输入上限保持 90k。
+7. 保留输入 DOCX 已有人工及普通批注，替换作者为“AI 审查总结”的旧总结，确保最终只有一条总结。Summarizer 输入上限保持 90k。
 
 ## 任务与状态
 
@@ -46,12 +46,12 @@
 
 执行状态 `succeeded` 表示审查文件生成成功，不代表所有判断通过质量复核。质量未通过时 message 明确提示“部分审查项待复核”；消费者同时读取 quality。未通过内容不作为确认的法律结论。
 
-state/plan.json 保存标准来源摘要；恢复缓存使用 review_contract_version=3，旧契约计划/结果不自动复用。日志按原有 API/Web 用户分区保存，不新增平行日志系统。停用日志时仍由任务响应提供质量及标准摘要。
+state/plan.json 保存标准来源摘要；本次逐 finding 决策使用 `review_contract_version=4`，旧结果不自动复用。日志按原有 API/Web 用户分区保存，不新增平行日志系统。
 
 ## 验证
 
-运行 `python -m unittest discover -s tests/review_quality -v` 和已有 `tests/criteria_formal_recall` 回归测试。局部测试只能证明代码契约，不能证明模型语义准确率。
+运行已有 `tests/criteria_formal_recall` 回归测试；相关质量测试已合并到现有测试脚本，不新增独立运行脚本。局部测试只能证明代码契约，不能证明模型语义准确率。
 
-端到端使用正式 API 和原始输入合同，不上传已 AI 批注版本；固定实际标准与模型配置。核对已指出的 14 类问题、全部标准内真实占位字段、正确批注保留情况、待复核数量、既有批注、原文定位、索引与总耗时。交付任务 ID、DOCX、对照表和残余问题，不以单份结果推断全项目准确率。
+端到端使用项目根目录 `docker-compose.yaml` 启动正式 API/Worker，并上传原始输入合同。核对全部标准内真实占位字段、正确批注保留、旧 AI 总结替换、原文定位、索引与总耗时；不以单份结果推断全项目准确率。
 
 代码改动需要重新构建服务镜像。只同步挂载提示词不能部署 schema、反思及写入逻辑；必须验证运行镜像版本，不能让新字段提示词长期搭配旧代码。

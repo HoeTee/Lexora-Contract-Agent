@@ -1,6 +1,6 @@
 # 合同审查 Agent
 
-审查输出契约更新：见[审查质量与批注规则](docs/REVIEW_QUALITY.md)。新增 edit/evidence 锚点用途、逐字段批注、以附件为基准修改正文、反思待复核状态及标准版本摘要；docxindex 路由和召回算法未改动。新代码须随镜像部署，不能只更新提示词。
+审查输出契约见[审查质量与批注规则](docs/REVIEW_QUALITY.md)。Reflector 逐条确认 finding，pending 只保存在 API/日志，最终 DOCX 只写已确认问题并替换旧 AI 审查总结；docxindex 路由和召回算法未改动。
 
 合同审查 Agent 支持三种 DOCX 审查入口：浏览器 `/web`、异步 `/api` 和本地 CLI。系统读取合同与审查标准，执行 agent 工作流，并输出带批注的 DOCX。
 

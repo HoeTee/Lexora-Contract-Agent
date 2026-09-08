@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
@@ -28,10 +29,68 @@ from agents.base_agent import Settings
 from agents.planner import PlannerAgent, assemble_tasks, split_criteria_from_docx
 from agents.orchestrator import OrchestratorAgent
 from agents.summarizer import SummarizerAgent
-from agents.review_presentation import build_review_presentation
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
+
+
+def _normalize_annotation_text(value: str) -> str:
+    return "".join(str(value or "").split()).strip("，。：；、“”\"'")
+
+
+def _prepare_inline_results(results: list[dict]) -> tuple[list[dict], list[str]]:
+    """Select confirmed edit anchors and explicit opening instructions for reporting."""
+    inline_results: list[dict] = []
+    opening_notices: list[str] = []
+    seen_annotations: set[tuple[str, str, str, str]] = set()
+
+    for result in results:
+        placement = result.get("placement") or {}
+        placement_target = placement.get("target", "inline")
+        review_instruction = str(result.get("review_instruction") or "").strip()
+        if placement_target == "summary":
+            if review_instruction and review_instruction not in opening_notices:
+                opening_notices.append(review_instruction)
+            continue
+
+        rendered_issues: list[dict] = []
+        for issue in result.get("issues", []):
+            edit_anchors: list[dict] = []
+            for anchor in issue.get("anchors") or []:
+                if anchor.get("role", "edit") != "edit":
+                    continue
+                if not all(str(anchor.get(field) or "").strip() for field in ("xml_anchor_type", "xml_anchor_id", "quoted_text")):
+                    continue
+                comment = str(anchor.get("comment_text") or issue.get("issue_comment") or "").strip()
+                normalized_action = (
+                    "missing_value"
+                    if anchor.get("defect_type") == "missing_value"
+                    else _normalize_annotation_text(comment)
+                )
+                key = (
+                    str(anchor.get("xml_anchor_type")),
+                    str(anchor.get("xml_anchor_id")),
+                    _normalize_annotation_text(anchor.get("quoted_text", "")),
+                    normalized_action,
+                )
+                if key in seen_annotations:
+                    continue
+                seen_annotations.add(key)
+                local_anchor = deepcopy(anchor)
+                local_anchor["comment_text"] = comment
+                edit_anchors.append(local_anchor)
+
+            if edit_anchors or placement_target == "body_end":
+                local_issue = deepcopy(issue)
+                local_issue["anchors"] = edit_anchors
+                rendered_issues.append(local_issue)
+
+        if rendered_issues:
+            local_result = deepcopy(result)
+            local_result["issues"] = rendered_issues
+            inline_results.append(local_result)
+
+    return inline_results, opening_notices
 
 
 class ContractReviewWorkflow:
@@ -169,21 +228,17 @@ class ContractReviewWorkflow:
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
                 async with self.trace.span("phase.summarize", run_type="phase", inputs={"result_count": len(results)}) as span:
-                    presentation = build_review_presentation(results)
-                    final_review = await self._phase_summarize(
-                        presentation.summarizer_results
-                    )
-                    final_review["opening_notices"] = presentation.opening_notices
-                    final_review["global_issues"] = presentation.global_issues
-                    presentation_results = presentation.inline_results
+                    presentation_results, opening_notices = _prepare_inline_results(results)
+                    final_review = await self._phase_summarize(results)
+                    final_review["opening_notices"] = opening_notices
                     span.set_outputs(
                         {
                             "summary_section_count": len(final_review),
                             "raw_issue_count": sum(
                                 len(result.get("issues", [])) for result in results
                             ),
-                            "canonical_issue_count": len(
-                                presentation.summarizer_results
+                            "confirmed_issue_count": sum(
+                                len(result.get("issues", [])) for result in results
                             ),
                             "presentation_issue_count": sum(
                                 len(result.get("issues", [])) for result in presentation_results
@@ -193,13 +248,7 @@ class ContractReviewWorkflow:
                                 for result in presentation_results
                                 for issue in result.get("issues", [])
                             ),
-                            "inline_source_issue_keys": [
-                                issue.get("source_issue_keys", [])
-                                for result in presentation_results
-                                for issue in result.get("issues", [])
-                            ],
-                            "opening_notices": presentation.opening_notices,
-                            "global_issues": presentation.global_issues,
+                            "opening_notices": opening_notices,
                         }
                     )
 

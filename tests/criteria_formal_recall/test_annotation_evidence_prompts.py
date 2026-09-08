@@ -7,7 +7,8 @@ from agents.prompts.cn_prompts import (
     SUB_AGENT_BASE_PROMPT,
     SUMMARIZER_SYSTEM_PROMPT,
 )
-from agents.review_presentation import build_review_presentation, prompt_summary_records
+from agents.summarizer import _summary_issue_records
+from workflow.workflow import _prepare_inline_results
 
 
 class AnnotationEvidencePromptTests(unittest.TestCase):
@@ -33,10 +34,10 @@ class AnnotationEvidencePromptTests(unittest.TestCase):
                 "check_point": "核对分公司授权",
             }],
         }]
-        presentation = build_review_presentation(results)
-        self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(presentation.global_issues, [comment])
-        self.assertEqual(prompt_summary_records(presentation.summarizer_results)[0]["issue_comment"], comment)
+        inline, notices = _prepare_inline_results(results)
+        self.assertEqual(inline, [])
+        self.assertEqual(notices, [])
+        self.assertEqual(_summary_issue_records(results)[0]["issue_comment"], comment)
 
 
 if __name__ == "__main__":

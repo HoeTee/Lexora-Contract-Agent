@@ -7,9 +7,9 @@
 系统现在区分两份 DOCX 语义：
 
 - 给 subagent 审查的文本：使用 `clean_docx()` 生成，接受修订并清除原批注。
-- 最终输出的批注版 DOCX：以用户上传的原始 DOCX 为基础，保留原批注和原修订，再追加 AI 批注和黄色高亮。
+- 最终输出的批注版 DOCX：以用户上传的原始 DOCX 为基础，保留人工及普通批注和原修订，替换旧 AI 审查总结，再追加本次 AI 批注和黄色高亮。
 
-保留范围包括所有已有人工批注、历史普通 AI 批注和历史 AI 审查总结，不按作者或内容删除、替换。重复上传已审查文件时，旧总结与本次新增总结会共存；“每次生成一条总结”不表示输出文件只能有一条历史总结。
+保留范围包括所有已有人工批注和历史普通 AI 批注。作者为“AI 审查总结”的旧总结会连同其批注标记一起替换，最终只保留本次生成的一条总结。
 
 这样做的目的，是让 subagent 看到的文本和程序定位 `quoted_text` 时使用的临时匹配文本一致，同时不破坏客户上传合同中已有的批注和修订痕迹。
 
@@ -17,29 +17,28 @@
 
 批注生成阶段同时使用两类最终结构化结果：
 
-- `presentation_results`：由 `build_review_presentation()` 对 Orchestrator 原始 `results` 做确定性去重、锚点选择和分流后生成，只保留写入原文的规范化问题。
-- `final_review`：包含 Summarizer 返回的 `overall_comment`、`priority_comments`，以及程序追加的 `opening_notices`、`global_issues`，共同生成文档开头总览批注。未通过质量验收的事项以“待复核、未确认判断”明确列入 global_issues，不作为确定的原文修改批注。
+- 原文批注结果：Workflow 从 Orchestrator 的已确认 issues 中选择有效 `role=edit` 锚点；evidence 和未确认问题不进入 Writer。
+- `final_review`：包含 Summarizer 返回的 `overall_comment`、`priority_comments`，以及 Planner 明确提供的 `opening_notices`，共同生成文档开头总览批注。
 
 因此，`results` 不是 SummaryAgent 的输出。真实数据流是：
 
 ```text
 SubAgentOutput
-  -> Orchestrator 汇总成 raw results
-  -> build_review_presentation 生成 presentation_results、summarizer_results、opening_notices、global_issues
-  -> SummaryAgent 读取 summarizer_results
+  -> Reflector 逐条确认 finding
+  -> Orchestrator 输出 confirmed issues 与内部 unresolved_issues
+  -> Workflow 按 placement 和 anchor.role 分流
+  -> SummaryAgent 读取 confirmed issues
   -> LLM 只输出 overall_comment、priority_comments
-  -> 程序把 opening_notices、global_issues 追加到 final_review
-  -> DOCX 批注生成器使用 presentation_results 和 final_review
+  -> 程序把 opening_notices 追加到 final_review
+  -> DOCX 批注生成器使用 confirmed edit anchors 和 final_review
 ```
 
 其中：
 
-- 每个原始 issue 都有稳定 `issue_key`，必须进入原文批注、总结或有来源记录的去重合并；程序检测到漏项会报错。edit 锚点逐处写入，evidence 锚点仅用于论证，不生成批注。先前未说明撤回的发现进入待复核，不静默丢失。
-- 没有有效锚点、合同整体期限问题，以及条款断号或标题顺序问题进入总结；该判断不依赖 Reviewer 返回的锚点数量，不借正常标题或相邻段落强行放置批注。
-- 合同框架缺失多项必备标题时，即使 Reviewer 返回了少量正常标题作为定位证据，也进入总结并一次列明全部缺失标题。
-- 写入前按 `xml_anchor_type + xml_anchor_id + quoted_text + 修改动作` 去重；同一 XML 范围由多个审查要点返回同一修改时只生成一次批注，并在 `source_issue_keys` 保留来源。
-- “错别字/语病/重复”等文字质量要点命中同一 XML 范围时合并；关系型问题中带有“作为修正基准/用于对比”等说明的正确附件标题锚点不写批注，只保留正文错误引用。
-- 当前 `check_point` 给出“直接写明”的固定引号文字时，程序原样复制该文字，并只保留一个批注落点；不会从同一 criterion 的其他检查点串入错误文字。
+- 每个 finding 独立确认；已确认 finding 可写入，未确认 finding 只保留在任务状态和日志，不能显示“待复核”或内部 path。
+- edit 锚点逐处写入，evidence 锚点仅用于论证。写入前按 `xml_anchor_type + xml_anchor_id + quoted_text + 修改动作` 精确去重；missing_value 在同一字段位置只写一次。
+- 总结去向由 Planner 的结构化 `placement` 决定，不再根据“断号、期限、附件标题”等关键词推测。
+- 固定提示来自结构化 `review_instruction`，不再从自然语言正则提取。
 - SummaryAgent 不再返回 `issue_decisions`，不能删除问题、改写锚点或决定展示位置。
 - 整体仍只调用一次 SummaryAgent，不增加新的 LLM 调用。
 
@@ -254,4 +253,4 @@ DOCX 批注不是只在正文里插入一个标记。一个有效批注至少同
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：新增 edit/evidence 锚点用途、逐字段批注、以附件为基准修改正文、反思待复核状态及标准版本摘要。docxindex 路由和召回算法不变。新代码须随镜像部署，不能只更新提示词。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：逐字段 finding 独立确认，pending 只保存在 API/日志，最终 DOCX 替换旧 AI 总结并只写已确认问题。docxindex 路由和召回算法不变。

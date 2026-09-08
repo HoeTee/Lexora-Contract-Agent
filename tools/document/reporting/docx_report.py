@@ -628,7 +628,6 @@ class DocxReportGenerator:
         overall_comment = str(summary_sections.get("overall_comment", "")).strip()
         priority_comments = summary_sections.get("priority_comments", [])
         opening_notices = summary_sections.get("opening_notices", [])
-        global_issues = summary_sections.get("global_issues", [])
 
         if overall_comment:
             lines.append("总体审查结论：")
@@ -656,18 +655,6 @@ class DocxReportGenerator:
                 lines.append("")
             lines.append("合同首部需补充的提示：")
             for index, item in enumerate(valid_opening_notices, start=1):
-                lines.append(f"{index}. {item}")
-
-        valid_global_issues = [
-            item.strip()
-            for item in global_issues
-            if isinstance(item, str) and item.strip()
-        ]
-        if valid_global_issues:
-            if lines:
-                lines.append("")
-            lines.append("全局审查问题：")
-            for index, item in enumerate(valid_global_issues, start=1):
                 lines.append(f"{index}. {item}")
 
         return "\n".join(lines)
@@ -701,6 +688,28 @@ class DocxReportGenerator:
             doc.part.relate_to(comments_part, COMMENTS_RELTYPE)
 
         comments_element = etree.fromstring(comments_part.blob)
+        replaced_summary_ids: set[str] = set()
+        for existing_comment in list(comments_element.findall(f".//{qn('w:comment')}")):
+            if existing_comment.get(qn("w:author")) != SUMMARY_COMMENT_AUTHOR:
+                continue
+            raw_id = existing_comment.get(qn("w:id"))
+            if raw_id is not None:
+                replaced_summary_ids.add(raw_id)
+            parent = existing_comment.getparent()
+            if parent is not None:
+                parent.remove(existing_comment)
+        if replaced_summary_ids:
+            marker_tags = {
+                qn("w:commentRangeStart"),
+                qn("w:commentRangeEnd"),
+                qn("w:commentReference"),
+            }
+            for element in list(doc.element.iter()):
+                if element.tag not in marker_tags or element.get(qn("w:id")) not in replaced_summary_ids:
+                    continue
+                parent = element.getparent()
+                if parent is not None:
+                    parent.remove(element)
         existing_ids: list[int] = []
         for existing_comment in comments_element.findall(f".//{qn('w:comment')}"):
             raw_id = existing_comment.get(qn("w:id"))
@@ -808,10 +817,6 @@ class DocxReportGenerator:
             }
 
             for result in results:
-                if result.get('quality_status') == 'pending_review':
-                    annotation_events.append({'event': 'annotation_quality_pending',
-                                              'criterion_id': result.get('criterion_id')})
-                    continue
                 criterion = result.get('criterion', '')
                 cid = result.get('criterion_id', '')
                 placement = result.get('placement') or {}
@@ -961,8 +966,7 @@ class DocxReportGenerator:
 
             skipped_count = len(unmatched_comments)
 
-            if comments_data:
-                DocxReportGenerator._add_comments_to_doc(doc, comments_data)
+            DocxReportGenerator._add_comments_to_doc(doc, comments_data)
 
             doc.save(output_path)
             if annotation_events_path:

@@ -202,4 +202,4 @@ Celery task、broker、worker 与 workflow 内部并发的边界见 [智能体�
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：新增 edit/evidence 锚点用途、逐字段批注、以附件为基准修改正文、反思待复核状态及标准版本摘要。docxindex 路由和召回算法不变。新代码须随镜像部署，不能只更新提示词。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：Reflector 逐条确认 finding，pending 只保存在 API/日志，最终 DOCX 只写已确认问题。docxindex 路由和召回算法不变；本地正式回归使用项目根目录 `docker-compose.yaml`，不能用部署包 compose 替代。

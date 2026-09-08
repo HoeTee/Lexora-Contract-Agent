@@ -5,18 +5,15 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import xml.etree.ElementTree as ET
+import zipfile
 
 from docx import Document
 from docx.oxml import OxmlElement
 
-from agents.orchestrator import OrchestratorAgent
+from agents.orchestrator import OrchestratorAgent, _FindingLedger
 from agents.prompts.cn_prompts import load_prompts
-from agents.review_presentation import (
-    build_review_presentation,
-    prompt_issue_records,
-    prompt_summary_records,
-)
-from agents.schemas import SubAgentOutput, SummaryOutput
+from agents.schemas import ReflectorOutput, SubAgentOutput, SummaryOutput
 from agents.summarizer import (
     SUMMARIZER_MAX_PROMPT_TOKENS,
     SummarizerAgent,
@@ -28,9 +25,50 @@ from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
 from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.retriever import _should_use_fallback
+from workflow.workflow import _prepare_inline_results
 
 
 class AnchorEvidenceValidationTests(unittest.TestCase):
+    def test_explicit_frontmatter_placeholders_are_added_per_field(self) -> None:
+        context = (
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:frontmatter/p1\n内容：\n"
+            "地址：#地址#\n\n---\n\n"
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:frontmatter/p2\n内容：\n"
+            "联系电话：【未填写】\n\n---\n\n"
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:frontmatter/p3\n内容：\n"
+            "银行账号：________"
+        )
+        output = {"status": "compliant", "issues": []}
+        route = {"steps": [{"method": "region", "regions": ["frontmatter"]}]}
+
+        added = OrchestratorAgent()._ensure_explicit_blank_field_issues(
+            output,
+            context,
+            "检查合同主体基本信息",
+            ["检查基本信息是否填写完整"],
+            route,
+        )
+
+        self.assertEqual(added, 3)
+        self.assertEqual(output["status"], "issues_found")
+        self.assertEqual(
+            [issue["anchors"][0]["xml_anchor_id"] for issue in output["issues"]],
+            ["path:frontmatter/p1", "path:frontmatter/p2", "path:frontmatter/p3"],
+        )
+
+    def test_reflector_requires_unique_per_finding_decisions(self) -> None:
+        value = {
+            "status": "PASS",
+            "feedback": "",
+            "finding_decisions": [
+                {"finding_id": "F001", "decision": "confirm", "reason": "字段明确未填写"}
+            ],
+        }
+        self.assertEqual(ReflectorOutput.model_validate(value).finding_decisions[0].decision, "confirm")
+        value["finding_decisions"].append(value["finding_decisions"][0])
+        with self.assertRaises(ValueError):
+            ReflectorOutput.model_validate(value)
+
     def test_wrong_model_anchor_id_is_repaired_from_unique_retrieval_evidence(self) -> None:
         context = (
             "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p8\n内容：\n合同编号：A\n\n---\n\n"
@@ -72,6 +110,48 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
 
 
 class DocxAnchorRegressionTests(unittest.TestCase):
+    def test_new_summary_replaces_old_ai_summary(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "source.docx"
+            first = Path(temp_dir) / "first.docx"
+            second = Path(temp_dir) / "second.docx"
+            document = Document()
+            document.add_paragraph("合同正文")
+            document.save(source)
+            results = [{
+                "criterion_id": "TEST",
+                "criterion": "测试",
+                "issues": [{
+                    "issue_id": "TEST.1",
+                    "risk_level": "low",
+                    "issue_comment": "测试问题",
+                    "check_point": "测试",
+                    "anchors": [{
+                        "role": "edit",
+                        "xml_anchor_type": "paragraph",
+                        "xml_anchor_id": "path:body/p1",
+                        "quoted_text": "合同正文",
+                        "comment_text": "测试批注",
+                    }],
+                }],
+            }]
+            DocxReportGenerator._generate_docx_with_comments(
+                str(source), results, str(first), {"overall_comment": "旧总结", "priority_comments": []}
+            )
+            DocxReportGenerator._generate_docx_with_comments(
+                str(first), results, str(second), {"overall_comment": "新总结", "priority_comments": []}
+            )
+
+            namespace = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+            with zipfile.ZipFile(second) as archive:
+                comments = ET.fromstring(archive.read("word/comments.xml"))
+            summaries = [
+                "".join(comment.itertext())
+                for comment in comments
+                if comment.attrib.get(f"{{{namespace}}}author") == "AI 审查总结"
+            ]
+            self.assertEqual(summaries, ["总体审查结论：新总结"])
+
     def test_anchor_paths_keep_real_xml_child_indexes(self) -> None:
         with TemporaryDirectory() as temp_dir:
             contract_path = Path(temp_dir) / "contract.docx"
@@ -188,13 +268,11 @@ class DocxAnchorRegressionTests(unittest.TestCase):
             "overall_comment": "总体概述。",
             "priority_comments": [],
             "opening_notices": ["注意：补充固定提示语。"],
-            "global_issues": ["缺失第六、九、十四、十五条。"],
         })
 
         self.assertIn("合同首部需补充的提示：", text)
         self.assertIn("注意：补充固定提示语。", text)
-        self.assertIn("全局审查问题：", text)
-        self.assertIn("缺失第六、九、十四、十五条。", text)
+        self.assertNotIn("全局审查问题：", text)
 
 
 class PromptAuthorityTests(unittest.TestCase):
@@ -244,7 +322,7 @@ class SubAgentSchemaNormalizationTests(unittest.TestCase):
         self.assertEqual(len(output.issues[0].anchors[0].comment_text), 120)
 
 
-class ReviewPresentationTests(unittest.TestCase):
+class WorkflowPresentationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.results = [
             {
@@ -289,21 +367,6 @@ class ReviewPresentationTests(unittest.TestCase):
             },
         ]
 
-    def test_prompt_records_expose_stable_issue_and_anchor_keys(self) -> None:
-        records = prompt_issue_records(self.results)
-
-        self.assertEqual(records[0]["issue_key"], "C12::C12.1")
-        self.assertEqual(records[0]["anchors"][0]["anchor_key"], "C12::C12.1#anchor_1")
-        self.assertNotIn("_issue", records[0])
-
-    def test_summary_prompt_excludes_anchor_and_reasoning_fields(self) -> None:
-        record = prompt_summary_records(self.results)[0]
-
-        self.assertEqual(
-            set(record),
-            {"section", "criterion_id", "risk_level", "issue_comment", "check_point", "quality_status"},
-        )
-
     def test_summary_schema_rejects_removed_issue_decisions_field(self) -> None:
         with self.assertRaises(ValueError):
             SummaryOutput.model_validate({
@@ -312,20 +375,37 @@ class ReviewPresentationTests(unittest.TestCase):
                 "issue_decisions": [],
             })
 
-    def test_cross_criterion_duplicates_render_as_one_annotation(self) -> None:
-        self.results[0]["issues"][0]["anchors"][0]["comment_text"] = (
-            "删除重复的“原因”，修改为“因乙方原因”。"
-        )
-        self.results[1]["issues"][0]["anchors"][0]["comment_text"] = (
-            "删除重复的原因，改为“因乙方原因”。"
+    def test_same_missing_field_is_written_once_across_criteria(self) -> None:
+        duplicate = json.loads(json.dumps(self.results[0], ensure_ascii=False))
+        duplicate["criterion_id"] = "C18"
+        duplicate["issues"][0]["anchors"][0]["defect_type"] = "missing_value"
+        self.results[0]["issues"][0]["anchors"][0]["defect_type"] = "missing_value"
+        duplicate["issues"][0]["anchors"][0]["comment_text"] = "请填写该字段。"
+
+        inline, _ = _prepare_inline_results([self.results[0], duplicate])
+
+        self.assertEqual(len(inline), 1)
+
+    def test_pending_criterion_keeps_confirmed_findings_only(self) -> None:
+        opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
+        ledger = _FindingLedger(opinion)
+        finding_id = ledger.current(opinion)[0]["finding_id"]
+        ledger.review(
+            opinion,
+            {
+                "status": "REJECT",
+                "feedback": "其他 finding 仍需修改",
+                "finding_decisions": [
+                    {"finding_id": finding_id, "decision": "confirm", "reason": "事实成立"}
+                ],
+            },
+            1,
         )
 
-        presentation = build_review_presentation(self.results)
+        confirmed = ledger.confirmed_issues(opinion)
 
-        self.assertEqual(len(presentation.inline_results), 1)
-        issue = presentation.inline_results[0]["issues"][0]
-        self.assertEqual(issue["source_issue_keys"], ["C12::C12.1", "C15::C15.1"])
-        self.assertEqual(len(issue["anchors"]), 1)
+        self.assertEqual(len(confirmed), 1)
+        self.assertEqual(confirmed[0]["finding_id"], finding_id)
 
     def test_ambiguous_different_advice_is_not_merged_only_by_criterion(self) -> None:
         for result in self.results:
@@ -337,116 +417,8 @@ class ReviewPresentationTests(unittest.TestCase):
             "结合语境应改为“乙方向甲方发货”。"
         )
 
-        presentation = build_review_presentation(self.results)
-
-        self.assertEqual(len(presentation.inline_results), 2)
-
-    def test_anchorless_issue_is_summary_only_and_still_represented(self) -> None:
-        self.results[0]["issues"][0]["anchors"] = []
-
-        presentation = build_review_presentation([self.results[0]])
-
-        self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(presentation.global_issues, ["存在重复用词。"])
-        self.assertEqual(presentation.opening_notices, [])
-        self.assertEqual(len(presentation.summarizer_results), 1)
-
-    def test_multi_anchor_numbering_issue_is_summary_only(self) -> None:
-        anchors = [
-            {
-                "xml_anchor_type": "paragraph",
-                "xml_anchor_id": f"path:body/p{index}",
-                "quoted_text": f"第{index}条",
-                "comment_text": "序号断号。",
-            }
-            for index in range(1, 4)
-        ]
-        results = [{
-            "criterion_id": "ORDER",
-            "criterion": "检查标题顺序是否杂乱",
-            "status": "issues_found",
-            "issues": [{
-                "issue_id": "ORDER.1",
-                "risk_level": "low",
-                "issue_comment": "条款序号存在多处断号。",
-                "anchors": anchors,
-                "reasoning": "多处断号",
-                "criterion": "检查标题顺序是否杂乱",
-                "check_point": "条款序号",
-            }],
-        }]
-
-        presentation = build_review_presentation(results)
-
-        self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(
-            presentation.global_issues,
-            ["条款编号多处不连续。"],
-        )
-
-    def test_numbering_issue_is_summary_only_even_with_one_anchor(self) -> None:
-        result = self.results[0]
-        result["criterion"] = "检查标题顺序是否杂乱"
-        issue = result["issues"][0]
-        issue["issue_comment"] = "合同条款序号缺失第六条。"
-
-        presentation = build_review_presentation([result])
-
-        self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(
-            presentation.global_issues,
-            ["合同条款序号缺失第六条。"],
-        )
-
-    def test_missing_contract_framework_is_summary_only_with_two_anchors(self) -> None:
-        result = self.results[0]
-        result["criterion"] = "合同框架需要具备至少以下必备标题"
-        issue = result["issues"][0]
-        issue["issue_comment"] = "合同框架缺失多项必备标题：保密条款、争议解决。"
-        issue["anchors"].append({
-            "xml_anchor_type": "paragraph",
-            "xml_anchor_id": "path:body/p2",
-            "quoted_text": "第四条 甲方义务",
-            "comment_text": "作为结构参照。",
-        })
-
-        presentation = build_review_presentation([result])
-
-        self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(
-            presentation.global_issues,
-            ["合同框架缺失多项必备标题：保密条款、争议解决。"],
-        )
-
-    def test_reference_only_attachment_anchor_is_removed(self) -> None:
-        issue = self.results[0]["issues"][0]
-        issue["anchors"].append({
-            "xml_anchor_type": "paragraph",
-            "xml_anchor_id": "path:body/p2",
-            "quoted_text": "附件一：服务清单",
-            "comment_text": "此处为附件一实际标题，作为正文引用的修正基准。",
-        })
-
-        presentation = build_review_presentation([self.results[0]])
-        anchors = presentation.inline_results[0]["issues"][0]["anchors"]
-
-        self.assertEqual(len(anchors), 1)
-        self.assertEqual(anchors[0]["xml_anchor_id"], "path:body/p1")
-
-    def test_attachment_heading_reference_is_removed_for_alternate_wording(self) -> None:
-        issue = self.results[0]["issues"][0]
-        issue["anchors"].append({
-            "xml_anchor_type": "paragraph",
-            "xml_anchor_id": "path:body/p2",
-            "quoted_text": "附件一：服务清单",
-            "comment_text": "此处标题为服务清单，请与正文中的附件名称保持一致。",
-        })
-
-        presentation = build_review_presentation([self.results[0]])
-        anchors = presentation.inline_results[0]["issues"][0]["anchors"]
-
-        self.assertEqual(len(anchors), 1)
-        self.assertEqual(anchors[0]["xml_anchor_id"], "path:body/p1")
+        inline, _ = _prepare_inline_results(self.results)
+        self.assertEqual(len(inline), 2)
 
     def test_keyword_triggered_fixed_instruction_is_routed_to_opening_summary(self) -> None:
         results = [{
@@ -469,50 +441,11 @@ class ReviewPresentationTests(unittest.TestCase):
             }],
         }]
 
-        presentation = build_review_presentation(results)
-        self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(
-            presentation.opening_notices,
-            ["注意：当前检查点固定文字"],
-        )
-
-    def test_missing_content_fixed_instruction_remains_inline(self) -> None:
-        result = self.results[0]
-        result["criterion"] = (
-            "检查联系信息，如无则在合同首部写明“注意：请补充合同基本信息”。"
-        )
-        issue = result["issues"][0]
-        issue["check_point"] = (
-            "如无联系地址，在合同首部写明“注意：请补充合同基本信息”"
-        )
-
-        presentation = build_review_presentation([result])
-
-        self.assertEqual(len(presentation.inline_results), 1)
-        self.assertEqual(presentation.opening_notices, [])
-
-    def test_duration_issue_is_routed_to_summary(self) -> None:
-        self.results[0]["issues"][0]["check_point"] = "补充合同履行期限"
-
-        presentation = build_review_presentation([self.results[0]])
-
-        self.assertEqual(presentation.inline_results, [])
-        self.assertEqual(presentation.global_issues, ["存在重复用词。"])
-
-    def test_nested_prescribed_text_is_complete_in_summary(self) -> None:
-        issue = self.results[0]["issues"][0]
-        issue["anchors"] = []
-        issue["check_point"] = (
-            "如无上述内容，在正文结尾处写入“注意：补充“以下为合同签署栏”"
-            "或“以下无正文””"
-        )
-
-        presentation = build_review_presentation([self.results[0]])
-
-        self.assertEqual(
-            presentation.global_issues,
-            ["注意：补充“以下为合同签署栏”或“以下无正文”"],
-        )
+        results[0]["placement"] = {"target": "summary"}
+        results[0]["review_instruction"] = "注意：当前检查点固定文字"
+        inline, notices = _prepare_inline_results(results)
+        self.assertEqual(inline, [])
+        self.assertEqual(notices, ["注意：当前检查点固定文字"])
 
 
 class SummarizerPromptBudgetTests(unittest.TestCase):

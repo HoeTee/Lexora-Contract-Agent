@@ -59,4 +59,4 @@ logging:
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：新增 edit/evidence 锚点用途、逐字段批注、以附件为基准修改正文、反思待复核状态及标准版本摘要。docxindex 路由和召回算法不变。新代码须随镜像部署，不能只更新提示词。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：`finding_decisions`、`unresolved_issues` 和 pending 状态保存在任务日志中，不进入用户 DOCX。docxindex 路由和召回算法不变。

@@ -165,22 +165,30 @@ class SubAgentOutput(StrictOutputModel):
         return self
 
 
-class FindingRemoval(StrictOutputModel):
+class FindingDecision(StrictOutputModel):
     finding_id: str = Field(min_length=1)
+    decision: Literal["confirm", "revise", "remove"]
     reason: str = Field(min_length=1)
 
     @field_validator("finding_id", "reason")
     @classmethod
     def nonblank(cls, value: str) -> str:
         if not value.strip():
-            raise ValueError("removal decision must not be blank")
+            raise ValueError("finding decision must not be blank")
         return value
 
 
 class ReflectorOutput(StrictOutputModel):
     status: Literal["PASS", "REJECT"]
     feedback: str = ""
-    removals: list[FindingRemoval] = Field(default_factory=list)
+    finding_decisions: list[FindingDecision] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_unique_findings(self):
+        finding_ids = [item.finding_id for item in self.finding_decisions]
+        if len(finding_ids) != len(set(finding_ids)):
+            raise ValueError("finding_decisions must contain each finding_id at most once")
+        return self
 
 
 class SummaryContentOutput(StrictOutputModel):

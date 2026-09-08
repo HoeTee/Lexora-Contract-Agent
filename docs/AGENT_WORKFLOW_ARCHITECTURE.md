@@ -16,8 +16,8 @@
 | 2. 建索引 build_index | MCP `contract_build_index` | 按 `retrieval.backend` 为合同建立临时 LlamaIndex 或 docxindex 索引 |
 | 3. 规划 plan | `PlannerAgent.design_tasks` | 把审查标准 markdown 拆成结构化任务 `criteria_list` |
 | 4. 执行+反思 execute | `OrchestratorAgent.execute_criteria` | 逐条审查标准，产出 `results` |
-| 5. 最终整理 summarize | `build_review_presentation` + `SummarizerAgent.compile_summary_comment` | 程序确定性完成去重、锚点选择和展示分流；Summarizer 只生成总览 |
-| 6. 批注 generate | MCP `generate_docx_report` | 用整理后的 `presentation_results` + `final_review` 生成批注版 DOCX |
+| 5. 最终整理 summarize | Workflow 分流 + `SummarizerAgent.compile_summary_comment` | Workflow 按结构化 placement 和已确认 finding 分流；Summarizer 只生成总览 |
+| 6. 批注 generate | MCP `generate_docx_report` | 用已确认的原文批注结果与 `final_review` 生成批注版 DOCX |
 
 每个阶段会通过 `progress_callback` 上报阶段名，便于前端展示进度：`ingesting`、`building_index`、`planning`、`reviewing`、`summarizing`、`generating_docx`、`completed`。
 
@@ -39,7 +39,7 @@
 | PlannerAgent | `agents/planner.py` | 把审查标准拆成结构化审查任务 | 审查标准 markdown | `criteria_list`（id / section / criterion / check_points） |
 | OrchestratorAgent | `agents/orchestrator.py` | 逐条派发 SubAgent，串联检索、反思、并发控制 | `criteria_list` | `results` |
 | SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准，可调用白名单允许的 MCP 工具 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues） |
-| ReflectorAgent | `agents/reflector.py` | 质量复核 SubAgent 输出 | criterion + subagent_output + 补充检索 | `{ status: PASS/REJECT, feedback }` |
+| ReflectorAgent | `agents/reflector.py` | 逐条质量复核 SubAgent finding | criterion + subagent_output + 补充检索 | `{ status, feedback, finding_decisions[] }` |
 | SummarizerAgent | `agents/summarizer.py` | 根据程序整理后的完整问题清单生成总览，不拥有删除问题或选择锚点的权限 | `summarizer_results` | `{ overall_comment, priority_comments }` |
 
 基础设施：`agents/base_agent.py`（`Agent` 基类与 `Settings` 模型配置）、`agents/schemas.py`（结构化输出 schema）、`agents/prompts/cn_prompts.yaml`（所有提示词，含审查边界）。
@@ -82,7 +82,7 @@ class SubAgentOutput:
 class ReflectorOutput:
     status: Literal["PASS", "REJECT"]
     feedback: str = ""
-    removals: list[FindingRemoval] = []   # finding_id + reason；由 Reflector 输出
+    finding_decisions: list[FindingDecision] = []  # finding_id + confirm/revise/remove + reason
 
 class SummaryOutput:
     overall_comment: str = ""
@@ -98,9 +98,9 @@ class SummaryOutput:
 3. 若 `status == compliant`：短路，跳过反思直接返回。
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：
    - 对 `quoted_text` 为空的“缺失类” issue 再检索一次，生成 `missing_text_review_notes` 供 Reflector 判断。
-   - `Reflector.review` 返回 `PASS` 或 `REJECT`。
-   - `PASS` 且发现完整性检查通过才结束；`REJECT` 在还有反思轮次时按反馈改写。达到上限或反思异常时标记 `quality_status=pending_review`，不直接输出确定性批注。每轮保留发现快照及撤回理由。
-5. 返回该 criterion 结果：`criterion_id`、`section`、`issues`、`status`、`applicability_reason`、`tokens`，以及 `quality_status`、`quality_history`、`finding_removals`、`unresolved_issues`。判断结论与质量状态分别记录。
+   - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`；一个 finding 需修改不会连带删除同一 criterion 中已经确认的问题。
+   - 全部 finding 决策完整且满足 PASS 才结束；达到上限或反思异常时标记 `quality_status=pending_review`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。
+5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。
 
 并发与容错（`execute_criteria`）：
 
@@ -139,15 +139,12 @@ results = await asyncio.gather(
 审查标准 DOCX -> ingest -> 审查标准 markdown -> Planner -> criteria_list
 合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引
 每条 criterion: 检索 context -> SubAgent(可调用白名单工具) -> (Reflector 反思循环) -> 单条结果
-所有单条结果 -> raw results -> build_review_presentation
-build_review_presentation -> presentation_results + summarizer_results + summary_issue_comments
-summarizer_results -> Summarizer -> final_review
-presentation_results + final_review -> generate_docx_report -> 批注版 DOCX
+所有单条结果 -> Workflow 按 placement 和 edit/evidence 分流
+已确认问题 -> Summarizer -> final_review
+已确认 edit anchors + final_review -> generate_docx_report -> 批注版 DOCX
 ```
 
-`raw results` 继续写入审查日志，保留各 criterion 的原始输出；`presentation_results` 只包含最终写入原文的批注。没有有效锚点、合同整体期限问题，以及条款断号/标题顺序问题由程序放入 `summary_issue_comments`，不依赖 Reviewer 返回的锚点数量。每个原始 `issue_key` 必须进入一个规范化问题，否则程序直接报错，不能静默遗漏。Summarizer 只读取规范化问题，不再返回 discard 或锚点决策。该调整复用原有 Summarizer 调用，不增加 LLM 调用次数。索引与检索见 `DOCX_STRUCTURE_RETRIEVAL_DESIGN.md`，批注写入与 `quoted_text` 定位见 `DOCX_ANNOTATION_DESIGN.md`。
-
-`build_review_presentation()` 的输入是 Orchestrator `results`，输出是 `ReviewPresentation`：`inline_results`、`summarizer_results`、`summary_issue_comments`。相同 XML 范围且修改动作相同的跨要点批注只保留一次；“错别字/语病/重复”等文字质量要点命中同一范围时也合并，并在规范化 issue 的 `source_issue_keys` 中记录全部来源。合同框架缺失、全局断号、履行期限和无锚点问题进入总结；关系型问题中仅作正确值参照的附件标题锚点不写批注。当前 `check_point` 含“写明/写入”的固定引号文字时，只保留一个落点或总结项并原样写入。该步骤不调用模型。
+`raw results` 继续写入审查日志。Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。相同 XML 范围、原文及修改动作完全相同的批注去重，同一位置的不同问题不得仅因文字相似而合并。固定提示使用 Planner 的 `review_instruction` 和 `placement`，不再由关键词或正则猜测去向。该调整不增加 LLM 调用次数。
 
 ## 架构边界
 
@@ -209,4 +206,4 @@ workflow:
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：新增 edit/evidence 锚点用途、逐字段批注、以附件为基准修改正文、反思待复核状态及标准版本摘要。docxindex 路由和召回算法不变。新代码须随镜像部署，不能只更新提示词。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：逐字段 finding 独立确认，pending 只保存在 API/日志，最终 DOCX 只写已确认问题。docxindex 路由和召回算法不变。
