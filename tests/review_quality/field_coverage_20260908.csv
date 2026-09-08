@@ -1,0 +1,11 @@
+case_id,criterion_id,xml_anchor_id,field,source_present,retrieved_in_C3,normal_inline_comment,pending_summary,verdict
+F01,C3,path:body/p28,乙方名称,true,true,true,true,原文批注来自C18；C3待复核
+F02,C3,path:body/p29,联系地址,true,true,false,true,只在待复核总结
+F03,C3,path:body/p30,联系电话,true,true,false,true,只在待复核总结
+F04,C3,path:body/p31,邮编,true,true,false,true,只在待复核总结
+F05,C3,path:body/p32,联系人,true,true,false,true,只在待复核总结
+F06,C3,path:body/p33,邮箱地址,true,true,false,true,只在待复核总结
+F07,C3,path:body/p34,统一社会信用代码,true,true,false,true,只在待复核总结
+F08,C3,path:body/p35,账户名称,true,true,false,true,只在待复核总结
+F09,C3,path:body/p36,开户银行,true,true,false,false,模型漏报
+F10,C3,path:body/p37,银行账号,true,true,false,false,模型漏报
