@@ -25,6 +25,7 @@ from endpoints.runtime.errors import ModelCallError, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
 from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_info
 from loggers.trace_logger import get_current_trace
+from tools.docxindex.indexing import estimate_tokens
 
 
 _PLACEMENT_DIRECTIVES = {
@@ -316,6 +317,8 @@ class OrchestratorAgent:
             "query": search_query,
             "api_events_path": self.api_events_path,
         }
+        if RETRIEVAL_BACKEND == "docxindex":
+            search_payload["return_metadata"] = True
         if route_override:
             search_payload["route_override"] = route_override
             search_payload["criterion_id"] = cid
@@ -328,7 +331,21 @@ class OrchestratorAgent:
                 search_result,
                 default_component="embedding" if RETRIEVAL_BACKEND == "llamaindex" else "agent",
             )
-        context = search_result if search_result else "未找到相关内容。"
+        contexts = [search_result] if search_result else ["未找到相关内容。"]
+        if RETRIEVAL_BACKEND == "docxindex" and isinstance(search_result, str):
+            try:
+                payload = json.loads(search_result)
+            except json.JSONDecodeError:
+                payload = None
+            if isinstance(payload, dict) and isinstance(payload.get("contexts"), list):
+                contexts = [str(item) for item in payload["contexts"] if str(item).strip()]
+                if not contexts:
+                    contexts = ["未找到相关内容。"]
+        context = "\n\n".join(
+            f"# 检索证据批次 {index}/{len(contexts)}\n{item}"
+            for index, item in enumerate(contexts, 1)
+        )
+        retrieval_tokens = estimate_tokens(context)
 
         if self.logger:
             self.logger.log(

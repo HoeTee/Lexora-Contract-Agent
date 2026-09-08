@@ -21,7 +21,7 @@ from tools.docxindex.retrieval import (
     rerank_matches,
     rule_matches,
     scan_matches,
-    subtree_matches,
+    section_root_ids,
     title_matches,
 )
 from tools.docxindex.vector import (
@@ -104,12 +104,15 @@ class DocxIndexRetriever:
         query: str,
         route_override: dict | None = None,
         criterion_id: str | None = None,
+        return_metadata: bool = False,
     ) -> str:
         """Retrieve review-ready, DOCX-anchor-aware text for one query."""
         started_at = time.monotonic()
         _terminal(f"[DocxIndex] Searching temporary index: query_chars={len(query)}")
         try:
-            result = await asyncio.to_thread(self._search_sync, query, route_override, criterion_id)
+            result = await asyncio.to_thread(
+                self._search_sync, query, route_override, criterion_id, return_metadata
+            )
             _terminal(
                 "[DocxIndex] Search complete: "
                 f"result_chars={len(result)}, elapsed={round(time.monotonic() - started_at, 2)}s"
@@ -181,6 +184,7 @@ class DocxIndexRetriever:
         query: str,
         route_override: dict | None = None,
         criterion_id: str | None = None,
+        return_metadata: bool = False,
     ) -> str:
         if self._index is None:
             raise RuntimeError("docxindex_build_index must be called before docxindex_search")
@@ -225,14 +229,18 @@ class DocxIndexRetriever:
                         "若当前审查标准以词语缺失为触发条件，应直接据此判断。"
                     )
             elif step.method == "region":
-                allowed_node_ids = _region_node_ids(index, step.regions)
-                scoped_query = _step_query(query, step.terms)
-                current = self._semantic_matches(
-                    index,
-                    scoped_query,
-                    allowed_node_ids,
-                    scope=step.regions[0],
-                )
+                root_ids = _region_root_ids(index, step)
+                allowed_node_ids = _scope_node_ids(index, root_ids)
+                scope = step.regions[0] if step.regions else "section"
+                if step.coverage == "complete":
+                    current = _complete_scope_matches(index, root_ids)
+                else:
+                    current = self._semantic_matches(
+                        index,
+                        _step_query(query, step.terms),
+                        allowed_node_ids,
+                        scope=scope,
+                    )
             elif step.method == "scan":
                 current = scan_matches(
                     index,
@@ -248,8 +256,6 @@ class DocxIndexRetriever:
                     None,
                     scope="global",
                 )
-            elif step.method == "subtree":
-                current = subtree_matches(index, step)
             else:
                 raise ValueError(f"Unsupported docxindex route method: {step.method}")
             current = _add_route_source(current, step.method)
@@ -259,6 +265,8 @@ class DocxIndexRetriever:
                 step=step_index,
                 method=step.method,
                 regions=step.regions,
+                anchor_terms=step.anchor_terms,
+                coverage=step.coverage,
                 match_count=len(current),
                 node_ids=[item.get("node_id") for item in current],
             )
@@ -282,8 +290,16 @@ class DocxIndexRetriever:
         )
 
         has_scan = any(step.method == "scan" for step in route_plan.steps)
+        has_complete = any(
+            step.method == "region" and step.coverage == "complete"
+            for step in route_plan.steps
+        )
         selected_node_limit = config.semantic.max_selected_nodes
-        limit = None if has_scan else max(selected_node_limit, sum(bool(group) for group in step_groups))
+        limit = (
+            None
+            if has_scan or has_complete
+            else max(selected_node_limit, sum(bool(group) for group in step_groups))
+        )
         ranked_matches = _interleave_groups(step_groups, limit=limit)
         if complete_title_matches:
             ranked_matches = _deduplicate_matches(complete_title_matches + ranked_matches)
@@ -294,14 +310,18 @@ class DocxIndexRetriever:
             else config.output_tokens
         )
         context = build_content_context(index, ranked_matches, content_budget)
-        content_nodes = list(context["content_context"])
-        content_parts = 1
+        content_pages = [list(context["content_context"])]
         if has_scan:
             next_part = context["pagination"]["next_part"]
             while next_part is not None:
                 page = build_content_context(index, ranked_matches, content_budget, part=next_part)
-                content_nodes.extend(page["content_context"])
-                content_parts += 1
+                content_pages[0].extend(page["content_context"])
+                next_part = page["pagination"]["next_part"]
+        elif return_metadata:
+            next_part = context["pagination"]["next_part"]
+            while next_part is not None:
+                page = build_content_context(index, ranked_matches, content_budget, part=next_part)
+                content_pages.append(list(page["content_context"]))
                 next_part = page["pagination"]["next_part"]
         source_counts: dict[str, int] = {}
         for match in ranked_matches:
@@ -311,13 +331,22 @@ class DocxIndexRetriever:
             "result",
             candidate_count=len(ranked_matches),
             source_counts=source_counts,
-            content_parts=content_parts,
-            has_more=False if has_scan else context["pagination"]["has_more"],
+            content_parts=len(content_pages),
+            has_more=False if has_scan or return_metadata else context["pagination"]["has_more"],
         )
-        content = _format_anchor_context(index, content_nodes)
+        contents = [_format_anchor_context(index, nodes) for nodes in content_pages]
         if deterministic_notices:
-            content = "\n".join(deterministic_notices) + "\n\n" + content
-        return content
+            contents[0] = "\n".join(deterministic_notices) + "\n\n" + contents[0]
+        if return_metadata:
+            return json.dumps(
+                {
+                    "contexts": contents,
+                    "content_parts": len(contents),
+                    "complete": True,
+                },
+                ensure_ascii=False,
+            )
+        return contents[0]
 
     def _semantic_matches(
         self,
@@ -408,13 +437,19 @@ def _should_use_fallback(
     return bool(fallback_enabled and plan.fallback and not scoped_or_complete)
 
 
-def _region_node_ids(index: dict[str, Any], regions: list[str]) -> set[str]:
-    if not regions:
-        raise ValueError("region route requires at least one region")
-    roots = {
+def _region_root_ids(index: dict[str, Any], step: Any) -> list[str]:
+    if step.anchor_terms:
+        roots = section_root_ids(index, step)
+        if not roots:
+            return []
+        return roots
+    return [
         str((index.get("top_regions") or {}).get(region) or region)
-        for region in regions
-    }
+        for region in step.regions
+    ]
+
+
+def _scope_node_ids(index: dict[str, Any], roots: list[str]) -> set[str]:
     return {
         str(node.get("node_id"))
         for node in index.get("nodes") or []
@@ -424,6 +459,35 @@ def _region_node_ids(index: dict[str, Any], regions: list[str]) -> set[str]:
             for root in roots
         )
     }
+
+
+def _region_node_ids(index: dict[str, Any], regions: list[str]) -> set[str]:
+    """Return all node IDs below fixed regions (compatibility helper)."""
+    roots = [str((index.get("top_regions") or {}).get(region) or region) for region in regions]
+    return _scope_node_ids(index, roots)
+
+
+def _complete_scope_matches(index: dict[str, Any], roots: list[str]) -> list[dict[str, Any]]:
+    nodes = {str(node.get("node_id") or ""): node for node in index.get("nodes") or []}
+    result = []
+    for root_id in roots:
+        node = nodes.get(root_id)
+        if not node:
+            continue
+        result.append(
+            {
+                "node_id": root_id,
+                "title": node.get("title"),
+                "summary": node.get("summary"),
+                "start_index": node.get("start_index"),
+                "end_index": node.get("end_index"),
+                "start_anchor": node.get("start_anchor"),
+                "end_anchor": node.get("end_anchor"),
+                "token_estimate": node.get("token_estimate"),
+                "sources": ["region_complete"],
+            }
+        )
+    return result
 
 
 def _step_query(query: str, terms: list[str]) -> str:
@@ -452,7 +516,7 @@ def _interleave_groups(
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    by_id: dict[str, dict[str, Any]] = {}
     position = 0
     while True:
         added = False
@@ -462,10 +526,15 @@ def _interleave_groups(
             added = True
             item = group[position]
             node_id = str(item.get("node_id") or "")
-            if not node_id or node_id in seen:
+            if not node_id:
                 continue
-            seen.add(node_id)
-            result.append(item)
+            existing = by_id.get(node_id)
+            if existing is not None:
+                _merge_duplicate_match(existing, item)
+                continue
+            copied = dict(item)
+            by_id[node_id] = copied
+            result.append(copied)
             if limit is not None and len(result) >= limit:
                 return result
         if not added:
@@ -475,14 +544,33 @@ def _interleave_groups(
 
 def _deduplicate_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    seen: set[str] = set()
+    by_id: dict[str, dict[str, Any]] = {}
     for match in matches:
         node_id = str(match.get("node_id") or "")
-        if not node_id or node_id in seen:
+        if not node_id:
             continue
-        seen.add(node_id)
-        result.append(match)
+        existing = by_id.get(node_id)
+        if existing is None:
+            item = dict(match)
+            by_id[node_id] = item
+            result.append(item)
+            continue
+        _merge_duplicate_match(existing, match)
     return result
+
+
+def _merge_duplicate_match(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
+    sources = sorted({*(existing.get("sources") or []), *(incoming.get("sources") or [])})
+    existing_start = existing.get("start_index")
+    existing_end = existing.get("end_index")
+    incoming_start = incoming.get("start_index")
+    incoming_end = incoming.get("end_index")
+    existing_span = -1 if existing_start is None or existing_end is None else existing_end - existing_start
+    incoming_span = -1 if incoming_start is None or incoming_end is None else incoming_end - incoming_start
+    if incoming_span > existing_span or ("text_override" in existing and "text_override" not in incoming):
+        existing.clear()
+        existing.update(incoming)
+    existing["sources"] = sources
 
 
 def _route_event(event: str, **payload: Any) -> None:

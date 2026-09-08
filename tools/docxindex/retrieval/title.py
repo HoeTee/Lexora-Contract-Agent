@@ -15,7 +15,7 @@ def title_matches(index: dict[str, Any], step: RouteStep) -> list[dict[str, Any]
         title = str(item.get("title") or "").strip()
         if not node_id or not title or item.get("node_type") in {"body", "attachments"}:
             continue
-        if step.all_titles and not _is_catalog_title(item, depth):
+        if not _is_catalog_title(item, depth):
             continue
         if not step.all_titles and not any(term in title for term in step.terms):
             continue
@@ -41,12 +41,7 @@ def _walk(nodes: list[dict[str, Any]], depth: int = 0):
 
 def _is_catalog_title(node: dict[str, Any], depth: int) -> bool:
     node_type = str(node.get("node_type") or "")
-    node_id = str(node.get("node_id") or "")
-    return (
-        node_type == "tail"
-        or (depth == 1 and node_id.startswith("body/sec_"))
-        or node_type in {"attachment_parent", "attachment_section"}
-    )
+    return depth == 1 and node_type not in {"frontmatter", "body", "tail", "attachments"}
 
 
 def _candidate(node: dict[str, Any], source: str) -> dict[str, Any]:

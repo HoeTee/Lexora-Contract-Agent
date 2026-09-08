@@ -29,7 +29,7 @@ STRATEGY_EXPECTED_JSON = """
       "review_instruction": "",
       "route": {
         "steps": [
-          {"method": "rule", "terms": ["关键词"], "regions": [], "all_titles": false, "anchor_terms": []}
+          {"method": "rule", "terms": ["关键词"], "regions": [], "all_titles": false, "anchor_terms": [], "coverage": "relevant"}
         ],
         "fallback": false
       },

@@ -723,12 +723,17 @@ def generic_replacements(
         r"甲方名称.*公章",
         r"甲方.*签字",
     )
+    signature_start = max(
+        body_fraction,
+        body_end_fraction - 0.10,
+        (max(body_attachment[-1], dispute[-1], project[-1], grammar[-1], typo[-1]) + 1) / size,
+    )
     try:
         signature = choose_paragraph(
             "signature",
             signature_patterns,
-            start=body_end_fraction,
-            end=1.0,
+            start=signature_start,
+            end=body_end_fraction,
             max_len=180,
             prefer_last=True,
             fallback_to_any=True,
@@ -791,7 +796,7 @@ def generic_replacements(
     add_paragraph(
         signature,
         (10,),
-        "甲方（浙农商盖章）：　　　　　　乙方（原乙方盖章）：",
+        "甲方：浙江农商联合银行股份有限公司（盖章）　　　　　　乙方：原乙方（盖章）",
         "制造甲方签署名称不一致",
     )
     add_paragraph(
@@ -1115,6 +1120,7 @@ def validate_retrieval_regions(contract_id: str, output: Path) -> None:
 
     frontmatter_texts = texts_in("frontmatter")
     body_texts = texts_in("body/")
+    tail_texts = texts_in("tail")
     all_texts = [str(record.get("raw_text") or record.get("text") or "") for record in anchor_records]
     body_titles = [
         str(node.get("title") or "")
@@ -1135,7 +1141,7 @@ def validate_retrieval_regions(contract_id: str, output: Path) -> None:
             (all_texts, "发贷"),
             (all_texts, "一致一致"),
         ),
-        "tail": ((all_texts, "浙农商盖章"),),
+        "tail": ((tail_texts, "浙江农商联合银行股份有限公司（盖章）"),),
     }
     missing_region_markers = [
         f"{region}:{marker}"

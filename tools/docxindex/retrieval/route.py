@@ -18,7 +18,7 @@ from tools.docxindex.llm.schemas import RouteResponse
 
 
 DEFAULT_ROUTE_CONFIG = Path(__file__).resolve().parents[4] / "config.yaml"
-ROUTE_PROMPT_VERSION = "docx_route_v7"
+ROUTE_PROMPT_VERSION = "docx_route_v8"
 ROUTE_TITLE_MAX_DEPTH = 2
 ROUTE_TITLE_ATTACHMENT_MAX_DEPTH = 4
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"

@@ -40,19 +40,21 @@ PLANNER_STRATEGY_PROMPT: |2+
 
   你是审查标准执行策略规划器。输入是逐条审查标准（id、section、criterion 原文），你的任务是为每一条生成执行策略：route（检索计划）、placement（批注去向），以及可选的 review_instruction（触发类固定文字指令）。
 
-  route.steps 的 method 只能是：title、region、rule、scan、subtree。
-  - title：检查标题是否存在、标题顺序、目录核对；需要完整目录时 all_titles=true。
-  - region：内容明确属于固定区域；regions 只能填一个值：frontmatter（合同首部）、body（正文）、tail（合同末尾/签署栏）、attachments（附件）。
+  route.steps 的 method 只能是：title、region、rule、scan、hybrid。
+  - title：只检查一级标题是否存在、标题顺序和目录；需要完整一级标题目录时 all_titles=true。
+  - region：读取固定区域或明确标题下的内容。固定区域在 regions 填一个值：frontmatter（合同首部）、body（正文）、tail（合同末尾/签署栏）、attachments（附件）；标题定位在 anchor_terms 填标题关键词。两者不能同时填写。
+    coverage=complete 表示完整读取定位范围；coverage=relevant 表示在范围内选择相关节点。
   - rule：存在精确关键词、字段名、金额、敏感词，或需要判断某词语存在/不存在；terms 列出需要原文匹配的短词。
   - scan：错别字、语病或必须逐段通读全文的问题；不填 terms。
-  - subtree：需要检索"某个标题下"的内容；anchor_terms 列出定位该标题的关键词。
+  - hybrid：标题、区域和精确关键词均不能可靠限定范围时，执行全局语义检索。
 
   route 规划规则：
   1. 可组合 1-5 个步骤；scan 最多出现一次，且只能与 title/rule 组合。
   2. 需要比较两个区域时（如首部与末尾、正文与附件），为每个区域各生成一个 region 步骤。
-  3. 合同首部信息（主体、联系方式、签订日期、合同编号等）使用 region(frontmatter)，可再加一个 rule 字段名步骤。
-  4. 存在/不存在判断（如"缺少某表述"）使用 rule，terms 填该表述本身。
-  5. fallback 一般为 false；仅当步骤全部是 title/rule 且结果可能需要全局语义补充时才为 true；含 region/scan/subtree 时必须为 false。
+  3. 合同首部信息（主体、联系方式、签订日期、合同编号等）使用 region(frontmatter)；需要逐项检查完整性或跨区域比较时 coverage=complete。
+  4. 检查某一标题下的完整章节时使用 region(anchor_terms=[标题关键词], coverage=complete)。
+  5. 存在/不存在判断（如"缺少某表述"）使用 rule，terms 填该表述本身。
+  6. fallback 一般为 false；仅当步骤全部是 title/rule 且结果可能需要全局语义补充时才为 true；含 region/scan/hybrid 时必须为 false。
 
   placement.target 只能是：
   - summary：问题写入文首的 AI 审查总结，不挂具体条款。标题缺失、触发类通用提醒、全局结构问题用此项。

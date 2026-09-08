@@ -1,22 +1,52 @@
 from __future__ import annotations
 
 import re
+import json
 from pathlib import Path
 from threading import Lock
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
 
 from loggers.api_event_logger import _LOGGERS
 from loggers.model_event_context import reset_model_event_path, set_model_event_path
 from tools.docxindex.llm.schemas import RouteStep, ScanResponse
 from tools.docxindex.indexing.config import IndexingConfig
+from tools.docxindex.detection.regions import find_tail_start
+from tools.docxindex.retrieval.config import RetrievalConfig
+from tools.docxindex.schema import BodyItem
 from tools.docxindex.retrieval.llm_query import _compact_structure
 from tools.docxindex.retrieval.scan import scan_matches
 from tools.docxindex.retrieval.rule import rule_matches
-from tools.docxindex.retriever import _interleave_groups, _region_node_ids, _route_event
+from tools.docxindex.retrieval.title import title_matches
+from tools.docxindex.retriever import (
+    DocxIndexRetriever,
+    _complete_scope_matches,
+    _deduplicate_matches,
+    _interleave_groups,
+    _region_node_ids,
+    _region_root_ids,
+    _route_event,
+)
 
 
 class ScopedRegionTests(unittest.TestCase):
+    def test_tail_starts_at_earliest_signature_evidence(self) -> None:
+        def item(index: int, kind: str, text: str) -> BodyItem:
+            return BodyItem(
+                kind=kind,
+                anchor=f"p_{index:04d}",
+                body_child_index=index,
+                text=text,
+                xml_path=f"/w:document/w:body/*[{index + 1}]",
+            )
+
+        items = [item(index, "p", "正文") for index in range(25)]
+        items[20] = item(20, "p", "三、甲方：浙江农商联合银行股份有限公司（盖章）")
+        items[22] = item(22, "tbl", "甲方（盖章） 乙方（盖章）")
+
+        self.assertEqual(find_tail_start(items, 0, len(items)), 20)
+
     def test_online_index_enrichment_is_enabled_by_default(self) -> None:
         enrichment = IndexingConfig().enrichment
 
@@ -61,6 +91,118 @@ class ScopedRegionTests(unittest.TestCase):
         matches = _interleave_groups(groups, limit=2)
 
         self.assertEqual([item["node_id"] for item in matches], ["body/a", "attachments/a"])
+
+    def test_region_heading_locator_selects_section_root(self) -> None:
+        index = {
+            "nodes": [
+                {"node_id": "body/payment", "node_type": "section", "title": "合同金额及支付方式"},
+                {"node_id": "body/payment/detail", "node_type": "section", "title": "付款条件"},
+            ]
+        }
+        step = RouteStep(method="region", anchor_terms=["支付方式"], coverage="complete")
+
+        self.assertEqual(_region_root_ids(index, step), ["body/payment"])
+
+    def test_title_route_returns_only_first_level_business_titles(self) -> None:
+        index = {
+            "nodes": [
+                {"node_id": "body/sec", "title": "支付方式", "node_type": "section", "start_index": 1},
+                {"node_id": "body/sec/detail", "title": "付款条件", "node_type": "section", "start_index": 2},
+            ],
+            "structure_tree": [{
+                "node_id": "body",
+                "title": "正文",
+                "node_type": "body",
+                "nodes": [{
+                    "node_id": "body/sec",
+                    "title": "支付方式",
+                    "node_type": "section",
+                    "nodes": [{
+                        "node_id": "body/sec/detail",
+                        "title": "付款条件",
+                        "node_type": "section",
+                        "nodes": [],
+                    }],
+                }],
+            }],
+        }
+
+        matches = title_matches(index, RouteStep(method="title", all_titles=True))
+
+        self.assertEqual([item["node_id"] for item in matches], ["body/sec"])
+
+    def test_complete_scope_keeps_the_root_full_text_range(self) -> None:
+        index = {"nodes": [{
+            "node_id": "body/payment",
+            "title": "支付方式",
+            "start_index": 10,
+            "end_index": 30,
+            "start_anchor": "p_0010",
+            "end_anchor": "p_0030",
+        }]}
+
+        matches = _complete_scope_matches(index, ["body/payment"])
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual((matches[0]["start_index"], matches[0]["end_index"]), (10, 30))
+
+    def test_duplicate_title_does_not_replace_wider_section_range(self) -> None:
+        title = {
+            "node_id": "body/payment",
+            "start_index": 10,
+            "end_index": 10,
+            "text_override": "支付方式",
+            "sources": ["title"],
+        }
+        section = {
+            "node_id": "body/payment",
+            "start_index": 10,
+            "end_index": 30,
+            "sources": ["region"],
+        }
+
+        matches = _deduplicate_matches([title, section])
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0]["end_index"], 30)
+        self.assertNotIn("text_override", matches[0])
+        self.assertEqual(matches[0]["sources"], ["region", "title"])
+
+    def test_complete_region_metadata_returns_every_token_page(self) -> None:
+        retriever = DocxIndexRetriever.__new__(DocxIndexRetriever)
+        retriever._index = {
+            "top_regions": {"frontmatter": "frontmatter"},
+            "nodes": [{
+                "node_id": "frontmatter",
+                "title": "合同首部",
+                "node_type": "frontmatter",
+                "text": "甲" * 1200 + "乙" * 1200,
+                "start_index": 1,
+                "end_index": 2,
+                "start_anchor": "p_0001",
+                "end_anchor": "p_0002",
+                "token_estimate": 1200,
+            }],
+            "anchor_map": {
+                "p_0001": {"body_child_index": 1, "text": "甲" * 1200, "raw_text": "甲" * 1200},
+                "p_0002": {"body_child_index": 2, "text": "乙" * 1200, "raw_text": "乙" * 1200},
+            },
+        }
+        retriever._vector_index = None
+        retriever.retrieval_config = RetrievalConfig(output_tokens=500)
+        retriever.route_config = SimpleNamespace(fallback_enabled=True)
+
+        result = json.loads(retriever._search_sync(
+            "检查主体",
+            {"steps": [{"method": "region", "regions": ["frontmatter"], "coverage": "complete"}]},
+            "C10",
+            True,
+        ))
+
+        self.assertGreater(result["content_parts"], 1)
+        self.assertEqual(len(result["contexts"]), result["content_parts"])
+        self.assertIn("甲", result["contexts"][0])
+        self.assertIn("乙", result["contexts"][-1])
 
     def test_rule_prioritizes_anchor_matching_more_planned_terms(self) -> None:
         index = {

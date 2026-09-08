@@ -41,7 +41,7 @@ class RoutePromptContractTests(unittest.TestCase):
         )
 
         self.assertIn(ROUTE_EXPECTED_JSON, prompt)
-        for field in ("steps", "method", "terms", "regions", "all_titles", "fallback"):
+        for field in ("steps", "method", "terms", "regions", "all_titles", "anchor_terms", "coverage", "fallback"):
             self.assertIn(field, prompt)
         self.assertNotIn('"context"', ROUTE_EXPECTED_JSON)
         for method in METHODS:
@@ -65,7 +65,7 @@ class RoutePromptContractTests(unittest.TestCase):
         self.assertEqual(result.steps[0].method, "rule")
         self.assertEqual(len(client.prompts), 1)
         self.assertIn(ROUTE_EXPECTED_JSON, client.prompts[0])
-        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v7")
+        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v8")
 
     def test_schema_rejects_removed_join_route_and_slots_field(self) -> None:
         with self.assertRaises(ValidationError):
@@ -135,6 +135,23 @@ class RoutePromptContractTests(unittest.TestCase):
         )
 
         self.assertEqual([step.method for step in result.steps], ["title", "rule", "scan"])
+
+    def test_region_accepts_one_fixed_region_or_heading_locator(self) -> None:
+        fixed = RouteResponse.model_validate({
+            "steps": [{"method": "region", "regions": ["tail"], "coverage": "complete"}]
+        })
+        section = RouteResponse.model_validate({
+            "steps": [{"method": "region", "anchor_terms": ["支付方式"], "coverage": "complete"}]
+        })
+
+        self.assertEqual(fixed.steps[0].regions, ["tail"])
+        self.assertEqual(section.steps[0].anchor_terms, ["支付方式"])
+
+    def test_removed_subtree_route_is_rejected(self) -> None:
+        with self.assertRaises(ValidationError):
+            RouteResponse.model_validate({
+                "steps": [{"method": "subtree", "anchor_terms": ["支付方式"]}]
+            })
 
     def test_validation_failure_preserves_successful_upstream_http_status(self) -> None:
         client = LLMClient.__new__(LLMClient)

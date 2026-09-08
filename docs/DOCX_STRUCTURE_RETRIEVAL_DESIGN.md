@@ -742,15 +742,17 @@ structure_tree > input_tokens
 
 向量检索不用于构建结构树，也不是与结构树并列执行的独立检索。当前有三个受控调用位置：
 
-- `region`：先用 `allowed_node_ids` 限定区域并执行结构语义；结构结果少于 10 个时，向量仅在同一区域补齐缺口；
+- `region`：用固定 region 或标题关键词定位范围。`coverage=relevant` 时执行范围内结构语义，并在结果少于 10 个时用向量补齐；`coverage=complete` 时完整读取范围并按 `output_tokens` 分页；
 - `hybrid`：先对全局结构树执行结构语义；结构结果少于 10 个时，向量补齐缺口；
 - `fallback`：仅当 `RoutePlan.fallback=true` 且路线只有可安全扩大的 `title/rule` 时执行同一套全局语义检索。
 
 `region`、`scan`、`hybrid` 不进入全局 fallback。跨区域比较使用多个独立 `region` 步骤，结果按步骤交错合并，避免后一个区域在 `semantic.max_selected_nodes` 截断前完全丢失。
 
-`title(all_titles=true)` 是完整目录查询：所有顶层正文标题、tail 和附件标题都必须以紧凑标题证据返回，
+`title(all_titles=true)` 是一级标题目录查询：各顶层区域下深度 1 的业务标题必须以紧凑标题证据返回，
 不受普通 `semantic.max_selected_nodes` 候选上限截断。`rule` 的精确关键词全部未命中时，执行器必须同时返回
 “确定性全文精确检索未出现这些词”的结果，供审查模型判断缺失型问题。
+
+按标题读取章节与按固定 region 读取内容共用 `region` 方法；原 subtree 方法已移除。同一节点的多个候选按原文覆盖范围合并，保留完整正文范围。
 
 向量索引对象来自 DocumentIndex 中已有 node 或 chunk：
 

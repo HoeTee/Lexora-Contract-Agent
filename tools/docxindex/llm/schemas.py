@@ -111,16 +111,19 @@ class RerankResponse(BaseModel):
 class RouteStep(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    method: Literal["title", "region", "rule", "scan", "hybrid", "subtree"]
+    method: Literal["title", "region", "rule", "scan", "hybrid"]
     terms: list[str] = Field(default_factory=list)
     regions: list[Literal["frontmatter", "body", "tail", "attachments"]] = Field(default_factory=list)
     all_titles: bool = False
     anchor_terms: list[str] = Field(default_factory=list)
+    coverage: Literal["relevant", "complete"] = "relevant"
 
     @model_validator(mode="after")
     def validate_method_fields(self) -> "RouteStep":
-        if self.method == "region" and len(self.regions) != 1:
-            raise ValueError("region route requires exactly one regions value")
+        if self.method == "region" and (
+            bool(self.regions) == bool(self.anchor_terms) or len(self.regions) > 1
+        ):
+            raise ValueError("region route requires exactly one locator: regions or anchor_terms")
         if self.method != "region" and self.regions:
             raise ValueError(f"{self.method} route must not set regions")
         if self.method == "rule" and not self.terms:
@@ -129,10 +132,10 @@ class RouteStep(BaseModel):
             raise ValueError("title route requires terms or all_titles=true")
         if self.method == "scan" and self.terms:
             raise ValueError("scan route must not set terms")
-        if self.method == "subtree" and not self.anchor_terms:
-            raise ValueError("subtree route requires at least one anchor term")
-        if self.method != "subtree" and self.anchor_terms:
+        if self.method != "region" and self.anchor_terms:
             raise ValueError(f"{self.method} route must not set anchor_terms")
+        if self.method != "region" and self.coverage != "relevant":
+            raise ValueError(f"{self.method} route must use coverage=relevant")
         return self
 
 

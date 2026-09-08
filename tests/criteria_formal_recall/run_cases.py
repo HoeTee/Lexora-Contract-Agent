@@ -210,6 +210,12 @@ async def download_result(client: httpx.AsyncClient, settings: Settings, task_id
 
 
 def criterion_number(payload: dict[str, Any]) -> int | None:
+    criterion_id = str(payload.get("criterion_id") or "").strip()
+    id_match = re.fullmatch(r"C(\d{1,2})", criterion_id, flags=re.IGNORECASE)
+    if id_match:
+        value = int(id_match.group(1))
+        return value if 1 <= value <= 18 else None
+
     text = str(payload.get("criterion") or "")
     match = CRITERION_NUMBER.match(text)
     if match:
