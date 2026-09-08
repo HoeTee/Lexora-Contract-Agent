@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tools.docxindex.llm.schemas import RouteStep
+from routing.schemas import RouteStep
 
 from .title import _candidate
 

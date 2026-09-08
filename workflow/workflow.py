@@ -32,6 +32,8 @@ from agents.summarizer import SummarizerAgent
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
+from routing import is_mandatory_criteria, load_mandatory_tasks, mandatory_source_manifest
+from tools.document.reporting.docx_report import deduplicate_review_results_by_range
 
 
 def _normalize_annotation_text(value: str) -> str:
@@ -204,8 +206,11 @@ class ContractReviewWorkflow:
 
                 # Phase 3: Plan tasks
                 criteria_file = Path(criteria_path)
-                self.criteria_source = {"filename": criteria_file.name,
-                                        "sha256": hashlib.sha256(criteria_file.read_bytes()).hexdigest()}
+                self.criteria_source = {
+                    "filename": criteria_file.name,
+                    "sha256": hashlib.sha256(criteria_file.read_bytes()).hexdigest(),
+                    "mandatory": mandatory_source_manifest(),
+                }
                 await self._emit_progress(progress_callback, "planning", "Extracting review criteria")
                 async with self.trace.span("phase.plan", run_type="phase", inputs={"criteria_chars": len(criteria_md)}) as span:
                     criteria_list = await self._phase_plan(criteria_md, criteria_path)
@@ -222,10 +227,12 @@ class ContractReviewWorkflow:
 
                 async with self.trace.span("phase.execute", run_type="phase", inputs={"criteria_count": len(criteria_list)}) as span:
                     results = await self._phase_execute(criteria_list)
+                    results, deduplication = deduplicate_review_results_by_range(contract_path, results)
                     span.set_outputs(
                         {
                             "result_count": len(results),
                             "error_count": sum(1 for result in results if result.get("status") == "ERROR"),
+                            "deduplication": deduplication,
                         }
                     )
 
@@ -481,21 +488,34 @@ class ContractReviewWorkflow:
                 print(f"    {c['id']}: {c['criterion']}")
             return criteria_list
 
-        skeletons = split_criteria_from_docx(criteria_path)
-        planner = PlannerAgent(settings=self.settings)
-        strategies = await planner.extract_strategies(skeletons)
-        criteria_list = assemble_tasks(skeletons, strategies)
-        self._planner_tokens = planner.token_usage.get("total_tokens", 0)
+        mandatory_tasks = load_mandatory_tasks()
+        uploaded_tasks: list[dict] = []
+        self._planner_tokens = 0
+        if not is_mandatory_criteria(criteria_path):
+            skeletons = split_criteria_from_docx(criteria_path)
+            for position, skeleton in enumerate(skeletons, 1):
+                skeleton["id"] = f"U{position:02d}"
+            planner = PlannerAgent(settings=self.settings)
+            strategies = await planner.extract_strategies(skeletons)
+            uploaded_tasks = assemble_tasks(skeletons, strategies)
+            self._planner_tokens = planner.token_usage.get("total_tokens", 0)
+        criteria_list = mandatory_tasks + uploaded_tasks
         self.logger.log(
             phase="Planning", sender="Workflow", receiver="Planner",
             action="extract_strategies",
             input_summary=f"{len(criteria_md)} chars criteria",
-            output_summary=f"{len(criteria_list)} criteria extracted with routes",
+            output_summary=(
+                f"{len(mandatory_tasks)} mandatory criteria loaded with fixed routes; "
+                f"{len(uploaded_tasks)} uploaded criteria planned"
+            ),
             tokens=self._planner_tokens,
             duration=round(time.time() - start, 2)
         )
 
-        print(f"  Criteria: {len(criteria_list)} tasks")
+        print(
+            f"  Criteria: {len(criteria_list)} tasks "
+            f"({len(mandatory_tasks)} mandatory, {len(uploaded_tasks)} uploaded)"
+        )
         for c in criteria_list:
             print(f"    {c['id']}: {c['criterion']}")
         return criteria_list

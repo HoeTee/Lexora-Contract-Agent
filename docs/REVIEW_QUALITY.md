@@ -2,7 +2,7 @@
 
 ## 范围与原则
 
-本次调整字段完整性路线、审查、反思、结果整理及 DOCX 写入；不修改索引、向量召回、并发和限流，也不新增 Agent 或路由类型。Planner 只有在标准要求全文逐项检查时选择现有 `scan`，因此实际 scan 调用数由审查要点语义决定。
+固定18条审查标准由 `resources/criteria/criteria-formal.docx` 提供权威原文，由同目录 `criteria-formal.routes.yaml` 提供固定路线和批注去向；它们跳过 Planner 和路由 LLM，但仍经过 Orchestrator、检索、SubAgent 与 Reflector。用户上传标准由 Planner 在现有 `title/rule/scan/region/hybrid` 五种路线中规划。此次不修改索引算法、进程并发或全局模型限流。
 
 审查依据是任务实际使用的标准原文。字段缺失不等于已填写值不一致；关键词命中不授权扩大禁用词范围。建议必须放回完整句子检查，不擅自改变起算条件、权利义务。名称中的书名号、编号、空格等引用格式差异不构成附件名称不一致。
 
@@ -25,9 +25,11 @@
 
 内部发现指纹由原文位置、引用及缺陷类型生成，不按评论措辞生成；无锚点发现使用检查点与问题文本。模型使用同一审查项内稳定的 F001 等短编号，不自行生成 ID。current_findings 仅是位置索引，不是完整证据；完整结果由 subagent_output 提供。引用粒度改变也会触发撤回核对，不能把这一保守检查等同于语义完备性证明。
 
-正式验证还发现 Planner 曾生成 region + rule + scan 的非法组合。现于 Planner 的 ExtractedRoute schema 同步 docxindex 既有 scan 组合限制，使原有 JSON 校验重试在规划阶段处理该错误；未修改 docxindex 路由执行算法。
+路线 schema 统一定义在根目录 `routing/schemas.py`，Planner 与 docxindex 执行器共同校验同一契约，避免两份 schema 漂移。非法的 region + scan 等组合仍会触发现有 JSON 校验重试。
 
 ## 执行与写入
+
+固定任务和用户任务完成反思后，工作流会用原始 DOCX 解析每个 edit anchor 的 `paragraph_path/start_index/end_index`。只有两类来源落在完全相同字符范围时才冲突，固定任务保留、用户任务删除；同一段落内不同字符范围、无法解析的锚点以及同来源结果均保留。该步骤发生在 Summarizer 和 DOCX Writer 之前。
 
 1. 字段完整性不使用业务正则判定。标准明确字段名时由 `rule` 定位，标准要求全合同检查且未限定字段时由 `scan` 分批交给 LLM 结合字段语义、相邻文字和表格关系判断。
 2. 已有反思调用接收检索证据、当前发现和先前未保留的发现；不新增复核 Agent。

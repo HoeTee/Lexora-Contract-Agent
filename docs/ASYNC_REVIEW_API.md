@@ -550,4 +550,4 @@ data/api/<task_id>/
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：`quality.pending_criteria` 只表示内部质量状态，不会以“待复核”写入用户 DOCX；已确认 finding 仍可交付。docxindex 路由和召回算法不变。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：`quality.pending_criteria` 只表示内部质量状态，不会以“待复核”写入用户 DOCX；固定18条始终执行，上传的 `criteria_file` 作为附加用户标准进入动态规划。

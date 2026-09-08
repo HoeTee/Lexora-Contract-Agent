@@ -253,4 +253,4 @@ DOCX 批注不是只在正文里插入一个标记。一个有效批注至少同
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：逐字段 finding 独立确认，pending 只保存在 API/日志，最终 DOCX 替换旧 AI 总结并只写已确认问题。docxindex 路由和召回算法不变。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：逐字段 finding 独立确认；固定与上传结果若落在完全相同字符范围则固定批注优先，之后最终 DOCX 替换旧 AI 总结并只写已确认问题。

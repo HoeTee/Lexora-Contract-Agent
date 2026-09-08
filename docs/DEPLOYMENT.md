@@ -142,13 +142,14 @@ volumes:
 
 `profiles/` 可以为空。创建租户和用户后，程序会生成 `profiles/tenant_profiles.json`、`profiles/tenants/<tenant_id>/profiles.json` 和用户审查标准文件。该目录必须可写，因为管理 CLI、管理员后台和用户资料修改都会更新身份数据。
 
-如需自定义默认审查要点，可挂载单个文件：
+固定18条标准及路线配置必须成对挂载到约定路径：
 
 ```yaml
-- ./criteria.docx:/app/resources/criteria/criteria.docx:ro
+- ./criteria-formal.docx:/app/resources/criteria/criteria-formal.docx:ro
+- ./criteria-formal.routes.yaml:/app/resources/criteria/criteria-formal.routes.yaml:ro
 ```
 
-不要用空目录覆盖 `/app/resources/criteria/`。
+输入来自远端宿主机当前目录；容器读取上述两个只读文件。不要用空目录覆盖 `/app/resources/criteria/`，也不要只替换 DOCX 而保留不匹配的路线配置。
 
 ## 端口与健康检查
 
@@ -202,4 +203,4 @@ Celery task、broker、worker 与 workflow 内部并发的边界见 [智能体�
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：Reflector 逐条确认 finding，pending 只保存在 API/日志，最终 DOCX 只写已确认问题。docxindex 路由和召回算法不变；本地正式回归使用项目根目录 `docker-compose.yaml`，不能用部署包 compose 替代。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：固定标准 DOCX 与 `criteria-formal.routes.yaml` 都必须随镜像或挂载目录提供。它们不写入 `config.yaml`；本地正式回归使用项目根目录 `docker-compose.yaml`，不能用部署包 compose 替代。

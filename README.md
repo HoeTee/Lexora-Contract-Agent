@@ -1,6 +1,6 @@
 # 合同审查 Agent
 
-审查输出契约见[审查质量与批注规则](docs/REVIEW_QUALITY.md)。Reflector 逐条确认 finding，pending 只保存在 API/日志，最终 DOCX 只写已确认问题并替换旧 AI 审查总结；docxindex 路由和召回算法未改动。
+审查输出契约见[审查质量与批注规则](docs/REVIEW_QUALITY.md)。根目录 `routing/` 管理固定审查路线和用户标准动态路线；`tools/docxindex/` 只负责索引与检索执行。Reflector 逐条确认 finding，最终 DOCX 只写已确认问题并替换旧 AI 审查总结。
 
 合同审查 Agent 支持三种 DOCX 审查入口：浏览器 `/web`、异步 `/api` 和本地 CLI。系统读取合同与审查标准，执行 agent 工作流，并输出带批注的 DOCX。
 

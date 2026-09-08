@@ -114,7 +114,8 @@ COPY --from=protect-builder /out/code.bin /app/code.bin
 # Runtime resources that are intentionally readable or bind-mounted.
 COPY frontend/ /app/frontend/
 COPY agents/prompts/cn_prompts.yaml /app/agents/prompts/cn_prompts.yaml
-COPY resources/criteria/criteria.docx /app/resources/criteria/criteria.docx
+COPY resources/criteria/criteria-formal.docx /app/resources/criteria/criteria-formal.docx
+COPY resources/criteria/criteria-formal.routes.yaml /app/resources/criteria/criteria-formal.routes.yaml
 COPY tools/document/reporting/pandoc_xelatex_template.tex /app/tools/document/reporting/pandoc_xelatex_template.tex
 
 RUN mkdir -p /app/data /app/profiles /app/logs /app/reports

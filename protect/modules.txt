@@ -5,6 +5,7 @@ agents
 endpoints
 loggers
 mcp_service
+routing
 task_queue
 tools
 workflow

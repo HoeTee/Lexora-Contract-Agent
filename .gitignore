@@ -38,6 +38,8 @@ RAG_persist/
 /resources/criteria/*
 !/resources/criteria/.gitkeep
 !/resources/criteria/criteria.docx
+!/resources/criteria/criteria-formal.docx
+!/resources/criteria/criteria-formal.routes.yaml
 
 # Python environments, caches, and build artifacts
 __pycache__/

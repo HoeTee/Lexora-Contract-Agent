@@ -59,4 +59,4 @@ logging:
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：`finding_decisions`、`unresolved_issues` 和 pending 状态保存在任务日志中，不进入用户 DOCX。docxindex 路由和召回算法不变。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：`finding_decisions`、`unresolved_issues` 和 pending 状态保存在任务日志中，不进入用户 DOCX；计划状态同时记录固定标准和固定路线配置的哈希，用于恢复校验。

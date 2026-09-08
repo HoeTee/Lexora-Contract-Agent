@@ -1,6 +1,6 @@
 ﻿# 智能体与工作流架构
 
-本文说明合同审查的智能体（agent）与工作流（workflow）架构。工作流编排在 `workflow/workflow.py`，各 agent 在 `agents/`，MCP 客户端和服务脚本在 `mcp_service/`，检索与文档解析能力通过 MCP 工具提供。
+本文说明合同审查的智能体（agent）与工作流（workflow）架构。工作流编排在 `workflow/workflow.py`，业务路由控制面在根目录 `routing/`，各 agent 在 `agents/`，索引和检索执行在 `tools/docxindex/`，能力通过 MCP 工具提供。
 
 ## 总览
 
@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | 1. 解析 ingest | MCP `ingest_file` | 把合同和审查标准 DOCX 转成 markdown |
 | 2. 建索引 build_index | MCP `contract_build_index` | 按 `retrieval.backend` 为合同建立临时 LlamaIndex 或 docxindex 索引 |
-| 3. 规划 plan | `PlannerAgent.design_tasks` | 把审查标准 markdown 拆成结构化任务 `criteria_list` |
+| 3. 规划 plan | `routing.profile` + `PlannerAgent.extract_strategies` | 固定18条从 DOCX 和固定路线配置直接组装；用户上传标准才调用 Planner |
 | 4. 执行+反思 execute | `OrchestratorAgent.execute_criteria` | 逐条审查标准，产出 `results` |
 | 5. 最终整理 summarize | Workflow 分流 + `SummarizerAgent.compile_summary_comment` | Workflow 按结构化 placement 和已确认 finding 分流；Summarizer 只生成总览 |
 | 6. 批注 generate | MCP `generate_docx_report` | 用已确认的原文批注结果与 `final_review` 生成批注版 DOCX |
@@ -36,7 +36,7 @@
 
 | Agent | 文件 | 职责 | 输入 | 输出 |
 | --- | --- | --- | --- | --- |
-| PlannerAgent | `agents/planner.py` | 把审查标准拆成结构化审查任务 | 审查标准 markdown | `criteria_list`（id / section / criterion / check_points） |
+| PlannerAgent | `agents/planner.py` | 只为用户上传标准提取五种路线和批注去向 | 用户标准 skeleton | `CriterionStrategy` |
 | OrchestratorAgent | `agents/orchestrator.py` | 逐条派发 SubAgent，串联检索、反思、并发控制 | `criteria_list` | `results` |
 | SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准，可调用白名单允许的 MCP 工具 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues） |
 | ReflectorAgent | `agents/reflector.py` | 逐条质量复核 SubAgent finding | criterion + subagent_output + 补充检索 | `{ status, feedback, finding_decisions[] }` |
@@ -136,15 +136,18 @@ results = await asyncio.gather(
 ## 数据流
 
 ```text
-审查标准 DOCX -> ingest -> 审查标准 markdown -> Planner -> criteria_list
+固定 criteria-formal.docx + criteria-formal.routes.yaml -> 18个 mandatory tasks
+用户上传标准 DOCX -> deterministic split -> Planner -> uploaded tasks
+mandatory tasks + uploaded tasks -> criteria_list
 合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引
 每条 criterion: 检索 context -> SubAgent(可调用白名单工具) -> (Reflector 反思循环) -> 单条结果
 所有单条结果 -> Workflow 按 placement 和 edit/evidence 分流
-已确认问题 -> Summarizer -> final_review
+已确认问题 -> 按 DOCX paragraph_path/start_index/end_index 去重（同位置 mandatory 优先）
+去重结果 -> Summarizer -> final_review
 已确认 edit anchors + final_review -> generate_docx_report -> 批注版 DOCX
 ```
 
-`raw results` 继续写入审查日志。Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。相同 XML 范围、原文及修改动作完全相同的批注去重，同一位置的不同问题不得仅因文字相似而合并。固定提示使用 Planner 的 `review_instruction` 和 `placement`，不再由关键词或正则猜测去向。该调整不增加 LLM 调用次数。
+`raw results` 继续写入审查日志。Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。只有固定任务与上传任务解析到完全相同的 `paragraph_path/start_index/end_index` 时，上传批注才被固定批注替代；同来源批注及不同字符范围不按该优先规则删除。固定提示来自路线配置的 `review_instruction`，不由正则猜测去向。
 
 ## 架构边界
 
@@ -162,7 +165,7 @@ API process -> Redis broker -> Celery worker -> workflow.run()
 
 API 进程负责提交、状态和结果响应，worker 负责 workflow、MCP、模型调用和 DOCX 生成。Web 任务目前仍在 Web 应用进程内执行，不经过 Celery。
 
-整份合同并发由 worker 数量和 Celery `--concurrency` 控制；单份合同内 criterion 并发由 `workflow.max_orchestrator_concurrency` 控制。这两个限制不是同一层。
+整份合同并发由 worker 数量和 Celery `--concurrency` 控制；单份合同内固定任务和上传任务共同受 `workflow.max_orchestrator_concurrency` 控制。这两个限制不是同一层。路由模块不创建新的线程池、进程池或 semaphore。
 
 ## Criterion 恢复状态
 
@@ -181,7 +184,7 @@ state/
 
 ## 全局模型并发
 
-`model_semaphore.llm`、`embedding`、`reranker` 使用 Redis 租约控制跨进程、跨容器的模型 HTTP 请求总并发。它不会替代 Celery 合同并发或 workflow criterion 并发。
+`model_semaphore.llm`、`embedding`、`reranker` 使用 Redis 租约控制跨进程、跨容器的模型 HTTP 请求总并发。固定任务跳过 Planner/路由 LLM，但其检索、SubAgent 和 Reflector 模型请求仍走现有客户端和同一 Redis 全局限制；路由模块没有旁路模型调用。
 
 每类配置包含 `enabled`、`max_concurrent_requests`、`redis_url`、`key`、`wait_timeout_seconds`、`lease_seconds` 和 `poll_interval_seconds`。实际读取与租约实现位于 `config.py` 和 `endpoints/runtime/llm_semaphore.py`。
 
@@ -206,4 +209,4 @@ workflow:
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：逐字段 finding 独立确认，pending 只保存在 API/日志，最终 DOCX 只写已确认问题。docxindex 路由和召回算法不变。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：逐字段 finding 独立确认，固定与上传标准分流规划，并在输出前按精确字符范围执行固定优先去重。

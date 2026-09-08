@@ -90,6 +90,76 @@ class TextAnchor:
     run_ranges: list[RunRange]
 
 
+def deduplicate_review_results_by_range(
+    contract_path: str,
+    results: list[dict],
+) -> tuple[list[dict], dict[str, int]]:
+    """Drop cross-source duplicate edit anchors by resolved DOCX character range.
+
+    Results from the mandatory profile win only when an uploaded criterion resolves
+    to the exact same paragraph path, start index, and end index. Unresolved anchors,
+    summary-only findings, and different character ranges are preserved.
+    """
+    doc = Document(contract_path)
+    candidates: list[tuple[int, int, int, tuple[str, int, int], bool]] = []
+    for result_index, result in enumerate(results):
+        mandatory = result.get("review_source") == "mandatory"
+        for issue_index, issue in enumerate(result.get("issues") or []):
+            for anchor_index, anchor in enumerate(issue.get("anchors") or []):
+                if anchor.get("role", "edit") != "edit":
+                    continue
+                resolved = DocxReportGenerator._find_text_range_anchor_in_xml_anchor(
+                    doc,
+                    str(anchor.get("xml_anchor_type") or ""),
+                    str(anchor.get("xml_anchor_id") or ""),
+                    str(anchor.get("quoted_text") or ""),
+                )
+                if resolved is None:
+                    continue
+                key = (
+                    resolved.path,
+                    resolved.match.start_index,
+                    resolved.match.end_index,
+                )
+                candidates.append((result_index, issue_index, anchor_index, key, mandatory))
+
+    grouped: dict[tuple[str, int, int], list[tuple[int, int, int, bool]]] = {}
+    suppressed: set[tuple[int, int, int]] = set()
+    for result_index, issue_index, anchor_index, key, mandatory in candidates:
+        grouped.setdefault(key, []).append((result_index, issue_index, anchor_index, mandatory))
+    for group in grouped.values():
+        if not any(item[3] for item in group):
+            continue
+        suppressed.update(item[:3] for item in group if not item[3])
+
+    deduplicated = copy.deepcopy(results)
+    removed_issues = 0
+    removed_anchors = 0
+    for result_index, result in enumerate(deduplicated):
+        kept_issues = []
+        for issue_index, issue in enumerate(result.get("issues") or []):
+            original_anchors = issue.get("anchors") or []
+            had_edit = any(anchor.get("role", "edit") == "edit" for anchor in original_anchors)
+            kept_anchors = [
+                anchor
+                for anchor_index, anchor in enumerate(original_anchors)
+                if (result_index, issue_index, anchor_index) not in suppressed
+            ]
+            removed_anchors += len(original_anchors) - len(kept_anchors)
+            has_edit = any(anchor.get("role", "edit") == "edit" for anchor in kept_anchors)
+            if had_edit and not has_edit:
+                removed_issues += 1
+                continue
+            issue["anchors"] = kept_anchors
+            kept_issues.append(issue)
+        result["issues"] = kept_issues
+    return deduplicated, {
+        "resolved_edit_anchors": len(candidates),
+        "removed_duplicate_anchors": removed_anchors,
+        "removed_duplicate_issues": removed_issues,
+    }
+
+
 class DocxReportGenerator:
     """Generates DOCX reports, including annotated copies of original contracts."""
 

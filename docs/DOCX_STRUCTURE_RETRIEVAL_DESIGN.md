@@ -17,18 +17,21 @@
 resources/criteria/criteria-formal.docx
 ```
 
-## 1. 审查要点分类
+## 1. 审查要点与路由控制面
 
-`criteria-formal.docx` 中的审查要点按执行方式分为四类。
+`criteria-formal.docx` 的18条标准原文全部属于固定审查面；`criteria-formal.routes.yaml` 按 `criterion_number` 为每条提供固定 `RoutePlan`、`check_points`、`placement` 和可选 `review_instruction`。二者均位于 `resources/criteria/`，不通过 `config.yaml` 指定路径。
 
-| 类别 | 审查要点 | 执行方式 |
+根目录 `routing/` 负责路线 schema、动态路线提示词和固定配置校验；`tools/docxindex/indexing/` 只建索引，`tools/docxindex/retrieval/` 只执行路线。用户上传标准仍允许使用全部五种路线，由 Planner 动态生成后交给同一执行器。
+
+| 路线 | 固定审查要点示例 | 执行方式 |
 |---|---|---|
-| 关键词规则审查 | 4、5、8、9、16 | 只使用 Planner 明确输出的原文短词扫描全文，返回命中的 node 和 anchor |
-| 标题规则审查 | 2 | 检查结构树 title 是否存在、是否符合要求 |
-| 全文遍历审查 | 12、15 | 遍历结构树 node，逐个展开 node 输入模型检查 |
-| 普通 LLM 审查 | 其他审查要点 | 先用结构树检索候选 node，再展开原文交给模型审查 |
+| `title` | 2、5、8、13 | 返回完整一级标题目录供模型判断 |
+| `rule` | 9、16 | 对标准明确给出的词语执行全文精确检索 |
+| `scan` | 3、12、15 | 按 token 分批遍历全部原文 anchor 并让模型筛选候选 |
+| `region` | 1、4、6、10、11、17、18 | 完整或语义读取固定区域、标题章节；多区域分别保留证据 |
+| `hybrid` | 7、14 | 无法可靠限定标题或区域时执行全局结构语义检索，向量只补结构缺口 |
 
-其中 12、15 可以归入规则审查的大类，但执行方式不是关键词命中，而是“遍历每个 node 后逐个判断”。
+固定路线并不跳过审查 Agent：只跳过动态 Planner 和路由 LLM，随后仍进入 Orchestrator、检索、SubAgent 和 Reflector。
 
 标题顺序混乱也归入规则审查：直接检查结构树中标题编号是否连续、层级是否跳变、同级标题是否乱序。
 

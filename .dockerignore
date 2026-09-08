@@ -50,6 +50,8 @@ build/
 *.pdf
 !resources/criteria/
 !resources/criteria/criteria.docx
+!resources/criteria/criteria-formal.docx
+!resources/criteria/criteria-formal.routes.yaml
 ~$*
 .~lock.*#
 *.tmp

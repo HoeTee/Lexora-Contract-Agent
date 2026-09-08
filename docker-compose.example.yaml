@@ -28,7 +28,8 @@ services:
       - ./.env:/app/.env:ro
       - ./config.yaml:/app/config.yaml:ro
       - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
-      - ./criteria.docx:/app/resources/criteria/criteria.docx
+      - ./criteria-formal.docx:/app/resources/criteria/criteria-formal.docx:ro
+      - ./criteria-formal.routes.yaml:/app/resources/criteria/criteria-formal.routes.yaml:ro
       - ./profiles:/app/profiles
       - ./data:/app/data
 
@@ -60,6 +61,7 @@ services:
       - ./.env:/app/.env:ro
       - ./config.yaml:/app/config.yaml:ro
       - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
-      - ./criteria.docx:/app/resources/criteria/criteria.docx
+      - ./criteria-formal.docx:/app/resources/criteria/criteria-formal.docx:ro
+      - ./criteria-formal.routes.yaml:/app/resources/criteria/criteria-formal.routes.yaml:ro
       - ./profiles:/app/profiles
       - ./data:/app/data

@@ -207,7 +207,7 @@ def infer_rerank_provider(model_name: str) -> str:
 MCP_SERVER_TARGET = "module:mcp_service.server.server"
 MCP_SERVER_URL = "http://localhost:8000/mcp"
 DOCS_DIR = str(PROJECT_ROOT_PATH / "docs")
-DEFAULT_CRITERIA_PATH = str(PROJECT_ROOT_PATH / "resources" / "criteria" / "criteria.docx")
+DEFAULT_CRITERIA_PATH = str(PROJECT_ROOT_PATH / "resources" / "criteria" / "criteria-formal.docx")
 REPORTS_DIR = str(PROJECT_ROOT_PATH / "reports")
 LOGS_DIR = str(PROJECT_ROOT_PATH / "logs" / "workflow")
 
@@ -373,7 +373,6 @@ SUBAGENT_ALLOWED_TOOLS = _as_str_tuple(
     "workflow.subagent_allowed_tools",
     allow_empty=True,
 )
-
 QUEUE_ENABLED = _parse_bool(cfg_optional("queue", "enabled", False), "queue.enabled")
 QUEUE_BROKER_URL = _as_str(
     cfg_optional("queue", "broker_url", "redis://localhost:6379/0"),

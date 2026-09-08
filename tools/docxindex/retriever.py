@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from loggers.model_event_context import append_model_event
+from routing.schemas import RoutePlan
 from tools.docxindex import build_document_index
 from tools.docxindex.indexing.config import IndexingConfig
 from tools.docxindex.llm import LLMClient, LLMSettings
-from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.retrieval import (
     RetrievalConfig,
     RouteConfig,
@@ -193,7 +193,7 @@ class DocxIndexRetriever:
         config = self.retrieval_config
         route = self.route_config
         if route_override:
-            route_plan = RouteResponse.model_validate(route_override)
+            route_plan = RoutePlan.model_validate(route_override)
             route_source = "extracted"
         else:
             route_plan = plan_route(
