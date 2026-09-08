@@ -160,7 +160,8 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
         if not output_path.exists():
             raise RuntimeError("Output DOCX file was not found.")
 
-        mark_succeeded(client_dir, task_id)
+        mark_succeeded(client_dir, task_id, quality=result.get("quality"),
+                       criteria_manifest=result.get("criteria_manifest"))
         write_task_log_event(client_dir, task_id, "review_completed", result_file=str(output_path))
     except Exception as exc:
         if isinstance(exc, ModelCallError):

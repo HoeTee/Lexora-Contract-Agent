@@ -26,6 +26,8 @@ def present_review_task(
         "finished_at": task["finished_at"],
         "message": task["message"],
         "error": task["error"],
+        "quality": task.get("quality", {}),
+        "criteria_manifest": task.get("criteria_manifest", {}),
         "input": {
             "contract_filename": task["input"]["contract_filename"],
             "criteria_source": task["input"]["criteria_source"],

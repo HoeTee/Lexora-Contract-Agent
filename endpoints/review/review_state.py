@@ -18,6 +18,7 @@ from endpoints.review.task_store import (
 
 
 CRITERION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
+REVIEW_CONTRACT_VERSION = 2
 
 
 def _safe_criterion_id(criterion_id: str) -> str:
@@ -62,7 +63,7 @@ class ReviewStateStore:
     def ensure_dirs(self) -> None:
         self.criteria_dir.mkdir(parents=True, exist_ok=True)
 
-    def save_plan(self, criteria_list: list[dict[str, Any]]) -> Path:
+    def save_plan(self, criteria_list: list[dict[str, Any]], criteria_source: dict | None = None) -> Path:
         return _write_json(
             plan_state_path(self.client_dir, self.task_id),
             {
@@ -70,11 +71,14 @@ class ReviewStateStore:
                 "saved_at": now_iso(),
                 "criteria_count": len(criteria_list),
                 "criteria": criteria_list,
+                "criteria_source": criteria_source or {},
+                "review_contract_version": REVIEW_CONTRACT_VERSION,
             },
         )
 
     def load_plan(self) -> dict[str, Any] | None:
-        return _read_json(plan_state_path(self.client_dir, self.task_id))
+        plan = _read_json(plan_state_path(self.client_dir, self.task_id))
+        return plan if plan and plan.get("review_contract_version") == REVIEW_CONTRACT_VERSION else None
 
     def criterion_input_path(self, criterion_id: str) -> Path:
         return criterion_input_state_path(self.client_dir, self.task_id, _safe_criterion_id(criterion_id))
@@ -102,11 +106,13 @@ class ReviewStateStore:
         )
 
     def load_criterion_output(self, criterion_id: str) -> dict[str, Any] | None:
-        return _read_json(self.criterion_output_path(criterion_id))
+        result = _read_json(self.criterion_output_path(criterion_id))
+        return result if result and result.get("review_contract_version") == REVIEW_CONTRACT_VERSION else None
 
     def save_criterion_output(self, result: dict[str, Any], *, attempt: int) -> Path:
         criterion_id = _safe_criterion_id(str(result.get("criterion_id", "")))
         payload = dict(result)
+        payload["review_contract_version"] = REVIEW_CONTRACT_VERSION
         payload.update(
             {
                 "task_id": self.task_id,
@@ -153,4 +159,3 @@ class ReviewStateStore:
                 "attempts": attempts,
             },
         )
-

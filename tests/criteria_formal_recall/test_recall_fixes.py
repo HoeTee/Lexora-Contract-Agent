@@ -221,7 +221,7 @@ class PromptAuthorityTests(unittest.TestCase):
 
 
 class SubAgentSchemaNormalizationTests(unittest.TestCase):
-    def test_word_comment_lengths_are_deterministically_truncated(self) -> None:
+    def test_word_comments_preserve_complete_text_within_new_limits(self) -> None:
         output = SubAgentOutput.model_validate({
             "status": "issues_found",
             "issues": [{
@@ -240,8 +240,8 @@ class SubAgentSchemaNormalizationTests(unittest.TestCase):
             }],
         })
 
-        self.assertEqual(len(output.issues[0].issue_comment), 160)
-        self.assertEqual(len(output.issues[0].anchors[0].comment_text), 100)
+        self.assertEqual(len(output.issues[0].issue_comment), 180)
+        self.assertEqual(len(output.issues[0].anchors[0].comment_text), 120)
 
 
 class ReviewPresentationTests(unittest.TestCase):
@@ -301,7 +301,7 @@ class ReviewPresentationTests(unittest.TestCase):
 
         self.assertEqual(
             set(record),
-            {"section", "criterion_id", "risk_level", "issue_comment", "check_point"},
+            {"section", "criterion_id", "risk_level", "issue_comment", "check_point", "quality_status"},
         )
 
     def test_summary_schema_rejects_removed_issue_decisions_field(self) -> None:
@@ -327,7 +327,7 @@ class ReviewPresentationTests(unittest.TestCase):
         self.assertEqual(issue["source_issue_keys"], ["C12::C12.1", "C15::C15.1"])
         self.assertEqual(len(issue["anchors"]), 1)
 
-    def test_text_quality_duplicates_merge_even_when_advice_differs(self) -> None:
+    def test_ambiguous_different_advice_is_not_merged_only_by_criterion(self) -> None:
         for result in self.results:
             result["issues"][0]["anchors"][0]["quoted_text"] = "乙方向甲方发贷。"
         self.results[0]["issues"][0]["anchors"][0]["comment_text"] = (
@@ -339,11 +339,7 @@ class ReviewPresentationTests(unittest.TestCase):
 
         presentation = build_review_presentation(self.results)
 
-        self.assertEqual(len(presentation.inline_results), 1)
-        self.assertEqual(
-            presentation.inline_results[0]["issues"][0]["source_issue_keys"],
-            ["C12::C12.1", "C15::C15.1"],
-        )
+        self.assertEqual(len(presentation.inline_results), 2)
 
     def test_anchorless_issue_is_summary_only_and_still_represented(self) -> None:
         self.results[0]["issues"][0]["anchors"] = []

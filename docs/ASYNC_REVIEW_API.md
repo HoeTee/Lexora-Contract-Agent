@@ -547,3 +547,7 @@ data/api/<task_id>/
 | `POST /api/review/jobs/result` 未传 `task_id` | `400` | 最小 JSON body 为 `{ "task_id": "..." }`；仅在需要覆盖默认输出方式时再传 `output_type`。 |
 | `POST /api/review/jobs/{task_id}/result` 传 `output_path` | 仍返回文件流，不会写入该路径。 | 使用 `curl.exe -o` 或客户端代码保存响应体。 |
 | PowerShell `curl.exe` 未使用 `-o` | 文件内容输出到终端。 | 使用上文的 `-o "C:\...\review_result.docx"` 写法。 |
+
+## 审查输出质量契约更新
+
+见[审查质量与批注规则](REVIEW_QUALITY.md)：新增 edit/evidence 锚点用途、逐字段批注、以附件为基准修改正文、反思待复核状态及标准版本摘要。docxindex 路由和召回算法不变。新代码须随镜像部署，不能只更新提示词。

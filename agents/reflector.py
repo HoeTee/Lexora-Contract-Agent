@@ -10,8 +10,9 @@ from agents.schemas import ReflectorOutput
 
 REFLECTOR_EXPECTED_JSON = """
 {
-  "status": "PASS 或 REJECT",
-  "feedback": "如果 REJECT，写明需要修正的问题；如果 PASS，可为空字符串"
+  "status": "PASS",
+  "feedback": "",
+  "removals": []
 }
 """
 

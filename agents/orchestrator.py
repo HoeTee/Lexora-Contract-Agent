@@ -19,6 +19,7 @@ from agents.json_utils import AgentOutputValidationError, chat_until_valid_json
 from agents.reflector import ReflectorAgent
 from agents.prompts.cn_prompts import SUB_AGENT_BASE_PROMPT
 from agents.schemas import SubAgentOutput
+from agents.review_quality import FindingLedger, finding_entries
 from endpoints.runtime.errors import ModelCallError, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
 from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_info
@@ -29,26 +30,27 @@ _PLACEMENT_DIRECTIVES = {
     "summary": "本标准发现的问题一律使用 anchors=[] 输出；系统会将 issue_comment 汇总进入文首审查总结，不得挂到具体条款。",
     "inline_at_title": "本标准发现的问题，批注锚点必须指向相关标题所在段落。",
     "tail": "本标准发现的问题，批注锚点必须指向合同末尾签署栏区域的段落。",
-    "merged_by_party": "本标准针对合同首部主体信息：按甲方、乙方分别输出问题，锚点指向首部对应主体信息所在段落。",
     "body_end": "本标准发现的问题使用 anchors=[] 输出；系统会将批注挂到正文结尾处。",
 }
 
 
 SUB_AGENT_EXPECTED_JSON = """
 {
-  "status": "compliant 或 issues_found 或 not_applicable",
+  "status": "issues_found",
   "applicability_reason": "仅当 status 为 not_applicable 时填写不适用理由；其他状态可省略",
   "issues": [
     {
       "issue_id": "当前criterion_id.序号",
-      "risk_level": "high | medium | low",
-      "issue_comment": "问题整体说明，160字以内",
+      "risk_level": "low",
+      "issue_comment": "问题整体说明，600字以内，不得以长度限制遗漏真实缺陷",
       "anchors": [
         {
-          "xml_anchor_type": "paragraph | table",
+          "role": "edit",
+          "defect_type": "missing_value",
+          "xml_anchor_type": "paragraph",
           "xml_anchor_id": "必须复用检索结果中的 xml_anchor_id",
           "quoted_text": "逐字摘录的单一连续合同原文",
-          "comment_text": "写入该处 Word 批注的修改意见，100字以内"
+          "comment_text": "写入该处 Word 批注的修改意见，300字以内；evidence 角色必须为空"
         }
       ],
       "reasoning": "说明为什么构成实质风险，以及如何对应 check_point",
@@ -339,6 +341,8 @@ class OrchestratorAgent:
         criterion_text: str,
         check_points: list[str],
         parsed_opinion: dict,
+        context: str = "",
+        missing_findings: list | None = None,
     ) -> str:
         """Give Reflector the current criterion plus the exact sub-agent output."""
         return json.dumps(
@@ -346,6 +350,9 @@ class OrchestratorAgent:
                 "criterion": criterion_text,
                 "check_points": check_points,
                 "subagent_output": parsed_opinion,
+                "retrieved_evidence": context,
+                "missing_previous_findings": missing_findings or [],
+                "current_findings": list(finding_entries(parsed_opinion).values()),
             },
             ensure_ascii=False,
             indent=2,
@@ -406,7 +413,6 @@ class OrchestratorAgent:
             route_override = criterion["route"]
         placement = criterion.get("placement") if isinstance(criterion.get("placement"), dict) else {}
         placement_target = placement.get("target", "inline")
-        placement_note = placement.get("note", "")
         review_instruction = (criterion.get("review_instruction") or "").strip()
 
         # Step 1: Retrieve relevant contract sections
@@ -477,6 +483,7 @@ class OrchestratorAgent:
                 "section": criterion.get("section", "其他"),
                 "issues": parsed_opinion["issues"],
                 "status": "COMPLIANT",
+                "quality_status": "not_required",
                 "placement": placement or None,
                 "applicability_reason": parsed_opinion.get("applicability_reason", ""),
                 "tokens": sub_agent.token_usage.get("total_tokens", 0) + evidence_tokens,
@@ -487,12 +494,16 @@ class OrchestratorAgent:
         # Step 3: Reflection loop. Each criterion needs its own reflector state;
         # sharing one ReflectorAgent across concurrent criteria mixes messages.
         reflector = ReflectorAgent(settings=self.settings)
+        ledger = FindingLedger(parsed_opinion)
+        quality_status = "pending_review"
         for round_num in range(MAX_REFLECTION_ROUNDS):
             missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion)
             reflector_input = self._build_reflector_input(
                 criterion_text,
                 check_points,
                 parsed_opinion,
+                context=context,
+                missing_findings=ledger.missing(parsed_opinion),
             )
             review = await self._review_with_fallback(
                 reflector,
@@ -514,10 +525,15 @@ class OrchestratorAgent:
                     tokens=reflector.token_usage.get("total_tokens", 0),
                     duration=round(time.time() - start, 2)
                 )
-            if status == "PASS":
+            if ledger.review(parsed_opinion, review, round_num + 1):
+                quality_status = "passed"
                 print(f"[Orchestrator] {cid}: PASS after {round_num+1} round(s)")
                 break
             else:
+                if status == "PASS":
+                    review["feedback"] += "\n存在未经说明删除的发现，或已要求撤回却仍保留的发现；请修正并保留所有真实字段缺陷。"
+                if round_num + 1 == MAX_REFLECTION_ROUNDS:
+                    break
                 print(f"[Orchestrator] {cid}: REJECT round {round_num+1}, refining...")
                 parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
                     sub_agent,
@@ -528,6 +544,7 @@ class OrchestratorAgent:
                 round_validation = self._validate_and_repair_anchors(parsed_opinion, context)
                 for key, value in round_validation.items():
                     anchor_validation[key] += value
+                ledger.observe(parsed_opinion)
         else:
             print(f"[Orchestrator] {cid}: Max {MAX_REFLECTION_ROUNDS} rounds reached")
 
@@ -544,6 +561,10 @@ class OrchestratorAgent:
             "criterion": criterion_text,
             "section": criterion.get("section", "其他"),
             "issues": parsed_opinion["issues"],
+            "quality_status": quality_status,
+            "quality_history": ledger.history,
+            "finding_removals": ledger.removals,
+            "unresolved_issues": ledger.unresolved_issues(parsed_opinion),
             "status": final_status,
             "placement": placement or None,
             "applicability_reason": parsed_opinion.get("applicability_reason", ""),

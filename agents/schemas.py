@@ -67,7 +67,7 @@ class ExtractedRoute(StrictOutputModel):
 class ExtractedPlacement(StrictOutputModel):
     """Where the review findings of one criterion should be written."""
 
-    target: Literal["summary", "inline", "inline_at_title", "tail", "merged_by_party", "body_end"]
+    target: Literal["summary", "inline", "inline_at_title", "tail", "body_end"]
     note: str = ""
 
 
@@ -85,37 +85,37 @@ class StrategyExtractionOutput(StrictOutputModel):
 
 
 class SubAgentAnchor(StrictOutputModel):
+    role: Literal["edit", "evidence"] = "edit"
+    defect_type: Literal["missing_value", "inconsistency", "wording", "other"] = "other"
     xml_anchor_type: Literal["paragraph", "table"]
     xml_anchor_id: str = Field(min_length=1)
     quoted_text: str = Field(min_length=1)
-    comment_text: str = Field(min_length=1, max_length=100)
+    comment_text: str = Field(default="", max_length=300)
 
-    @field_validator("comment_text", mode="before")
-    @classmethod
-    def truncate_comment_text(cls, value):
-        return value[:100] if isinstance(value, str) else value
-
-    @field_validator("xml_anchor_id", "quoted_text", "comment_text")
+    @field_validator("xml_anchor_id", "quoted_text")
     @classmethod
     def anchor_text_not_blank(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("field must not be blank")
         return value
 
+    @model_validator(mode="after")
+    def validate_role(self):
+        if self.role == "edit" and not self.comment_text.strip():
+            raise ValueError("edit anchor requires a specific comment_text")
+        if self.role == "evidence" and self.comment_text:
+            raise ValueError("evidence anchor must have empty comment_text")
+        return self
+
 
 class SubAgentIssue(StrictOutputModel):
     issue_id: str = Field(min_length=1)
     risk_level: Literal["high", "medium", "low"] # 风险等级，必须是 "high"、"medium" 或 "low" 中的一个
-    issue_comment: str = Field(min_length=1, max_length=160)
+    issue_comment: str = Field(min_length=1, max_length=600)
     anchors: list[SubAgentAnchor] = Field(default_factory=list)
     reasoning: str = Field(min_length=1)
     criterion: str = Field(min_length=1)
     check_point: str = Field(min_length=1)
-
-    @field_validator("issue_comment", mode="before")
-    @classmethod
-    def truncate_issue_comment(cls, value):
-        return value[:160] if isinstance(value, str) else value
 
     @field_validator("issue_id", "issue_comment", "reasoning", "criterion", "check_point") # 字段验证
     @classmethod # 在实例方法创建前检验某字段
@@ -149,9 +149,22 @@ class SubAgentOutput(StrictOutputModel):
         return self
 
 
+class FindingRemoval(StrictOutputModel):
+    finding_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    @field_validator("finding_id", "reason")
+    @classmethod
+    def nonblank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("removal decision must not be blank")
+        return value
+
+
 class ReflectorOutput(StrictOutputModel):
     status: Literal["PASS", "REJECT"]
     feedback: str = ""
+    removals: list[FindingRemoval] = Field(default_factory=list)
 
 
 class SummaryContentOutput(StrictOutputModel):

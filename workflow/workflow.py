@@ -10,9 +10,11 @@ Phases:
   6. Generate the annotated original-contract DOCX
 """
 import inspect
+import hashlib
 import json
 import os
 import time
+from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from config import (
@@ -130,6 +132,9 @@ class ContractReviewWorkflow:
                     index_metadata = await self._phase_build_index(contract_path)
 
                 # Phase 3: Plan tasks
+                criteria_file = Path(criteria_path)
+                self.criteria_source = {"filename": criteria_file.name,
+                                        "sha256": hashlib.sha256(criteria_file.read_bytes()).hexdigest()}
                 await self._emit_progress(progress_callback, "planning", "Extracting review criteria")
                 async with self.trace.span("phase.plan", run_type="phase", inputs={"criteria_chars": len(criteria_md)}) as span:
                     criteria_list = await self._phase_plan(criteria_md, criteria_path)
@@ -154,6 +159,12 @@ class ContractReviewWorkflow:
                     )
 
                 review_outputs_path = self._save_review_outputs(results)
+                pending_ids = [r["criterion_id"] for r in results if r.get("quality_status") == "pending_review"]
+                error_ids = [r["criterion_id"] for r in results if r.get("status") == "ERROR"]
+                quality = {"status": "pending_review" if pending_ids or error_ids else "passed",
+                           "pending_criteria": pending_ids, "error_criteria": error_ids}
+                criteria_manifest = {**self.criteria_source, "count": len(criteria_list),
+                                     "criteria": [{"id": c["id"], "criterion": c["criterion"]} for c in criteria_list]}
 
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
@@ -229,6 +240,8 @@ class ContractReviewWorkflow:
                     {
                         "report_docx": annotated_docx_path,
                         "criteria_count": len(results),
+                        "quality": quality,
+                        "criteria_manifest": criteria_manifest,
                         "issue_count": sum(len(result.get("issues", [])) for result in results),
                         "error_count": sum(1 for result in results if result.get("status") == "ERROR"),
                         "elapsed_seconds": elapsed,
@@ -251,6 +264,8 @@ class ContractReviewWorkflow:
                 await self._emit_progress(progress_callback, "completed", "Review completed")
 
                 return {
+                    "quality": quality,
+                    "criteria_manifest": criteria_manifest,
                     "report_docx": annotated_docx_path,
                     "criteria_count": len(results),
                     "issue_count": sum(len(result.get("issues", [])) for result in results),
@@ -504,7 +519,7 @@ class ContractReviewWorkflow:
         if self.state_store is None:
             return None
         self.state_store.ensure_dirs()
-        return str(self.state_store.save_plan(criteria_list))
+        return str(self.state_store.save_plan(criteria_list, getattr(self, "criteria_source", {})))
 
     def _load_plan_state(self) -> list[dict] | None:
         """Load planned criteria from recovery state when the same task is rerun."""
@@ -512,6 +527,8 @@ class ContractReviewWorkflow:
             return None
         plan = self.state_store.load_plan()
         if not plan:
+            return None
+        if plan.get("criteria_source") != getattr(self, "criteria_source", {}):
             return None
         criteria = plan.get("criteria")
         if not isinstance(criteria, list):

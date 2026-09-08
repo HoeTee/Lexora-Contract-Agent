@@ -96,8 +96,8 @@ class SummaryOutput:
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：
    - 对 `quoted_text` 为空的“缺失类” issue 再检索一次，生成 `missing_text_review_notes` 供 Reflector 判断。
    - `Reflector.review` 返回 `PASS` 或 `REJECT`。
-   - `PASS` 跳出循环；`REJECT` 则 SubAgent 按 `feedback` 补充完善，再进入下一轮。
-5. 返回该 criterion 结果：`criterion_id`、`section`、`issues`、`status`、`applicability_reason`、`tokens`。
+   - `PASS` 且发现完整性检查通过才结束；`REJECT` 在还有反思轮次时按反馈改写。达到上限或反思异常时标记 `quality_status=pending_review`，不直接输出确定性批注。每轮保留发现快照及撤回理由。
+5. 返回该 criterion 结果：`criterion_id`、`section`、`issues`、`status`、`applicability_reason`、`tokens`，以及 `quality_status`、`quality_history`、`finding_removals`、`unresolved_issues`。判断结论与质量状态分别记录。
 
 并发与容错（`execute_criteria`）：
 
@@ -203,3 +203,7 @@ workflow:
 - 配置了 MCP server 未暴露的工具名时，该工具不会传给 SubAgent，程序不会回退为完整工具列表。
 
 `llm.max_tool_calls` 仍是当前 `Agent` 的工具调用次数上限。不要在没有明确不同语义时新增另一个 SubAgent 工具次数配置；否则会形成两个配置控制同一件事。
+
+## 审查输出质量契约更新
+
+见[审查质量与批注规则](REVIEW_QUALITY.md)：新增 edit/evidence 锚点用途、逐字段批注、以附件为基准修改正文、反思待复核状态及标准版本摘要。docxindex 路由和召回算法不变。新代码须随镜像部署，不能只更新提示词。

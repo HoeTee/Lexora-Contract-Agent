@@ -15,7 +15,6 @@ _QUOTED_TEXT_PATTERN = re.compile(r"[“\"]([^”\"]+)[”\"]")
 _PRESCRIBED_TEXT_PATTERN = re.compile(r"(?:写明|写入)[“\"](.+)[”\"]")
 _REPLACEMENT_PATTERN = re.compile(r"(?:修改|改)为[：:]?[“\"]?([^”\"。；]+)")
 _REFERENCE_ONLY_TERMS = ("作为修正基准", "作为正文引用的修正基准", "作为对比", "用于对比", "此处为正确", "此处为附件")
-_TEXT_QUALITY_TERMS = ("错别字", "语病", "重复")
 _ATTACHMENT_HEADING_PATTERN = re.compile(r"^附件[一二三四五六七八九十\d]+[：:]")
 
 
@@ -52,6 +51,8 @@ def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
                     "xml_anchor_id": anchor.get("xml_anchor_id", ""),
                     "quoted_text": anchor.get("quoted_text", ""),
                     "comment_text": anchor.get("comment_text", ""),
+                    "role": anchor.get("role", "edit"),
+                    "defect_type": anchor.get("defect_type", "other"),
                 }
                 for anchor_index, anchor in enumerate(issue.get("anchors") or [])
             ]
@@ -62,6 +63,7 @@ def collect_issue_records(results: list[dict]) -> list[dict[str, Any]]:
                     "criterion_id": criterion_id,
                     "criterion": result.get("criterion", ""),
                     "placement": result.get("placement"),
+                    "quality_status": result.get("quality_status", "legacy_unverified"),
                     "issue_id": issue_id,
                     "risk_level": issue.get("risk_level", ""),
                     "issue_comment": issue.get("issue_comment", ""),
@@ -92,6 +94,7 @@ def prompt_summary_records(results: list[dict]) -> list[dict[str, Any]]:
             "risk_level": record["risk_level"],
             "issue_comment": record["issue_comment"],
             "check_point": record["check_point"],
+            "quality_status": record["quality_status"],
         }
         for record in collect_issue_records(results)
     ]
@@ -104,7 +107,13 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
     Output: canonical inline writer input, complete summarizer input, and
     deterministic summary-only comments. No issue may be silently discarded.
     """
-    records = collect_issue_records(results)
+    expanded_results = deepcopy(results)
+    for result in expanded_results:
+        result.setdefault("issues", []).extend(result.get("unresolved_issues", []))
+        if result.get("quality_status") == "pending_review" and not result["issues"]:
+            result["issues"] = [{"issue_id": "quality_pending", "issue_comment": "该审查项尚未通过质量复核。",
+                                 "check_point": result.get("criterion", ""), "anchors": []}]
+    records = collect_issue_records(expanded_results)
     inline_results: list[dict] = []
     summary_results: list[dict] = []
     opening_notices: list[str] = []
@@ -114,6 +123,17 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
 
     for record in records:
         issue_key = record["issue_key"]
+        if record["quality_status"] == "pending_review":
+            comment = f"待复核（{record['criterion_id']}，以下为未确认判断）：{record['issue_comment']}"
+            locations = [f"{a['xml_anchor_id']}「{a['quoted_text']}」：{a['comment_text']}"
+                         for a in record["anchors"] if a.get("role", "edit") == "edit"]
+            if locations:
+                comment += "；" + "；".join(locations)
+            summary_results.append(_materialize_result(record, [], comment))
+            if comment not in global_issues:
+                global_issues.append(comment)
+            represented.add(issue_key)
+            continue
         if _is_summary_only(record):
             comment = _summary_comment(record)
             summary_results.append(_materialize_result(record, [], comment))
@@ -127,7 +147,7 @@ def build_review_presentation(results: list[dict]) -> ReviewPresentation:
         source_anchors = [
             anchor
             for anchor in record["_issue"].get("anchors") or []
-            if _valid_anchor(anchor)
+            if _valid_anchor(anchor) and anchor.get("role", "edit") == "edit"
         ]
         substantive_anchors = [
             anchor for anchor in source_anchors if not _is_reference_only_anchor(anchor)
@@ -195,6 +215,7 @@ def _materialize_result(record: dict[str, Any], anchors: list[dict], comment: st
         "criterion_id": record["criterion_id"],
         "criterion": record["criterion"],
         "placement": record.get("placement"),
+        "quality_status": record.get("quality_status"),
         "status": "issues_found",
         "issues": [
             {
@@ -335,6 +356,8 @@ def _summary_comment(record: dict[str, Any]) -> str:
 def _annotation_key(anchor: dict, comment: str) -> tuple[str, str, str, str]:
     replacement = _REPLACEMENT_PATTERN.search(comment)
     action = replacement.group(1) if replacement else comment
+    if anchor.get("defect_type") == "missing_value":
+        action = "missing_value"  # Same exact field, regardless of phrasing/criterion.
     return (
         str(anchor.get("xml_anchor_type") or "").strip(),
         str(anchor.get("xml_anchor_id") or "").strip(),
@@ -356,13 +379,8 @@ def _find_duplicate_annotation(
     for existing_key, issue in annotations.items():
         if existing_key[:3] != candidate_range:
             continue
-        existing_criterion = str(issue.get("criterion") or "")
-        candidate_criterion = str(record.get("criterion") or "")
-        if (
-            any(term in existing_criterion for term in _TEXT_QUALITY_TERMS)
-            and any(term in candidate_criterion for term in _TEXT_QUALITY_TERMS)
-        ):
-            return issue
+        # Sharing a paragraph (even under text-quality criteria) does not
+        # establish that two edits correct the same defect.
         existing_action = existing_key[3]
         if (
             len(candidate_action) >= 4
