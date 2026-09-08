@@ -67,10 +67,12 @@ class SubAgentIssue:
     check_point: str
 
 class SubAgentAnchor:
+    role: Literal["edit", "evidence"]    # 修改位置 / 对照证据
+    defect_type: Literal["missing_value", "inconsistency", "wording", "other"]
     xml_anchor_type: Literal["paragraph", "table"]
     xml_anchor_id: str
     quoted_text: str
-    comment_text: str                     # 1~100 字
+    comment_text: str                     # edit: 1~300 字；evidence: 空字符串
 
 class SubAgentOutput:
     status: Literal["compliant", "issues_found", "not_applicable"]
@@ -80,6 +82,7 @@ class SubAgentOutput:
 class ReflectorOutput:
     status: Literal["PASS", "REJECT"]
     feedback: str = ""
+    removals: list[FindingRemoval] = []   # finding_id + reason；由 Reflector 输出
 
 class SummaryOutput:
     overall_comment: str = ""

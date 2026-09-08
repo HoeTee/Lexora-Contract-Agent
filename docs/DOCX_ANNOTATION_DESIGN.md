@@ -18,23 +18,23 @@
 批注生成阶段同时使用两类最终结构化结果：
 
 - `presentation_results`：由 `build_review_presentation()` 对 Orchestrator 原始 `results` 做确定性去重、锚点选择和分流后生成，只保留写入原文的规范化问题。
-- `final_review`：只包含 Summarizer 返回的 `overall_comment`、`priority_comments`，以及程序追加的 `summary_issue_comments`；三者共同生成文档开头总览批注。
+- `final_review`：包含 Summarizer 返回的 `overall_comment`、`priority_comments`，以及程序追加的 `opening_notices`、`global_issues`，共同生成文档开头总览批注。未通过质量验收的事项以“待复核、未确认判断”明确列入 global_issues，不作为确定的原文修改批注。
 
 因此，`results` 不是 SummaryAgent 的输出。真实数据流是：
 
 ```text
 SubAgentOutput
   -> Orchestrator 汇总成 raw results
-  -> build_review_presentation 生成 presentation_results、summarizer_results、summary_issue_comments
+  -> build_review_presentation 生成 presentation_results、summarizer_results、opening_notices、global_issues
   -> SummaryAgent 读取 summarizer_results
   -> LLM 只输出 overall_comment、priority_comments
-  -> 程序把 summary_issue_comments 追加到 final_review
+  -> 程序把 opening_notices、global_issues 追加到 final_review
   -> DOCX 批注生成器使用 presentation_results 和 final_review
 ```
 
 其中：
 
-- 每个原始 issue 都有稳定 `issue_key`，必须进入正文批注或 `summary_issue_comments`；程序检测到漏项会直接报错。
+- 每个原始 issue 都有稳定 `issue_key`，必须进入原文批注、总结或有来源记录的去重合并；程序检测到漏项会报错。edit 锚点逐处写入，evidence 锚点仅用于论证，不生成批注。先前未说明撤回的发现进入待复核，不静默丢失。
 - 没有有效锚点、合同整体期限问题，以及条款断号或标题顺序问题进入总结；该判断不依赖 Reviewer 返回的锚点数量，不借正常标题或相邻段落强行放置批注。
 - 合同框架缺失多项必备标题时，即使 Reviewer 返回了少量正常标题作为定位证据，也进入总结并一次列明全部缺失标题。
 - 写入前按 `xml_anchor_type + xml_anchor_id + quoted_text + 修改动作` 去重；同一 XML 范围由多个审查要点返回同一修改时只生成一次批注，并在 `source_issue_keys` 保留来源。
