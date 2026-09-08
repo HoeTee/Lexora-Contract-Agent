@@ -102,7 +102,7 @@ class DocxIndexRetriever:
     async def search(
         self,
         query: str,
-        route_override: str | None = None,
+        route_override: dict | None = None,
         criterion_id: str | None = None,
     ) -> str:
         """Retrieve review-ready, DOCX-anchor-aware text for one query."""
@@ -179,7 +179,7 @@ class DocxIndexRetriever:
     def _search_sync(
         self,
         query: str,
-        route_override: str | None = None,
+        route_override: dict | None = None,
         criterion_id: str | None = None,
     ) -> str:
         if self._index is None:
@@ -189,7 +189,7 @@ class DocxIndexRetriever:
         config = self.retrieval_config
         route = self.route_config
         if route_override:
-            route_plan = RouteResponse.model_validate(json.loads(route_override))
+            route_plan = RouteResponse.model_validate(route_override)
             route_source = "extracted"
         else:
             route_plan = plan_route(

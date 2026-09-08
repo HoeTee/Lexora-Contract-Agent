@@ -117,7 +117,7 @@ class OrchestratorAgent:
         criterion_text: str,
         check_points_text: str,
         start: float,
-        route_override: str | None = None,
+        route_override: dict | None = None,
     ) -> tuple[str, int]:
         """Unified retrieval: returns (context_text, retrieval_tokens)."""
         search_query = f"{criterion_text}\n检查要点：{check_points_text}"
@@ -403,7 +403,7 @@ class OrchestratorAgent:
 
         route_override = None
         if criterion.get("route") and not criterion.get("fallback_llm_route"):
-            route_override = json.dumps(criterion["route"], ensure_ascii=False)
+            route_override = criterion["route"]
         placement = criterion.get("placement") if isinstance(criterion.get("placement"), dict) else {}
         placement_target = placement.get("target", "inline")
         placement_note = placement.get("note", "")

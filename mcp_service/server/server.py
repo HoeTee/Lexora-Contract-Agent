@@ -226,7 +226,7 @@ async def docxindex_build_index(docx_path: str, api_events_path: str | None = No
 async def docxindex_search(
     query: str,
     api_events_path: str | None = None,
-    route_override: str | None = None,
+    route_override: dict | None = None,
     criterion_id: str | None = None,
 ) -> str:
     """Search the temporary in-memory docxindex index for the current contract."""
@@ -252,7 +252,7 @@ async def contract_build_index(docx_path: str, api_events_path: str | None = Non
 async def contract_search(
     query: str,
     api_events_path: str | None = None,
-    route_override: str | None = None,
+    route_override: dict | None = None,
     criterion_id: str | None = None,
 ) -> str:
     """Search the configured temporary contract retrieval index."""
