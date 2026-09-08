@@ -33,6 +33,10 @@ class ReflectorAgent(Agent):
         Returns: {"status": "PASS"/"REJECT", "feedback": "..."}
         """
         prompt = (
+            "字段职责：subagent_output 是唯一完整审查结果（含 edit 和 evidence）；current_findings 只是修改位置索引，不代表完整证据。\n"
+            "removals 只能由 Reflector 返回，不要要求 SubAgent 添加该字段。finding_id 必须逐字复制输入的 F001 等编号，不是 issue_id。\n"
+            '撤回格式示例：{"finding_id":"F001","reason":"原判断事实错误，具体证据为……"}；无撤回返回 []。\n'
+            "compliant + issues=[] 是合法结构，不得要求其提供 schema 未定义的顶层 reasoning 或为了引用证据而新增 issue。\n"
             "请审核以下审查结果的质量：\n\n"
             f"SubAgent 输出：\n{agent_output}\n\n"
             "以下是系统针对 anchors 为空的缺失类 issue 做的补充检索结果，"

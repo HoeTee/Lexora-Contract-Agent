@@ -19,7 +19,7 @@ from agents.json_utils import AgentOutputValidationError, chat_until_valid_json
 from agents.reflector import ReflectorAgent
 from agents.prompts.cn_prompts import SUB_AGENT_BASE_PROMPT
 from agents.schemas import SubAgentOutput
-from agents.review_quality import FindingLedger, finding_entries
+from agents.review_quality import FindingLedger
 from endpoints.runtime.errors import ModelCallError, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
 from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_info
@@ -343,6 +343,7 @@ class OrchestratorAgent:
         parsed_opinion: dict,
         context: str = "",
         missing_findings: list | None = None,
+        current_findings: list | None = None,
     ) -> str:
         """Give Reflector the current criterion plus the exact sub-agent output."""
         return json.dumps(
@@ -352,7 +353,7 @@ class OrchestratorAgent:
                 "subagent_output": parsed_opinion,
                 "retrieved_evidence": context,
                 "missing_previous_findings": missing_findings or [],
-                "current_findings": list(finding_entries(parsed_opinion).values()),
+                "current_findings": current_findings or [],
             },
             ensure_ascii=False,
             indent=2,
@@ -496,21 +497,25 @@ class OrchestratorAgent:
         reflector = ReflectorAgent(settings=self.settings)
         ledger = FindingLedger(parsed_opinion)
         quality_status = "pending_review"
+        supplementary_evidence: list[str] = []
         for round_num in range(MAX_REFLECTION_ROUNDS):
             missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion)
+            if missing_text_review_notes.startswith("[") and missing_text_review_notes not in supplementary_evidence:
+                supplementary_evidence.append(missing_text_review_notes)
             reflector_input = self._build_reflector_input(
                 criterion_text,
                 check_points,
                 parsed_opinion,
                 context=context,
                 missing_findings=ledger.missing(parsed_opinion),
+                current_findings=ledger.current(parsed_opinion),
             )
             review = await self._review_with_fallback(
                 reflector,
                 cid=cid,
                 round_num=round_num + 1,
                 reflector_input=reflector_input,
-                missing_text_review_notes=missing_text_review_notes,
+                missing_text_review_notes="\n".join(supplementary_evidence) or missing_text_review_notes,
             )
             if review is None:
                 break

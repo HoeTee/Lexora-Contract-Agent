@@ -16,8 +16,8 @@ from pydantic import ValidationError
 from agents.orchestrator import OrchestratorAgent, SUB_AGENT_EXPECTED_JSON
 from agents.reflector import REFLECTOR_EXPECTED_JSON
 from agents.review_presentation import build_review_presentation
-from agents.review_quality import FindingLedger, finding_entries
-from agents.schemas import SubAgentOutput, SubAgentAnchor, ReflectorOutput, ExtractedPlacement
+from agents.review_quality import FindingLedger
+from agents.schemas import SubAgentOutput, SubAgentAnchor, ReflectorOutput, ExtractedPlacement, ExtractedRoute
 from agents.prompts.cn_prompts import load_prompts, PROMPTS_PATH
 from tools.document.reporting.docx_report import DocxReportGenerator
 
@@ -92,7 +92,7 @@ class QualityTests(unittest.TestCase):
         o = opinion()
         ledger = FindingLedger(o)
         self.assertFalse(ledger.review(o, {"status": "PASS", "removals": [{"finding_id": "bad", "reason": "x"}]}, 1))
-        key = next(iter(finding_entries(o)))
+        key = ledger.current(o)[0]["finding_id"]
         self.assertFalse(ledger.review(o, {"status": "PASS", "removals": [{"finding_id": key, "reason": "原判断错误"}]}, 2))
 
     def test_pending_findings_and_lost_fields_remain_visible(self):
@@ -111,6 +111,11 @@ class QualityTests(unittest.TestCase):
                 self.assertIn(term, prompts[name])
         self.assertIn("missing_previous_findings", prompts["REFLECTOR_SYSTEM_PROMPT"])
         self.assertIn("pending_review", prompts["SUMMARIZER_SYSTEM_PROMPT"])
+
+    def test_invalid_planner_scan_combination_rejected_before_retrieval(self):
+        with self.assertRaises(ValidationError):
+            ExtractedRoute(steps=[{"method": "region", "regions": ["frontmatter"]}, {"method": "scan"}])
+        ExtractedRoute(steps=[{"method": "rule", "terms": ["主体"]}, {"method": "scan"}])
 
 
 class WriterTests(unittest.TestCase):

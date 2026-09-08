@@ -26,23 +26,35 @@ def finding_entries(opinion: dict) -> dict[str, dict]:
 
 class FindingLedger:
     def __init__(self, opinion: dict):
-        self.observed = finding_entries(opinion)
+        self.observed: dict[str, dict] = {}
         self.removals: dict[str, str] = {}
         self.history: list[dict] = []
+        self.observe(opinion)
 
     def observe(self, opinion: dict) -> None:
-        self.observed.update(finding_entries(opinion))
+        for key, entry in finding_entries(opinion).items():
+            entry["finding_id"] = (self.observed[key]["finding_id"] if key in self.observed
+                                   else f"F{len(self.observed) + 1:03d}")
+            self.observed[key] = entry
+
+    def current(self, opinion: dict) -> list[dict]:
+        """A compact location index, not a second copy of SubAgent's output."""
+        return [{"finding_id": self.observed[key]["finding_id"],
+                 "issue_id": entry["issue"]["issue_id"],
+                 "location": entry["anchor"], "description": entry["issue"]["issue_comment"]}
+                for key, entry in finding_entries(opinion).items()]
 
     def missing(self, opinion: dict) -> list[dict]:
         current = finding_entries(opinion)
         return [entry for key, entry in self.observed.items()
-                if key not in current and key not in self.removals]
+                if key not in current and entry["finding_id"] not in self.removals]
 
     def review(self, opinion: dict, review: dict, round_number: int) -> bool:
         unknown = []
+        known_ids = {entry["finding_id"] for entry in self.observed.values()}
         for item in review.get("removals", []):
             key = item["finding_id"]
-            if key in self.observed and item["reason"].strip():
+            if key in known_ids and item["reason"].strip():
                 self.removals[key] = item["reason"]
             else:
                 unknown.append(key)
@@ -50,7 +62,7 @@ class FindingLedger:
                              "review": deepcopy(review), "unknown_removal_ids": unknown})
         # A removal decision is not applied by deleting arbitrary model text.
         # The reviewer must actually retract the finding on its next revision.
-        retained_retractions = set(finding_entries(opinion)) & self.removals.keys()
+        retained_retractions = {entry["finding_id"] for entry in self.current(opinion)} & self.removals.keys()
         return (review["status"] == "PASS" and not self.missing(opinion)
                 and not unknown and not retained_retractions)
 

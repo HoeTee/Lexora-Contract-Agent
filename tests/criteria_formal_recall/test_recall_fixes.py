@@ -203,8 +203,8 @@ class PromptAuthorityTests(unittest.TestCase):
 
         prompts = load_prompts(prompt_path)
 
-        self.assertIn("优先级高于本提示词中的通用风险筛选规则", prompts["SUB_AGENT_BASE_PROMPT"])
-        self.assertIn("不得质疑标准本身的必要性", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("先判断当前标准的具体检查对象与触发条件", prompts["SUB_AGENT_BASE_PROMPT"])
+        self.assertIn("独立判断事实是否真正触发当前标准", prompts["REFLECTOR_SYSTEM_PROMPT"])
         self.assertIn("指定提示语", prompts["SUB_AGENT_BASE_PROMPT"])
         self.assertIn("固定文字完整性", prompts["REFLECTOR_SYSTEM_PROMPT"])
         self.assertNotIn("output_scope 枚举", prompts["SUMMARIZER_SYSTEM_PROMPT"])

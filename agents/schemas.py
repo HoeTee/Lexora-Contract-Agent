@@ -63,6 +63,16 @@ class ExtractedRoute(StrictOutputModel):
     steps: list[ExtractedRouteStep] = Field(min_length=1, max_length=5)
     fallback: bool = False
 
+    @model_validator(mode="after")
+    def validate_scan_combination(self):
+        # Match the existing docxindex RouteResponse contract before execution.
+        methods = [step.method for step in self.steps]
+        if methods.count("scan") > 1:
+            raise ValueError("scan route may appear at most once")
+        if "scan" in methods and any(m not in {"scan", "title", "rule"} for m in methods):
+            raise ValueError("scan route may only be combined with title or rule routes")
+        return self
+
 
 class ExtractedPlacement(StrictOutputModel):
     """Where the review findings of one criterion should be written."""
