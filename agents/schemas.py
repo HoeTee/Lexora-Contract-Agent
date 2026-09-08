@@ -127,6 +127,12 @@ class SubAgentIssue(StrictOutputModel):
     criterion: str = Field(min_length=1)
     check_point: str = Field(min_length=1)
 
+    @model_validator(mode="after")
+    def require_edit_for_anchored_issue(self):
+        if self.anchors and not any(a.role == "edit" for a in self.anchors):
+            raise ValueError("anchored issue requires an edit location with a specific comment; evidence alone is not an annotation. Use anchors=[] only for a genuine summary-only issue")
+        return self
+
     @field_validator("issue_id", "issue_comment", "reasoning", "criterion", "check_point") # 字段验证
     @classmethod # 在实例方法创建前检验某字段
     def required_text_not_blank(cls, value: str) -> str: # cls 和 value 是约定俗成的参数名

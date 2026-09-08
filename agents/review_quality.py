@@ -52,17 +52,23 @@ class FindingLedger:
     def review(self, opinion: dict, review: dict, round_number: int) -> bool:
         unknown = []
         known_ids = {entry["finding_id"] for entry in self.observed.values()}
+        current_ids = {entry["finding_id"] for entry in self.current(opinion)}
+        # A revised, currently present finding must be evaluated anew. A past
+        # withdrawal is not a permanent veto on the location itself.
+        for key in current_ids:
+            self.removals.pop(key, None)
         for item in review.get("removals", []):
             key = item["finding_id"]
             if key in known_ids and item["reason"].strip():
-                self.removals[key] = item["reason"]
+                if key not in current_ids:
+                    self.removals[key] = item["reason"]
             else:
                 unknown.append(key)
         self.history.append({"round": round_number, "opinion": deepcopy(opinion),
                              "review": deepcopy(review), "unknown_removal_ids": unknown})
         # A removal decision is not applied by deleting arbitrary model text.
         # The reviewer must actually retract the finding on its next revision.
-        retained_retractions = {entry["finding_id"] for entry in self.current(opinion)} & self.removals.keys()
+        retained_retractions = current_ids & {item["finding_id"] for item in review.get("removals", [])}
         return (review["status"] == "PASS" and not self.missing(opinion)
                 and not unknown and not retained_retractions)
 

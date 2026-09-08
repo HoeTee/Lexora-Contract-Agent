@@ -452,7 +452,7 @@ class OrchestratorAgent:
             task_prompt = (
                 task_prompt
                 + f"触发指令：{review_instruction}\n"
-                + "触发条件成立时，issue_comment 必须逐字使用指令中的固定文字，不得改写。\n\n"
+                + "只有标准原文本身给出完整目标文字且触发条件成立时才逐字采用。省略号‘…’、‘照抄’或‘报错…’不是完整目标，不得照搬；应按真实缺陷提供具体修改意见。\n\n"
             )
         placement_directive = _PLACEMENT_DIRECTIVES.get(placement_target)
         if placement_directive:

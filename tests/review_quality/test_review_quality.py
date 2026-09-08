@@ -55,6 +55,22 @@ class QualityTests(unittest.TestCase):
         with self.assertRaises(ValidationError):
             SubAgentAnchor.model_validate(anchor(comment_text="字" * 301))
 
+    def test_evidence_only_issue_requires_edit_or_summary(self):
+        with self.assertRaises(ValidationError):
+            SubAgentOutput.model_validate(opinion([anchor(role="evidence", comment_text="")]))
+
+    def test_withdrawal_does_not_permanently_veto_a_revised_finding(self):
+        o = opinion()
+        ledger = FindingLedger(o)
+        key = ledger.current(o)[0]["finding_id"]
+        removed = {"status": "compliant", "issues": []}
+        self.assertTrue(ledger.review(removed, {"status": "PASS", "removals": [
+            {"finding_id": key, "reason": "原判断错误"}]}, 1))
+        revised = opinion([anchor(comment="请填写实际联系地址。")])
+        ledger.observe(revised)
+        self.assertTrue(ledger.review(revised, {"status": "PASS", "removals": []}, 2))
+        self.assertNotIn(key, ledger.removals)
+
     def test_edit_locations_are_not_party_merged(self):
         a = [anchor(), anchor("电话：#电话#", "path:body/p2", "电话未填写。")]
         p = build_review_presentation([result(opinion(a), placement={"target": "inline"})])
