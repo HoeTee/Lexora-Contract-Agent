@@ -23,7 +23,7 @@ resources/criteria/criteria-formal.docx
 
 | 类别 | 审查要点 | 执行方式 |
 |---|---|---|
-| 关键词规则审查 | 4、5、8、9、16 | 使用关键词或正则扫描全文，返回命中的 node 和 anchor |
+| 关键词规则审查 | 4、5、8、9、16 | 只使用 Planner 明确输出的原文短词扫描全文，返回命中的 node 和 anchor |
 | 标题规则审查 | 2 | 检查结构树 title 是否存在、是否符合要求 |
 | 全文遍历审查 | 12、15 | 遍历结构树 node，逐个展开 node 输入模型检查 |
 | 普通 LLM 审查 | 其他审查要点 | 先用结构树检索候选 node，再展开原文交给模型审查 |
@@ -179,7 +179,7 @@ attachments  附件
 
 ### 6.1 合同首部 FrontMatter
 
-合同首部包括正式正文开始前的内容，例如合同标题页、合同编号、甲乙方信息、签署提示等。
+合同首部包括正式正文开始前的内容，例如合同标题页、合同编号、甲乙方信息、签署提示等。`scan_batch_tokens` 当前为 6000；scan 候选的 LLM 判定理由随原文锚点传给 Reviewer，避免二次审查时丢失候选语义。
 
 识别规则：
 
@@ -646,7 +646,7 @@ structure_tree > input_tokens
 执行流程：
 
 ```text
-1. 根据审查要点配置关键词或正则。
+1. Planner 根据审查要点明确输出 `step.terms`；执行器不从完整 query 猜词，也不使用业务正则扩展词表。
 2. 在 DocumentIndex 的 title/text 中扫描。
 3. 返回命中的 node_id、anchor、match_text。
 4. 根据审查要点直接生成问题，或展开命中 node 后交给 LLM 复核。
@@ -915,4 +915,4 @@ SubAgent 输出 issue 时至少包含：
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：首部显式占位字段在现有检索证据上执行结果覆盖校验；docxindex 路由、索引和向量补充算法不变。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：字段完整性由 Planner 在 `rule` 与 `scan` 之间选择。未填写形态由 scan/Reviewer LLM 结合上下文判断，不在 Orchestrator 中使用占位符正则补造问题；索引和向量补充算法不变。

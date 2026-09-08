@@ -28,7 +28,7 @@
 `agents/prompts/cn_prompts.yaml` 中 SubAgent 负责判定，现有 Reflector 独立复核；不增加 LLM 调用阶段：
 
 - “照抄”等编辑指令不作为最终意见，也不能在目标文字不明确时编造提示语。通用提醒返回 `anchors=[]` 进入总结；具体缺陷才锚定问题原文。
-- 已填写的 `【5‰】`、`【5%】` 不是空白占位；主体备选项与数值缺失分开判断。批注必须指出具体字段和缺失内容，引用最小完整的问题语句。
+- 字段是否未填写由 LLM 结合字段名称、相邻文字、表格关系和合同语境判断，不由业务正则硬匹配。`[合同中心-合同编码]`、`#乙方合同号#【     】`、字段后的 `XX` 是提示词示例；`【5‰】`、`【5%】` 等已有值和条件性补件说明是反例。批注必须直接引用对应字段和未填写位置。
 - 分公司签约授权与代理人签署授权分别审查。条件句不证明条件成立，未检索到外部授权书不等于未授权。有对应主体事实且仍需外部材料确认时，以待核实事项和空 anchors 进入总结；不将纯假设写成缺陷。
 - Summarizer 必须保留输入中的不确定性，不将“待核实”升级成“授权缺失”或“签署无效”。输出字段和工作流阶段不变。
 
@@ -97,7 +97,7 @@ class SummaryOutput:
 2. SubAgent 审查：以 `SUB_AGENT_BASE_PROMPT` 创建 `SubAgent_<cid>`，只向模型暴露 `workflow.subagent_allowed_tools` 白名单中的 MCP 工具，输出 `SubAgentOutput`，`status` 为 `compliant` / `issues_found` / `not_applicable`，`issues[].anchors` 含 `xml_anchor_type`、`xml_anchor_id`、`quoted_text`、`comment_text` 等字段。
 3. 若 `status == compliant`：短路，跳过反思直接返回。
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：
-   - 对 `quoted_text` 为空的“缺失类” issue 再检索一次，生成 `missing_text_review_notes` 供 Reflector 判断。
+   - 对 `quoted_text` 为空的“缺失类” issue 以固定 `hybrid` 路由再检索一次，生成 `missing_text_review_notes` 供 Reflector 判断；该补充检索不再调用路由 LLM，也不会新增审查模型调用。
    - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`；一个 finding 需修改不会连带删除同一 criterion 中已经确认的问题。
    - 全部 finding 决策完整且满足 PASS 才结束；达到上限或反思异常时标记 `quality_status=pending_review`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。
 5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。

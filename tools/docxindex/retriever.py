@@ -220,7 +220,7 @@ class DocxIndexRetriever:
                 if step.all_titles:
                     complete_title_matches.extend(current)
             elif step.method == "rule":
-                current = rule_matches(index, step, query)
+                current = rule_matches(index, step)
                 if not current:
                     terms = "、".join(step.terms)
                     deterministic_notices.append(
@@ -650,6 +650,9 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
             title = str(node.get("title") or "").strip()
             if title:
                 header += f"\n检索片段标题：{title}"
+            selection_reason = str(node.get("selection_reason") or "").strip()
+            if selection_reason:
+                header += f"\n检索候选判定理由：{selection_reason}"
             header += f"\nxml_anchor_type: {anchor_type}\nxml_anchor_id: {anchor_id}"
             parts.append(f"{header}\n内容：\n{text}")
     return "\n\n---\n\n".join(parts) if parts else "未找到相关合同内容。"

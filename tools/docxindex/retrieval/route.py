@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree as ET
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict
 
 from tools.docxindex.llm import LLMClient
 from tools.docxindex.llm.cache import JsonlCache, cache_key, text_hash
@@ -18,7 +18,7 @@ from tools.docxindex.llm.schemas import RouteResponse
 
 
 DEFAULT_ROUTE_CONFIG = Path(__file__).resolve().parents[4] / "config.yaml"
-ROUTE_PROMPT_VERSION = "docx_route_v8"
+ROUTE_PROMPT_VERSION = "docx_route_v9"
 ROUTE_TITLE_MAX_DEPTH = 2
 ROUTE_TITLE_ATTACHMENT_MAX_DEPTH = 4
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
@@ -28,8 +28,6 @@ NUMBERED_CRITERION = re.compile(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)(.+)$", re
 class RouteConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    criteria: Path
-    expected_criteria_count: int = Field(default=18, ge=1)
     fallback_enabled: bool = True
     methods: dict[str, str]
 
@@ -38,12 +36,15 @@ class RouteConfig(BaseModel):
         config_path = (path or DEFAULT_ROUTE_CONFIG).resolve()
         raw = load_yaml(config_path)
         data = dict(docxindex_config(raw).get("routing") or {})
-        for legacy_key in ("llm_candidates", "vector_candidates", "vector_threshold", "max_nodes"):
+        for legacy_key in (
+            "criteria",
+            "expected_criteria_count",
+            "llm_candidates",
+            "vector_candidates",
+            "vector_threshold",
+            "max_nodes",
+        ):
             data.pop(legacy_key, None)
-        source = Path(str(data.get("criteria") or ""))
-        if not source.is_absolute():
-            source = (config_path.parent / source).resolve()
-        data["criteria"] = source
         config = cls.model_validate(data)
         if set(config.methods) != {"title", "region", "rule", "scan", "hybrid"}:
             raise ValueError("route methods must be exactly: title, region, rule, scan, hybrid")
@@ -58,11 +59,7 @@ def plan_route(
     cache_dir: Path | None,
     criterion_text: str | None = None,
 ) -> RouteResponse:
-    if criterion_text is None:
-        criteria = load_criteria(config.criteria, config.expected_criteria_count)
-        criterion = _criterion_for_query(query, criteria)
-    else:
-        criterion = criterion_text
+    criterion = criterion_text or query
     titles = _titles(index.get("structure_tree") or [])
     prompt = route_prompt(query, criterion, titles, config.methods)
     cache = JsonlCache(cache_dir / "route.jsonl" if cache_dir else None)
@@ -121,11 +118,6 @@ def _ancestors(root: ET.Element, target: ET.Element) -> list[ET.Element]:
         current = parents[current]
         result.append(current)
     return result
-
-
-def _criterion_for_query(query: str, criteria: dict[int, str]) -> str:
-    match = re.match(r"^\s*(\d{1,2})(?:\s*[.、．]\s*|\s+)", query)
-    return criteria.get(int(match.group(1)), query) if match else query
 
 
 def _titles(

@@ -24,37 +24,28 @@ from tests.criteria_formal_recall.prepare_cases import select_contract_title_gro
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
 from tools.docxindex.llm.schemas import RouteResponse
+from tools.docxindex.llm.prompts import scan_prompt
 from tools.docxindex.retriever import _should_use_fallback
+from tools.docxindex.retrieval.rule import _literal_terms
 from workflow.workflow import _prepare_inline_results
 
 
 class AnchorEvidenceValidationTests(unittest.TestCase):
-    def test_explicit_frontmatter_placeholders_are_added_per_field(self) -> None:
-        context = (
-            "xml_anchor_type: paragraph\nxml_anchor_id: path:frontmatter/p1\n内容：\n"
-            "地址：#地址#\n\n---\n\n"
-            "xml_anchor_type: paragraph\nxml_anchor_id: path:frontmatter/p2\n内容：\n"
-            "联系电话：【未填写】\n\n---\n\n"
-            "xml_anchor_type: paragraph\nxml_anchor_id: path:frontmatter/p3\n内容：\n"
-            "银行账号：________"
-        )
-        output = {"status": "compliant", "issues": []}
-        route = {"steps": [{"method": "region", "regions": ["frontmatter"]}]}
-
-        added = OrchestratorAgent()._ensure_explicit_blank_field_issues(
-            output,
-            context,
-            "检查合同主体基本信息",
-            ["检查基本信息是否填写完整"],
-            route,
+    def test_blank_field_examples_are_semantic_scan_instructions(self) -> None:
+        prompt = scan_prompt(
+            "检查合同所有字段是否填写完整",
+            [{"anchor_id": "p_0001", "text": "乙方支持联络电话：XX，XX"}],
         )
 
-        self.assertEqual(added, 3)
-        self.assertEqual(output["status"], "issues_found")
-        self.assertEqual(
-            [issue["anchors"][0]["xml_anchor_id"] for issue in output["issues"]],
-            ["path:frontmatter/p1", "path:frontmatter/p2", "path:frontmatter/p3"],
-        )
+        self.assertIn("结合字段名称、相邻文字、表格关系和合同语境判断", prompt)
+        self.assertIn("#乙方合同号#【     】", prompt)
+        self.assertIn("违约金【5%】", prompt)
+        self.assertIn("条件性说明不能证明条件已经发生", prompt)
+        self.assertIn("列举项不是封闭清单", prompt)
+        self.assertIn("不设 Top-K", prompt)
+
+    def test_rule_terms_are_only_planner_supplied_literals(self) -> None:
+        self.assertCountEqual(_literal_terms(["联系电话", " 合同编号 "]), ["联系电话", "合同编号"])
 
     def test_reflector_requires_unique_per_finding_decisions(self) -> None:
         value = {
@@ -68,6 +59,53 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
         value["finding_decisions"].append(value["finding_decisions"][0])
         with self.assertRaises(ValueError):
             ReflectorOutput.model_validate(value)
+
+    def test_missing_fields_require_one_issue_and_one_edit_each(self) -> None:
+        issue = {
+            "issue_id": "C3.1",
+            "risk_level": "low",
+            "issue_comment": "两个字段未填写。",
+            "anchors": [
+                {
+                    "role": "edit",
+                    "defect_type": "missing_value",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p1",
+                    "quoted_text": "合同编号：待填写",
+                    "comment_text": "请填写合同编号。",
+                },
+                {
+                    "role": "edit",
+                    "defect_type": "missing_value",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p2",
+                    "quoted_text": "联系电话：待填写",
+                    "comment_text": "请填写联系电话。",
+                },
+            ],
+            "reasoning": "字段没有实际内容。",
+            "criterion": "信息应填写完整。",
+            "check_point": "信息应填写完整。",
+        }
+
+        with self.assertRaisesRegex(ValueError, "one separate issue per missing field"):
+            SubAgentOutput.model_validate({"status": "issues_found", "issues": [issue]})
+
+    def test_subagent_issue_ids_must_be_unique(self) -> None:
+        base = {
+            "issue_id": "C3.1",
+            "risk_level": "low",
+            "issue_comment": "字段未填写。",
+            "anchors": [],
+            "reasoning": "缺少内容。",
+            "criterion": "信息应填写完整。",
+            "check_point": "信息应填写完整。",
+        }
+
+        with self.assertRaisesRegex(ValueError, "unique issue_id"):
+            SubAgentOutput.model_validate(
+                {"status": "issues_found", "issues": [base, dict(base)]}
+            )
 
     def test_wrong_model_anchor_id_is_repaired_from_unique_retrieval_evidence(self) -> None:
         context = (
@@ -107,6 +145,55 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
 
         self.assertEqual(stats, {"valid": 0, "repaired": 0, "dropped": 1})
         self.assertEqual(output["issues"][0]["anchors"], [])
+
+
+class MissingTextReviewTests(unittest.IsolatedAsyncioTestCase):
+    async def test_supplementary_search_uses_fixed_hybrid_route(self) -> None:
+        class FakeMcpClient:
+            def __init__(self) -> None:
+                self.payload = None
+
+            async def call_tool(self, name, payload):
+                self.payload = payload
+                return "未找到相关内容。"
+
+        client = FakeMcpClient()
+        orchestrator = OrchestratorAgent(
+            mcp_client=client,
+            api_events_path="events.jsonl",
+        )
+
+        await orchestrator._build_missing_text_review_notes(
+            {
+                "issues": [
+                    {
+                        "issue_id": "C5.1",
+                        "check_point": "应约定保密条款",
+                        "criterion": "合同条款应完整",
+                        "anchors": [],
+                    }
+                ]
+            },
+            "C5",
+        )
+
+        self.assertEqual(client.payload["criterion_id"], "C5")
+        self.assertEqual(
+            client.payload["route_override"],
+            {
+                "steps": [
+                    {
+                        "method": "hybrid",
+                        "terms": [],
+                        "regions": [],
+                        "all_titles": False,
+                        "anchor_terms": [],
+                        "coverage": "relevant",
+                    }
+                ],
+                "fallback": False,
+            },
+        )
 
 
 class DocxAnchorRegressionTests(unittest.TestCase):
@@ -290,6 +377,11 @@ class PromptAuthorityTests(unittest.TestCase):
         self.assertIn("不得使用“断号”", prompts["SUMMARIZER_SYSTEM_PROMPT"])
         self.assertIn("付款计划数量必须按", prompts["SUB_AGENT_BASE_PROMPT"])
         self.assertIn("付款节点计数", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("检查合同中所有未填写内容", prompts["PLANNER_STRATEGY_PROMPT"])
+        self.assertIn("不得按固定字符形态机械判断", prompts["SUB_AGENT_BASE_PROMPT"])
+        self.assertIn("列举项不是封闭清单", prompts["SUB_AGENT_BASE_PROMPT"])
+        self.assertIn("不得按固定正则形态判断", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("一个 missing_value issue 只能对应一个字段", prompts["REFLECTOR_SYSTEM_PROMPT"])
 
     def test_runtime_prompt_makes_deterministic_absence_authoritative(self) -> None:
         source = inspect.getsource(OrchestratorAgent.execute_single_criterion)
@@ -403,6 +495,27 @@ class WorkflowPresentationTests(unittest.TestCase):
         )
 
         confirmed = ledger.confirmed_issues(opinion)
+
+        self.assertEqual(len(confirmed), 1)
+        self.assertEqual(confirmed[0]["finding_id"], finding_id)
+
+    def test_confirmed_finding_survives_later_model_omission(self) -> None:
+        opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
+        ledger = _FindingLedger(opinion)
+        finding_id = ledger.current(opinion)[0]["finding_id"]
+        ledger.review(
+            opinion,
+            {
+                "status": "PASS",
+                "feedback": "",
+                "finding_decisions": [
+                    {"finding_id": finding_id, "decision": "confirm", "reason": "事实成立"}
+                ],
+            },
+            1,
+        )
+
+        confirmed = ledger.confirmed_issues({"status": "compliant", "issues": []})
 
         self.assertEqual(len(confirmed), 1)
         self.assertEqual(confirmed[0]["finding_id"], finding_id)

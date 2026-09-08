@@ -51,7 +51,7 @@ class RoutePromptContractTests(unittest.TestCase):
 
     def test_plan_route_uses_contract_prompt_on_first_call(self) -> None:
         client = _RecordingClient()
-        config = RouteConfig(criteria=Path("unused.docx"), methods=METHODS)
+        config = RouteConfig(methods=METHODS)
 
         result = plan_route(
             {"structure_tree": []},
@@ -65,7 +65,8 @@ class RoutePromptContractTests(unittest.TestCase):
         self.assertEqual(result.steps[0].method, "rule")
         self.assertEqual(len(client.prompts), 1)
         self.assertIn(ROUTE_EXPECTED_JSON, client.prompts[0])
-        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v8")
+        self.assertEqual(ROUTE_PROMPT_VERSION, "docx_route_v9")
+        self.assertIn("检查全合同所有未填写字段", client.prompts[0])
 
     def test_schema_rejects_removed_join_route_and_slots_field(self) -> None:
         with self.assertRaises(ValidationError):
@@ -196,7 +197,7 @@ class RoutePromptContractTests(unittest.TestCase):
 
     def test_failed_validation_is_not_written_to_route_cache(self) -> None:
         client = _RejectingClient()
-        config = RouteConfig(criteria=Path("unused.docx"), methods=METHODS)
+        config = RouteConfig(methods=METHODS)
 
         with TemporaryDirectory() as temp_dir:
             cache_dir = Path(temp_dir)

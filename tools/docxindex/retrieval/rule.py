@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from tools.docxindex.llm.schemas import RouteStep
@@ -8,8 +7,9 @@ from tools.docxindex.llm.schemas import RouteStep
 from .title import _candidate
 
 
-def rule_matches(index: dict[str, Any], step: RouteStep, query: str = "") -> list[dict[str, Any]]:
-    terms = _literal_terms(query, step.terms)
+def rule_matches(index: dict[str, Any], step: RouteStep) -> list[dict[str, Any]]:
+    """Return anchors containing only the literal terms supplied by the route plan."""
+    terms = _literal_terms(step.terms)
     by_id = {node.get("node_id"): node for node in index.get("nodes") or []}
     scored: list[tuple[int, int, dict[str, Any]]] = []
     anchors = sorted(
@@ -43,22 +43,8 @@ def rule_matches(index: dict[str, Any], step: RouteStep, query: str = "") -> lis
     return [candidate for _, _, candidate in scored]
 
 
-def _literal_terms(query: str, planned: list[str]) -> list[str]:
+def _literal_terms(planned: list[str]) -> list[str]:
     terms = {term.strip() for term in planned if 2 <= len(term.strip()) <= 30}
-    terms.update(term.strip() for term in re.findall(r"[“\"]([^”\"]{2,30})[”\"]", query))
-    if "：" in query or ":" in query:
-        tail = re.split(r"[：:]", query, maxsplit=1)[1]
-        for term in re.split(r"[、，,；;。]", tail):
-            term = term.strip(" \t\r\n。；;：:")
-            if 2 <= len(term) <= 20 and not any(mark in term for mark in ("是否", "如果", "需要", "检查")):
-                terms.add(term)
-    role_roots = {
-        term[:-2]
-        for term in terms
-        if term.endswith("单位") and len(term) >= 4
-    }
-    role_roots.update(term[:-1] for term in terms if term.endswith("人") and len(term) >= 3)
-    terms.update(root for root in role_roots if len(root) >= 2)
     return sorted(terms, key=lambda item: (-len(item), item))
 
 

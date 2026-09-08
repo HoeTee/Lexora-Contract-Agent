@@ -10,14 +10,14 @@ from tools.docxindex.llm.schemas import ScanResponse
 
 from .title import _candidate
 
-SCAN_PROMPT_VERSION = "docx_scan_v1"
+SCAN_PROMPT_VERSION = "docx_scan_v3"
 
 
 def scan_matches(
     index: dict[str, Any],
     query: str,
     client: LLMClient,
-    batch_tokens: int = 12000,
+    batch_tokens: int = 6000,
     concurrency: int = 10,
 ) -> list[dict[str, Any]]:
     """Inspect every non-empty anchor and return only LLM-confirmed findings."""

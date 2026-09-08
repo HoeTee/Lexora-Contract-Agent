@@ -140,7 +140,7 @@ class RetrievalSchemaTests(unittest.TestCase):
     def test_route_config_no_longer_owns_retrieval_limits(self) -> None:
         self.assertEqual(
             set(RouteConfig.model_fields),
-            {"criteria", "expected_criteria_count", "fallback_enabled", "methods"},
+            {"fallback_enabled", "methods"},
         )
 
     def test_storage_view_only_serializes_nodes_child_ids(self) -> None:

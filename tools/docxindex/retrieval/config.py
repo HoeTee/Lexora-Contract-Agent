@@ -45,7 +45,7 @@ class RetrievalConfig(BaseModel):
 
     input_tokens: int = Field(default=20000, ge=500)
     output_tokens: int = Field(default=12000, ge=500)
-    scan_batch_tokens: int = Field(default=12000, ge=500)
+    scan_batch_tokens: int = Field(default=6000, ge=500)
     vector: VectorRetrievalConfig = Field(default_factory=VectorRetrievalConfig)
     semantic: SemanticRetrievalConfig = Field(default_factory=SemanticRetrievalConfig)
     rerank: RerankConfig = Field(default_factory=RerankConfig)

@@ -134,8 +134,12 @@ class SubAgentIssue(StrictOutputModel):
 
     @model_validator(mode="after")
     def require_edit_for_anchored_issue(self):
-        if self.anchors and not any(a.role == "edit" for a in self.anchors):
+        edits = [anchor for anchor in self.anchors if anchor.role == "edit"]
+        if self.anchors and not edits:
             raise ValueError("anchored issue requires an edit location with a specific comment; evidence alone is not an annotation. Use anchors=[] only for a genuine summary-only issue")
+        missing_edits = [anchor for anchor in edits if anchor.defect_type == "missing_value"]
+        if missing_edits and len(edits) != 1:
+            raise ValueError("a missing-value issue must contain exactly one edit anchor; return one separate issue per missing field")
         return self
 
     @field_validator("issue_id", "issue_comment", "reasoning", "criterion", "check_point") # 字段验证
@@ -167,6 +171,23 @@ class SubAgentOutput(StrictOutputModel):
                 raise ValueError("status is not_applicable, so issues must be empty")
             if not self.applicability_reason:
                 raise ValueError("status is not_applicable, so applicability_reason must not be blank")
+        issue_ids = [issue.issue_id for issue in self.issues]
+        if len(issue_ids) != len(set(issue_ids)):
+            raise ValueError("each issue must have a unique issue_id")
+        edit_keys: set[tuple[str, str, str, str]] = set()
+        for issue in self.issues:
+            for anchor in issue.anchors:
+                if anchor.role != "edit":
+                    continue
+                key = (
+                    anchor.xml_anchor_type,
+                    anchor.xml_anchor_id,
+                    "".join(anchor.quoted_text.split()),
+                    anchor.defect_type,
+                )
+                if key in edit_keys:
+                    raise ValueError("duplicate edit anchor and defect type across issues")
+                edit_keys.add(key)
         return self
 
 

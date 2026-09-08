@@ -35,55 +35,12 @@ _PLACEMENT_DIRECTIVES = {
     "body_end": "本标准发现的问题使用 anchors=[] 输出；系统会将批注挂到正文结尾处。",
 }
 
-_FRONTMATTER_SCOPE_TERMS = (
-    "信息是否齐全",
-    "信息完整",
-    "基本信息",
-    "基本情况",
-    "主体信息",
-    "联系方式",
-    "联系信息",
-    "银行账户",
-    "账户信息",
-)
-_FIELD_LABELS = (
-    "统一社会信用代码",
-    "法定代表人",
-    "身份证号码",
-    "联系电话",
-    "联系地址",
-    "邮箱地址",
-    "开户银行",
-    "银行账号",
-    "账户名称",
-    "项目负责人",
-    "联系方式",
-    "负责人",
-    "联系人",
-    "邮政编码",
-    "邮编",
-    "电话",
-    "传真",
-    "邮箱",
-    "地址",
-    "账户",
-    "账号",
-    "甲方",
-    "乙方",
-    "姓名",
-)
-_FIELD_LABEL_PATTERN = "|".join(re.escape(label) for label in _FIELD_LABELS)
-_EXPLICIT_EMPTY_FIELD_PATTERN = re.compile(
-    rf"(?P<label>{_FIELD_LABEL_PATTERN})\s*[：:]\s*"
-    r"(?P<marker>\#(?:[^#\r\n]+)\#|\[合同中心-[^\]\r\n]+\]|【\s*(?:未填写)?\s*】|(?:X|Ｘ){2,}|_{2,})"
-)
-
-
 def _finding_entries(opinion: dict) -> dict[str, dict]:
     """Index review findings by their edit location and defect type."""
     entries: dict[str, dict] = {}
     for issue in opinion.get("issues", []):
         edits = [anchor for anchor in issue.get("anchors", []) if anchor.get("role", "edit") == "edit"]
+        evidence = [anchor for anchor in issue.get("anchors", []) if anchor.get("role") == "evidence"]
         for anchor in edits or [None]:
             identity = (
                 [
@@ -98,7 +55,7 @@ def _finding_entries(opinion: dict) -> dict[str, dict]:
             key = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:20]
             local_issue = deepcopy(issue)
             if anchor:
-                local_issue["anchors"] = [deepcopy(anchor)]
+                local_issue["anchors"] = [deepcopy(anchor), *deepcopy(evidence)]
             entries[key] = {"issue": local_issue, "anchor": deepcopy(anchor)}
     return entries
 
@@ -109,7 +66,6 @@ class _FindingLedger:
     def __init__(self, opinion: dict):
         self.observed: dict[str, dict] = {}
         self.decisions: dict[str, dict] = {}
-        self.deterministic_ids: set[str] = set()
         self.history: list[dict] = []
         self.observe(opinion)
 
@@ -120,14 +76,6 @@ class _FindingLedger:
             else:
                 entry["finding_id"] = self.observed[key]["finding_id"]
             self.observed[key] = entry
-            if str(entry["issue"].get("issue_id", "")).startswith("det_missing_"):
-                finding_id = entry["finding_id"]
-                self.deterministic_ids.add(finding_id)
-                self.decisions[finding_id] = {
-                    "finding_id": finding_id,
-                    "decision": "confirm",
-                    "reason": "程序已确认检索原文包含明确的空值或模板占位符",
-                }
 
     def current(self, opinion: dict) -> list[dict]:
         return [
@@ -160,13 +108,7 @@ class _FindingLedger:
         unknown_ids = sorted(set(decisions) - required_ids)
         missing_ids = sorted(required_ids - set(decisions))
         if not unknown_ids and not missing_ids:
-            self.decisions.update(
-                {
-                    finding_id: decision
-                    for finding_id, decision in decisions.items()
-                    if finding_id not in self.deterministic_ids
-                }
-            )
+            self.decisions.update(decisions)
         self.history.append(
             {
                 "round": round_number,
@@ -197,9 +139,11 @@ class _FindingLedger:
 
     def confirmed_issues(self, opinion: dict) -> list[dict]:
         confirmed: list[dict] = []
-        for key, entry in _finding_entries(opinion).items():
-            finding_id = self.observed[key]["finding_id"]
+        current_entries = _finding_entries(opinion)
+        for key, observed_entry in self.observed.items():
+            finding_id = observed_entry["finding_id"]
             if self.decisions.get(finding_id, {}).get("decision") == "confirm":
+                entry = current_entries.get(key, observed_entry)
                 issue = deepcopy(entry["issue"])
                 issue["finding_id"] = finding_id
                 confirmed.append(issue)
@@ -416,88 +360,6 @@ class OrchestratorAgent:
         ]
 
     @staticmethod
-    def _requires_frontmatter_field_coverage(
-        criterion_text: str,
-        check_points: list[str],
-        route_override: dict | None,
-    ) -> bool:
-        """Limit deterministic blank checks to frontmatter completeness criteria."""
-        steps = (route_override or {}).get("steps") or []
-        uses_frontmatter = any(
-            step.get("method") == "region" and step.get("regions") == ["frontmatter"]
-            for step in steps
-            if isinstance(step, dict)
-        )
-        scope = " ".join([criterion_text, *check_points])
-        return uses_frontmatter and any(term in scope for term in _FRONTMATTER_SCOPE_TERMS)
-
-    def _ensure_explicit_blank_field_issues(
-        self,
-        opinion: dict,
-        context: str,
-        criterion_text: str,
-        check_points: list[str],
-        route_override: dict | None,
-    ) -> int:
-        """Add one deterministic issue for each explicit, uncovered blank field."""
-        if not self._requires_frontmatter_field_coverage(criterion_text, check_points, route_override):
-            return 0
-
-        covered = {
-            (anchor.get("xml_anchor_type", ""), anchor.get("xml_anchor_id", ""), self._normalize_anchor_text(anchor.get("quoted_text", "")))
-            for issue in opinion.get("issues", [])
-            for anchor in issue.get("anchors", [])
-            if anchor.get("role", "edit") == "edit"
-        }
-        added = 0
-        for evidence in self._retrieval_anchor_evidence(context):
-            for match in _EXPLICIT_EMPTY_FIELD_PATTERN.finditer(evidence["content"]):
-                quote = match.group(0).strip()
-                key = (
-                    evidence["xml_anchor_type"],
-                    evidence["xml_anchor_id"],
-                    self._normalize_anchor_text(quote),
-                )
-                if any(
-                    existing[:2] == key[:2]
-                    and (key[2] in existing[2] or existing[2] in key[2])
-                    for existing in covered
-                ):
-                    continue
-                label = match.group("label")
-                marker = match.group("marker")
-                field_name = f"{label}名称" if label in {"甲方", "乙方"} and "名称" in marker else label
-                digest = hashlib.sha256(
-                    f"{evidence['xml_anchor_type']}|{evidence['xml_anchor_id']}|{quote}".encode("utf-8")
-                ).hexdigest()[:12]
-                comment = f"此处为未填写的模板字段，请填写实际{field_name}。"
-                opinion.setdefault("issues", []).append(
-                    {
-                        "issue_id": f"det_missing_{digest}",
-                        "risk_level": "low",
-                        "issue_comment": comment,
-                        "anchors": [
-                            {
-                                "role": "edit",
-                                "defect_type": "missing_value",
-                                "xml_anchor_type": evidence["xml_anchor_type"],
-                                "xml_anchor_id": evidence["xml_anchor_id"],
-                                "quoted_text": quote,
-                                "comment_text": comment,
-                            }
-                        ],
-                        "reasoning": f"检索原文中的{field_name}仍为明确占位符或空值。",
-                        "criterion": criterion_text,
-                        "check_point": check_points[0] if check_points else criterion_text,
-                    }
-                )
-                covered.add(key)
-                added += 1
-        if added:
-            opinion["status"] = "issues_found"
-        return added
-
-    @staticmethod
     def _normalized_span(text: str, quote: str) -> str | None:
         """Return the exact source substring for a normalized in-source match."""
         normalized_quote = OrchestratorAgent._normalize_anchor_text(quote)
@@ -580,7 +442,11 @@ class OrchestratorAgent:
             issue["anchors"] = repaired_anchors
         return stats
 
-    async def _build_missing_text_review_notes(self, parsed_opinion: dict) -> str:
+    async def _build_missing_text_review_notes(
+        self,
+        parsed_opinion: dict,
+        criterion_id: str,
+    ) -> str:
         """Search again for issues that claim a missing contract provision."""
         notes = []
         for issue in parsed_opinion.get("issues", []):
@@ -599,6 +465,20 @@ class OrchestratorAgent:
                 {
                     "query": search_query,
                     "api_events_path": self.api_events_path,
+                    "criterion_id": criterion_id,
+                    "route_override": {
+                        "steps": [
+                            {
+                                "method": "hybrid",
+                                "terms": [],
+                                "regions": [],
+                                "all_titles": False,
+                                "anchor_terms": [],
+                                "coverage": "relevant",
+                            }
+                        ],
+                        "fallback": False,
+                    },
                 },
             )
             if isinstance(search_result, str) and search_result.startswith("Error"):
@@ -731,6 +611,12 @@ class OrchestratorAgent:
             "必须输出 issues_found，不得输出 compliant。\n"
             "- 若审查标准要求在触发后‘直接写明’或‘如无则写入’指定提示，且检索结果证明触发条件成立，"
             "必须按该标准输出 issue，不得再以风险较低、已有相关实体条款或一般完善建议为由跳过。\n\n"
+            "- 若当前标准只要求比较两处内容是否一致，任一侧为空白、模板变量或未填写时，不得在该一致性标准下输出 missing_value；"
+            "只有两侧均为实际有效值且内容不一致时才能报告 inconsistency。\n\n"
+            "- 输出前必须逐条检查字段长度：issue_comment 不得超过600个字符，anchor.comment_text 不得超过300个字符；"
+            "需要说明多个事实时应保留核心缺陷和修改要求，不得用超长背景复述合同。\n\n"
+            "- 检索结果若含‘检索候选判定理由’，表示 scan 已逐项发现该原文可能触发当前标准；"
+            "必须逐条作出实质判断。原文确为未填写时必须分别输出 issue，只有能从该原文看出已实际填写或不属于标准范围时才可排除。\n\n"
             f"以下是合同原文中与此标准相关的内容：\n\n{context}\n\n"
         )
         if review_instruction:
@@ -748,15 +634,7 @@ class OrchestratorAgent:
             SubAgentOutput,
             SUB_AGENT_EXPECTED_JSON,
         )
-        deterministic_fields = self._ensure_explicit_blank_field_issues(
-            parsed_opinion,
-            context,
-            criterion_text,
-            check_points,
-            route_override,
-        )
         anchor_validation = self._validate_and_repair_anchors(parsed_opinion, context)
-        anchor_validation["deterministic_blank_fields"] = deterministic_fields
 
         if self.logger:
             self.logger.log(
@@ -793,7 +671,7 @@ class OrchestratorAgent:
         quality_status = "pending_review"
         supplementary_evidence: list[str] = []
         for round_num in range(MAX_REFLECTION_ROUNDS):
-            missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion)
+            missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion, cid)
             if missing_text_review_notes.startswith("[") and missing_text_review_notes not in supplementary_evidence:
                 supplementary_evidence.append(missing_text_review_notes)
             reflector_input = self._build_reflector_input(
@@ -840,16 +718,9 @@ class OrchestratorAgent:
                     SubAgentOutput,
                     SUB_AGENT_EXPECTED_JSON,
                 )
-                self._ensure_explicit_blank_field_issues(
-                    parsed_opinion,
-                    context,
-                    criterion_text,
-                    check_points,
-                    route_override,
-                )
                 round_validation = self._validate_and_repair_anchors(parsed_opinion, context)
                 for key, value in round_validation.items():
-                    anchor_validation[key] += value
+                    anchor_validation[key] = anchor_validation.get(key, 0) + value
                 ledger.observe(parsed_opinion)
         else:
             print(f"[Orchestrator] {cid}: Max {MAX_REFLECTION_ROUNDS} rounds reached")
@@ -862,11 +733,7 @@ class OrchestratorAgent:
         }
         final_status = status_map[parsed_opinion["status"]]
 
-        confirmed_issues = (
-            parsed_opinion["issues"]
-            if quality_status == "passed"
-            else ledger.confirmed_issues(parsed_opinion)
-        )
+        confirmed_issues = ledger.confirmed_issues(parsed_opinion)
         unresolved_issues = ledger.unresolved_issues(parsed_opinion)
 
         return {

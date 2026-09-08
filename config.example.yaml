@@ -76,7 +76,7 @@ retrieval:
   docxindex:
     input_tokens: 20000
     output_tokens: 12000
-    scan_batch_tokens: 12000
+    scan_batch_tokens: 6000
     vector:
       enabled: true
       score_threshold: 0.45
@@ -119,13 +119,11 @@ retrieval:
         batch_max_nodes: 10
         batch_max_tokens: 20000
     routing:
-      criteria: "resources/criteria/criteria-formal.docx"
-      expected_criteria_count: 18
       fallback_enabled: true
       methods:
         title: "检查目录、标题、章节名称、必备标题和标题顺序。"
         region: "限定合同首部、正文、尾部或附件后，先执行区域内结构树语义检索；结果不足时才使用向量补充，随后重排。"
-        rule: "执行全文精确关键词、正则、金额和存在性定位。"
+        rule: "仅按路由明确给出的原文短词，执行全文精确关键词、金额和存在性定位。"
         scan: "按 token 预算把全部 anchor 分批交给 LLM 逐项检查。"
         hybrid: "无法限定标题、区域或精确关键词时，先执行全局结构树语义检索；结果不足时才使用向量补充，随后重排。"
     concurrency:

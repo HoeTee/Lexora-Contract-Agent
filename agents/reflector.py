@@ -42,6 +42,7 @@ class ReflectorAgent(Agent):
             "字段职责：subagent_output 是唯一完整审查结果（含 edit 和 evidence）；current_findings 只是修改位置索引，不代表完整证据。\n"
             "finding_decisions 只能由 Reflector 返回，不要要求 SubAgent 添加该字段。finding_id 必须逐字复制输入的 F001 等编号，不是 issue_id。\n"
             "必须逐条判断所有 current_findings 和 missing_previous_findings：事实成立用 confirm，需要改写用 revise，事实不成立用 remove，并写明理由。\n"
+            "一致性标准只比较两侧均已填写的有效值；任一侧为空白、模板变量或未填写时，必须移除该一致性标准下的 missing_value，不能把它确认为一致性问题。\n"
             "compliant + issues=[] 是合法结构，不得要求其提供 schema 未定义的顶层 reasoning 或为了引用证据而新增 issue。\n"
             "请审核以下审查结果的质量：\n\n"
             f"SubAgent 输出：\n{agent_output}\n\n"
