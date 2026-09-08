@@ -16,6 +16,7 @@ from tools.docxindex.llm.schemas import RerankResponse
 from tools.docxindex.indexing import estimate_tokens
 from tests.docxindex_ablation.run import ROOT, read_json, write_json, write_csv, replay, anchor_texts
 from tests.docxindex_ablation.variants import ORIGINAL_MERGE, ORIGINAL_RERANK, RERANK_MODULE
+from tests.docxindex_ablation.quality import require_baseline_quality
 
 
 def interventions(recorded, limit):
@@ -79,6 +80,7 @@ def run_pair(task, client, output, budget, repeats):
 
 
 def live(args):
+    require_baseline_quality(args.output)
     engine = retrieval.DocxIndexRetriever(ROOT / "config.yaml")
     tasks = []
     for directory in sorted(args.output.glob("D[0-9][0-9]")):

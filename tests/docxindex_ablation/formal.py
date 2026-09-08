@@ -14,6 +14,7 @@ import httpx
 
 from tests.criteria_formal_recall.run_cases import keep_system_awake, load_settings, run_one
 from tests.docxindex_ablation.run import ROOT, SUITE, read_json, sha, write_json
+from tests.docxindex_ablation.quality import require_baseline_quality
 
 
 def verify_intervention(events_path, variant):
@@ -61,6 +62,11 @@ def import_legacy_baselines(output):
 
 
 async def formal(args):
+    if "safe" in args.variants:
+        require_baseline_quality(args.output)
+        raise ValueError(
+            "Legacy combined treatment is disabled. Baseline adjudication must be followed by single-factor validation first."
+        )
     manifest = read_json(args.output / "manifest.json")
     target = args.output / "formal_verified"
     target.mkdir(parents=True, exist_ok=True)

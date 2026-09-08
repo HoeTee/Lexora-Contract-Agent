@@ -6,6 +6,37 @@
 `tests/criteria_formal_recall/expected_cases_10.csv` 的 180 条期望。
 启动时校验合同、期望表、审查标准和配置的 SHA-256。
 
+## 当前执行顺序：先核验效果，不先比较速度
+
+旧组合 `safe` 尚未证明质量不下降，正式提交入口现已停用；下面的组合配置说明仅为历史记录。
+不得将 180 次原文/锚点等价转换为 180 条问题全部正确召回。
+
+1. 核验原标准、180 条期望的有效性、基线实际可见批注和总结。
+2. 定义每条用例的验收条件；复合问题必须写明全部要求，部分召回单列，不算完整命中。
+3. 基线全部核验后，才进入单操作消融。基线本身可以有漏检、误判，不能为了“通过”把它标成满分。
+4. 默认不接受已正确召回用例丢失、新增事实误判或错误落点；争议、失败与未核验不视为通过。
+5. 质量守住后才比较时间/调用成本，最后再验证通过的单项组合。
+
+### 基线质量核验入口（不调用模型）
+
+```powershell
+python -m tests.docxindex_ablation.quality prepare --output $experiment
+python -m tests.docxindex_ablation.quality check --output $experiment
+```
+
+`prepare` 冻结原文、标准、期望、基线任务及最终 DOCX 的版本，生成 `baseline_quality/`：
+
+- `snapshot.json`：直接读取 DOCX XML 的全文位置和真实可见批注，不使用检索结果冒充完整原文。
+- `review.json`：逐条评判记录；初始为 pending，必须填写核验者、标准依据、验收条件、命中/部分命中/未命中及实际批注引用。
+- `cases.csv`、`comments.csv`：供审阅的用例与批注明细，含原文和批注文本；由 review.json 导出，不从 CSV 自动导入判断。
+- `conflicts.csv`：标准与用例口径冲突的证据。第 3 条要求“预留”字段，而原测试把“未填写”视为错误，10 份合同均有此冲突。
+- `gate.json`：未核验、争议、缺行、虚构引用、错误落点、版本变化均不放行；不自动删除争议用例缩小分母。
+
+未通过时命令退出码为 2，召回率/准确率为 null，不伪造分数。
+程序只检查版本、引用、覆盖和评判记录完整性，不能证明人工或 AI 判断本身正确。
+`baseline_ready=true` 只表示基线已完整核验，不代表消融可部署；单项的质量对照与组合验证仍是后续步骤。
+标准或测试合同的口径修订须先确认；本轮未改它们，后续单项正式复测暂不启动。
+
 ## 实验范围
 
 | 编号 | 具体代码操作 | 验证方式 |
@@ -58,17 +89,16 @@ python -m tests.docxindex_ablation.report --output $experiment
 ## 正式主程序对照
 
 测试启动器运行原项目 `app.app` 和 `mcp_service.server.server`，不是重写审查工作流。
-在两个终端分别启动：
+当前只启动基线采集。已有完整基线可直接做质量核验，不必重复调用模型：
 
 ```powershell
 python -m tests.docxindex_ablation.service --api --variant baseline --port 5101
-python -m tests.docxindex_ablation.service --api --variant safe --port 5102
 ```
 
 随后在测试终端设置已有、已注册的 `API_KEY` 环境变量（不要把密钥提交进脚本），再运行：
 
 ```powershell
-python -m tests.docxindex_ablation.formal --output $experiment
+python -m tests.docxindex_ablation.formal --output $experiment --variants baseline
 python -m tests.docxindex_ablation.report --output $experiment
 ```
 
@@ -92,7 +122,7 @@ MCP SDK 不会默认继承全部环境变量。早期 `formal/safe/` 中的任�
 新入口使用 `baseline_server` / `safe_server` 显式模块选择，不依赖环境变量传递。
 每次实际建索引会在本任务 `events.log` 写入 `docxindex_ablation variant=... operation=installed`；
 缺少、错误或混合标签都不能通过实验有效性校验。单候选跳过另记录 `skip_single_rerank`。
-可用 `--variants safe --contracts D01` 先验证单份，再扩大范围。
+旧 `--variants safe` 组合入口已停用，不能跳过基线质量核验和单项验证。
 
 旧 `judge` 输出包含无效候选标签，而且事实抽检失败，仅保留为失败的自动评判尝试；
 新报告不导入这些召回率/准确率数字，质量结论须审阅实际 DOCX 后确认。
@@ -112,6 +142,7 @@ MCP SDK 不会默认继承全部环境变量。早期 `formal/safe/` 中的任�
 
 ```powershell
 python -m unittest tests.docxindex_ablation.test_experiments -v
+python -m unittest tests.docxindex_ablation.test_quality -v
 python -m unittest tests.criteria_formal_recall.test_semantic_supplement tests.criteria_formal_recall.test_scoped_retrieval -v
 python -m ruff check tests/docxindex_ablation
 python -m compileall -q tests/docxindex_ablation

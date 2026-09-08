@@ -108,6 +108,8 @@ def main():
     )
     parser.add_argument("--port", type=int, default=5101)
     args = parser.parse_args()
+    if args.variant == "safe":
+        parser.error("Legacy combined treatment is disabled pending baseline quality and single-factor validation")
     if args.api:
         configure(args.variant)
         application = importlib.import_module("app").app
