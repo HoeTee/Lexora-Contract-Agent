@@ -447,6 +447,17 @@ class WorkflowPresentationTests(unittest.TestCase):
         self.assertEqual(inline, [])
         self.assertEqual(notices, ["注意：当前检查点固定文字"])
 
+    def test_anchored_missing_fields_override_criterion_summary_placement(self) -> None:
+        result = self.results[0]
+        result["placement"] = {"target": "summary"}
+        result["review_instruction"] = "注意：请补充合同基本信息"
+        result["issues"][0]["anchors"][0]["defect_type"] = "missing_value"
+
+        inline, notices = _prepare_inline_results([result])
+
+        self.assertEqual(len(inline), 1)
+        self.assertEqual(notices, [])
+
 
 class SummarizerPromptBudgetTests(unittest.TestCase):
     def test_summary_output_replaces_internal_numbering_jargon(self) -> None:

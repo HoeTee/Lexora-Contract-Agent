@@ -48,13 +48,25 @@ def _prepare_inline_results(results: list[dict]) -> tuple[list[dict], list[str]]
         placement = result.get("placement") or {}
         placement_target = placement.get("target", "inline")
         review_instruction = str(result.get("review_instruction") or "").strip()
-        if placement_target == "summary":
+        has_anchored_missing_value = any(
+            anchor.get("role", "edit") == "edit"
+            and anchor.get("defect_type") == "missing_value"
+            for issue in result.get("issues", [])
+            for anchor in issue.get("anchors") or []
+        )
+        if placement_target == "summary" and not has_anchored_missing_value:
             if review_instruction and review_instruction not in opening_notices:
                 opening_notices.append(review_instruction)
             continue
 
         rendered_issues: list[dict] = []
         for issue in result.get("issues", []):
+            if placement_target == "summary" and not any(
+                anchor.get("role", "edit") == "edit"
+                and anchor.get("defect_type") == "missing_value"
+                for anchor in issue.get("anchors") or []
+            ):
+                continue
             edit_anchors: list[dict] = []
             for anchor in issue.get("anchors") or []:
                 if anchor.get("role", "edit") != "edit":
