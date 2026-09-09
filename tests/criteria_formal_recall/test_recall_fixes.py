@@ -382,6 +382,26 @@ class DocxAnchorRegressionTests(unittest.TestCase):
             self.assertIsNotNone(anchor)
             self.assertEqual(anchor.match.matched_text, "甲方应在十\u00a0个工作日内付款")
 
+    def test_table_row_quote_anchors_complete_contained_cell_paragraph(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            contract_path = Path(temp_dir) / "contract.docx"
+            document = Document()
+            table = document.add_table(rows=1, cols=2)
+            table.cell(0, 0).text = "备 注"
+            table.cell(0, 1).text = "设备运到招标单位指定地点。"
+            document.save(contract_path)
+
+            anchor = DocxReportGenerator._find_text_range_anchor_in_xml_anchor(
+                Document(contract_path),
+                "table",
+                "path:body/tbl1",
+                "备 注\t设备运到招标单位指定地点。",
+            )
+
+            self.assertIsNotNone(anchor)
+            self.assertEqual(anchor.path, "body/tbl1/r1c2/p2")
+            self.assertEqual(anchor.match.matched_text, "设备运到招标单位指定地点。")
+
     def test_anchorless_issue_is_written_and_diagnosed(self) -> None:
         with TemporaryDirectory() as temp_dir:
             contract_path = Path(temp_dir) / "contract.docx"

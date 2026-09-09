@@ -563,7 +563,27 @@ class DocxReportGenerator:
             anchor_type,
             anchor_id,
         )
-        return DocxReportGenerator._find_exact_text_range_anchor(views, reference_text)
+        exact = DocxReportGenerator._find_exact_text_range_anchor(views, reference_text)
+        if exact or anchor_type != "table":
+            return exact
+
+        # Retrieval represents a table row as one text item, while Word comments
+        # must be attached inside one cell paragraph. If the model quotes that
+        # row, retain only a complete, verbatim cell paragraph from the quote.
+        normalized_reference = DocxReportGenerator._normalize_text(reference_text)
+        contained_views = [
+            view
+            for view in views
+            if len(DocxReportGenerator._normalize_text(view.text)) >= 4
+            and DocxReportGenerator._normalize_text(view.text) in normalized_reference
+        ]
+        if not contained_views:
+            return None
+        selected = max(
+            contained_views,
+            key=lambda view: len(DocxReportGenerator._normalize_text(view.text)),
+        )
+        return DocxReportGenerator._text_anchor_from_indexes(selected, 0, len(selected.text))
 
     @staticmethod
     def _get_document_start_anchor(doc: Document) -> ParagraphAnchor | None:
