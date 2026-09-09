@@ -312,6 +312,8 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/status" `
 }
 ```
 
+任务状态为 `succeeded` 表示输出 DOCX 已成功生成。若单个审查标准在完整重试后仍发生模型调用或结构化输出错误，系统仍提供其他标准的有效结果，同时返回 `quality.status=pending_review` 和非空 `quality.error_criteria`；DOCX 的 AI 审查总结会列出未完成的标准。调用方必须同时读取 `quality`，不能只根据 `status` 判断所有标准均已完成。
+
 | HTTP 状态码 | 返回场景 | 响应 |
 | --- | --- | --- |
 | `200` | 已鉴权客户拥有该任务。 | 经过过滤的任务状态，不返回服务端文件系统路径。 |

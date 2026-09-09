@@ -1083,40 +1083,42 @@ class OrchestratorAgent:
         results = await asyncio.gather(*execute_tasks, return_exceptions=True)
 
         final_results = []
+        fatal_errors: list[tuple[str, Exception]] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
-                if isinstance(result, ModelCallError):
-                    raise result
-                print(f"[Orchestrator] Error on criterion {criteria_list[i]['id']}: {result}")
+                criterion = criteria_list[i]
+                cid = str(criterion["id"])
+                if not isinstance(result, (AgentOutputValidationError, ModelCallError)):
+                    fatal_errors.append((cid, result))
+                    continue
+                print(f"[Orchestrator] Error on criterion {cid}: {result}")
                 final_results.append(
                     {
-                        "criterion_id": criteria_list[i]["id"],
-                        "criterion": criteria_list[i]["criterion"],
-                        "section": criteria_list[i].get("section", "其他"),
+                        "criterion_id": cid,
+                        "criterion": criterion["criterion"],
+                        "section": criterion.get("section", "其他"),
                         "issues": [],
                         "status": "ERROR",
-                        "review_source": criteria_list[i].get("review_source", "uploaded"),
-                        "policy_id": criteria_list[i].get("policy_id", ""),
+                        "quality_status": "error",
+                        "review_source": criterion.get("review_source", "uploaded"),
+                        "policy_id": criterion.get("policy_id", ""),
                         "applicability_reason": "",
                         "tokens": 0,
                         "error_message": str(result),
+                        "error_type": type(result).__name__,
                     }
                 )
             else:
                 final_results.append(result)
 
+        if fatal_errors:
+            cid, error = fatal_errors[0]
+            raise RuntimeError(f"Unexpected criterion execution failure in {cid}: {error}") from error
+
+        if final_results and all(result.get("status") == "ERROR" for result in final_results):
+            raise RuntimeError("All criteria failed; no valid review result is available for reporting.")
+
         total_tokens = sum(r.get("tokens", 0) for r in final_results)
         print(f"  Completed: {len(final_results)} reviews, Total tokens: {total_tokens:,}")
-
-        failed_results = [result for result in final_results if result.get("status") == "ERROR"]
-        if failed_results:
-            failed_summary = "; ".join(
-                f"{result.get('criterion_id')}: {result.get('error_message')}"
-                for result in failed_results
-            )
-            raise RuntimeError(
-                "Criterion execution failed after recovery attempts: "
-                f"{failed_summary}"
-            )
 
         return final_results

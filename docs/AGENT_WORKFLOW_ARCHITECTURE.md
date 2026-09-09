@@ -111,8 +111,8 @@ class SummaryOutput:
 - `asyncio.gather` 负责并发调度：多条 criterion 可以同时进入等待队列，并在外部模型调用、检索或反思等待期间交错推进。
 - `asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)` 负责并发限制：同一时间最多允许指定数量的 criterion 进入 `execute_single_criterion()`；其余 coroutine 会等待 semaphore 释放。
 - 因此，当前并发边界是“多条 criterion / 多个 SubAgent 审查任务并发”，不是单个 SubAgent 内部把同一条标准拆成多个并发步骤。
-- 单条 criterion 最多执行 `workflow.criterion_retry_max_attempts` 次；重试耗尽后的 `ModelCallError` 会导致整次审查失败。
-- 其他异常在重试耗尽后降级为该条 `status=ERROR`（记录 `error_message`），不影响其它 criterion。
+- 单条 criterion 最多执行 `workflow.criterion_retry_max_attempts` 次；重试耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 降级为该条 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
+- 未知程序异常保持任务级失败；全部 criterion 都失败时也不生成伪成功结果。部分 criterion 失败时任务为 `succeeded`，同时以 `quality.status=pending_review`、`quality.error_criteria` 和 DOCX“未完成审查项”披露缺口。
 
 简化结构如下：
 

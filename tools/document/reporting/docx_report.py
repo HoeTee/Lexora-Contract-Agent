@@ -753,6 +753,7 @@ class DocxReportGenerator:
         overall_comment = str(summary_sections.get("overall_comment", "")).strip()
         priority_comments = summary_sections.get("priority_comments", [])
         opening_notices = summary_sections.get("opening_notices", [])
+        incomplete_reviews = summary_sections.get("incomplete_reviews", [])
 
         if overall_comment:
             lines.append("总体审查结论：")
@@ -780,6 +781,18 @@ class DocxReportGenerator:
                 lines.append("")
             lines.append("合同首部需补充的提示：")
             for index, item in enumerate(valid_opening_notices, start=1):
+                lines.append(f"{index}. {item}")
+
+        valid_incomplete_reviews = [
+            item.strip()
+            for item in incomplete_reviews
+            if isinstance(item, str) and item.strip()
+        ]
+        if valid_incomplete_reviews:
+            if lines:
+                lines.append("")
+            lines.append("未完成审查项：")
+            for index, item in enumerate(valid_incomplete_reviews, start=1):
                 lines.append(f"{index}. {item}")
 
         return "\n".join(lines)

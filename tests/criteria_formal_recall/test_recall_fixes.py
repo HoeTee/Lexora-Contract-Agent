@@ -12,6 +12,7 @@ from docx import Document
 from docx.oxml import OxmlElement
 
 from agents.base_agent import estimate_chat_prompt_tokens
+from agents.json_utils import AgentOutputValidationError
 from agents.orchestrator import (
     OrchestratorAgent,
     _FindingLedger,
@@ -33,7 +34,7 @@ from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.llm.prompts import scan_prompt
 from tools.docxindex.retriever import _should_use_fallback
 from tools.docxindex.retrieval.rule import _literal_terms
-from workflow.workflow import _prepare_inline_results
+from workflow.workflow import _incomplete_review_notices, _prepare_inline_results
 
 
 def _subagent_output(issue_id: str, comment: str, anchor_id: str) -> dict:
@@ -415,6 +416,25 @@ class DocxAnchorRegressionTests(unittest.TestCase):
         self.assertIn("注意：补充固定提示语。", text)
         self.assertNotIn("全局审查问题：", text)
 
+    def test_summary_comment_discloses_incomplete_reviews_without_internal_id(self) -> None:
+        results = [{
+            "criterion_id": "H11",
+            "section": "合同框架",
+            "criterion": "校验正文与附件约定是否一致。",
+            "status": "ERROR",
+        }]
+
+        notices = _incomplete_review_notices(results)
+        text = DocxReportGenerator._build_summary_comment_text({
+            "overall_comment": "其余审查项已完成。",
+            "priority_comments": [],
+            "incomplete_reviews": notices,
+        })
+
+        self.assertIn("未完成审查项：", text)
+        self.assertIn("校验正文与附件约定是否一致", text)
+        self.assertNotIn("H11", text)
+
 
 class PromptAuthorityTests(unittest.TestCase):
     def test_explicit_criteria_are_authoritative_for_review_and_reflection(self) -> None:
@@ -757,6 +777,52 @@ class WorkflowPresentationTests(unittest.TestCase):
 
         self.assertEqual(len(errors), 1)
         self.assertIn("path:body/p9", errors[0])
+
+
+class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _criteria() -> list[dict]:
+        return [
+            {"id": "H01", "section": "合同主体", "criterion": "检查合同主体信息。"},
+            {"id": "H11", "section": "合同框架", "criterion": "校验正文与附件约定是否一致。"},
+        ]
+
+    async def test_one_schema_failure_keeps_other_criterion_result(self) -> None:
+        orchestrator = OrchestratorAgent()
+
+        async def execute(criterion: dict, *, max_attempts: int) -> dict:
+            self.assertEqual(max_attempts, 2)
+            if criterion["id"] == "H11":
+                raise AgentOutputValidationError("invalid user-facing output")
+            return {
+                "criterion_id": criterion["id"],
+                "criterion": criterion["criterion"],
+                "section": criterion["section"],
+                "issues": [],
+                "status": "COMPLIANT",
+                "quality_status": "not_required",
+                "tokens": 0,
+            }
+
+        orchestrator._execute_criterion_with_recovery = execute  # type: ignore[method-assign]
+
+        results = await orchestrator.execute_criteria(self._criteria())
+
+        self.assertEqual([result["status"] for result in results], ["COMPLIANT", "ERROR"])
+        self.assertEqual(results[1]["quality_status"], "error")
+        self.assertEqual(results[1]["error_type"], "AgentOutputValidationError")
+
+    async def test_all_schema_failures_remain_task_level_failure(self) -> None:
+        orchestrator = OrchestratorAgent()
+
+        async def execute(_criterion: dict, *, max_attempts: int) -> dict:
+            self.assertEqual(max_attempts, 2)
+            raise AgentOutputValidationError("invalid user-facing output")
+
+        orchestrator._execute_criterion_with_recovery = execute  # type: ignore[method-assign]
+
+        with self.assertRaisesRegex(RuntimeError, "All criteria failed"):
+            await orchestrator.execute_criteria(self._criteria())
 
 
 class SummarizerPromptBudgetTests(unittest.TestCase):

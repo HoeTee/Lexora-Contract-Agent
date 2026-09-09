@@ -585,7 +585,7 @@ def mark_succeeded(client_dir: str, task_id: str, *, quality: dict | None = None
         task_id,
         status="succeeded",
         finished_at=now_iso(),
-        message=("审查文件已生成，部分审查项待复核。" if quality and quality.get("status") == "pending_review"
+        message=("审查文件已生成，部分审查项未完成。" if quality and quality.get("status") == "pending_review"
                  else "Contract review succeeded."),
         quality=quality or {},
         criteria_manifest=criteria_manifest or {},

@@ -95,6 +95,20 @@ def _prepare_inline_results(results: list[dict]) -> tuple[list[dict], list[str]]
     return inline_results, opening_notices
 
 
+def _incomplete_review_notices(results: list[dict]) -> list[str]:
+    """Build user-facing notices for criteria that produced no valid result."""
+    notices: list[str] = []
+    for result in results:
+        if result.get("status") != "ERROR":
+            continue
+        criterion = str(result.get("criterion") or "").strip()
+        section = str(result.get("section") or "").strip()
+        label = f"{section}：{criterion}" if section and criterion else criterion or section
+        if label:
+            notices.append(f"{label}（本次未完成，审查结果不包含该项结论。）")
+    return notices
+
+
 class ContractReviewWorkflow:
     """High-level coordinator for one contract review run.
 
@@ -244,6 +258,7 @@ class ContractReviewWorkflow:
                     final_review = summary_payload
                     presentation_results, opening_notices = _prepare_inline_results(results)
                     final_review["opening_notices"] = opening_notices
+                    final_review["incomplete_reviews"] = _incomplete_review_notices(results)
                     review_outputs_path = self._save_review_outputs(results)
                     span.set_outputs(
                         {
@@ -262,6 +277,7 @@ class ContractReviewWorkflow:
                                 for issue in result.get("issues", [])
                             ),
                             "opening_notices": opening_notices,
+                            "incomplete_reviews": final_review["incomplete_reviews"],
                         }
                     )
 

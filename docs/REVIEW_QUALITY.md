@@ -38,7 +38,7 @@
 3. Reflector 对每条 finding 返回 confirm/revise/remove。一个 finding 需修改不会连带屏蔽同一 criterion 中已确认的问题。
 4. 同一审查输出中，两条 issue 不得复用完全相同的 edit 位置、缺陷类型和原文引用。校验错误会明确列出冲突的 issue_id：同一缺陷需合并，不同缺陷需缩小到各自的连续原文；字段标签整体不存在时使用 `anchors=[]`，不借用相邻正常文字挂批注。
 5. 对“信息是否齐全”“包括……等”这类非穷举标准，scan 必须遍历批次内全部原文且不设候选 Top-K；Reviewer 必须逐项判断 scan 返回的字段候选，不能把示例字段当作封闭清单。
-6. pending_review 只写入 API 状态和日志；不得进入 AI 审查总结，不得暴露 criterion/finding 编号或 XML path。
+6. Reflector 未确认的 `pending_review` 只写入 API 状态和日志，不进入 AI 审查总结；criterion 执行失败则按第15项在总结中明确列为“未完成审查项”。两种情况都不得暴露 criterion/finding 编号或 XML path。
 7. edit 位置逐处写入；evidence 永不产生批注。删除 merged_by_party 聚合器。旧结果含该 placement 时也按普通位置处理，不恢复聚合行为。
 8. Schema 要求每个 missing_value issue 只有一个 edit、每个 issue_id 唯一，并拒绝完全重复的 XML 位置、引用和缺陷类型；同段不同字段不因为同属 missing_value 就合并。不使用业务正则或模糊相似度阈值判断字段是否未填写。
 9. `issue_comment` 和 `comment_text` 禁止“同上”等上下文依赖表达及 `p311/path/node_id/检索结果N` 等内部定位；schema 失败后走现有定向重试。
@@ -47,6 +47,7 @@
 12. 支付方式等章节审查不再把所有问题强制锚定标题：只有章节整体问题可以使用标题 edit，发票、金额、比例、付款节点等具体问题必须锚定各自原文；整条约定缺失且没有直接位置时使用 `anchors=[]`。
 13. 同一标准同时检查不同区域时，不得把不同修改动作合并为一条批注。例如合同首部日期未填写与正文期限表述模糊必须分别形成 issue，并分别锚定日期字段和期限条款；任何一项整体不存在时才使用 `anchors=[]`。
 14. coverage/policy 定向修订在最后一次修订后会重新校验最终输出；最终结果已经合格时继续执行，只有仍存在校验错误时才令该标准失败，错误信息不得为空。
+15. 单个 criterion 的模型调用或结构化输出在完整重试后仍失败时，记录为 `status=ERROR`，其他标准继续执行并生成 DOCX；任务返回 `status=succeeded`、`quality.status=pending_review` 和 `quality.error_criteria`。AI 审查总结使用标准原文列出“未完成审查项”，不展示内部 criterion ID。索引、输入、报告写出、未知程序异常以及所有标准全部失败仍属于任务级失败。
 
 ## 任务与状态
 
@@ -55,7 +56,7 @@
 - `criteria_manifest`：实际标准文件名、SHA-256、拆分数量及每条标准原文。
 - `quality`：`status`、`pending_criteria`、`error_criteria`。
 
-执行状态 `succeeded` 表示审查文件生成成功，不代表所有判断通过质量复核。质量未通过时 message 明确提示“部分审查项待复核”；消费者同时读取 quality。未通过内容不作为确认的法律结论。
+执行状态 `succeeded` 表示审查文件生成成功，不代表所有判断通过质量复核。存在 criterion 错误时 message 明确提示“部分审查项未完成”；消费者同时读取 quality。未通过内容不作为确认的法律结论。
 
 state/plan.json 保存标准来源摘要；本次逐 finding 决策使用 `review_contract_version=4`，旧结果不自动复用。日志按原有 API/Web 用户分区保存，不新增平行日志系统。
 
