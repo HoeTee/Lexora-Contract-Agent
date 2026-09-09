@@ -738,7 +738,6 @@ class WorkflowPresentationTests(unittest.TestCase):
         first["criterion_id"] = "H12"
         second["criterion_id"] = "H15"
         second["issues"][0]["issue_id"] = "H15.1"
-        second["issues"][0]["anchors"][0]["xml_anchor_id"] = "path:body/p2"
 
         merged, stats = apply_summary_duplicate_groups(
             [first, second],
@@ -756,6 +755,57 @@ class WorkflowPresentationTests(unittest.TestCase):
             merged[0]["issues"][0]["anchors"][0]["comment_text"],
             "删除重复的“原因”，改为“因乙方原因”。",
         )
+
+    def test_summary_duplicate_group_keeps_issues_at_different_locations(self) -> None:
+        first = json.loads(json.dumps(self.results[0], ensure_ascii=False))
+        second = json.loads(json.dumps(self.results[0], ensure_ascii=False))
+        first["criterion_id"] = "H01"
+        second["criterion_id"] = "H01"
+        second["issues"][0]["issue_id"] = "C12.2"
+        second["issues"][0]["anchors"][0]["xml_anchor_id"] = "path:body/p31"
+        second["issues"][0]["anchors"][0]["quoted_text"] = "乙方地址：【未填写】"
+
+        merged, stats = apply_summary_duplicate_groups(
+            [first, second],
+            [{
+                "keep_issue_key": "0:H01:C12.1",
+                "merge_issue_keys": ["1:H01:C12.2"],
+                "canonical_comment": "合同首部信息未填写。",
+                "reason": "均为未填写",
+            }],
+        )
+
+        self.assertEqual([len(result["issues"]) for result in merged], [1, 1])
+        self.assertEqual(stats["applied_groups"], 0)
+        self.assertEqual(stats["skipped_groups"], 1)
+        self.assertEqual(stats["removed_duplicate_issues"], 0)
+
+    def test_summary_issue_cannot_absorb_anchored_inline_issue(self) -> None:
+        inline = json.loads(json.dumps(self.results[0], ensure_ascii=False))
+        inline["criterion_id"] = "H01"
+        inline["issues"][0]["issue_id"] = "1.4"
+        inline["issues"][0]["anchors"][0]["xml_anchor_id"] = "path:body/p31"
+        inline["issues"][0]["anchors"][0]["quoted_text"] = (
+            "乙方：深信服科技股份有限公司 地址：【未填写】"
+        )
+        summary = json.loads(json.dumps(inline, ensure_ascii=False))
+        summary["issues"][0]["issue_id"] = "1.5"
+        summary["issues"][0]["anchors"] = []
+
+        merged, stats = apply_summary_duplicate_groups(
+            [inline, summary],
+            [{
+                "keep_issue_key": "1:H01:1.5",
+                "merge_issue_keys": ["0:H01:1.4"],
+                "canonical_comment": "合同首部存在多处信息未填写。",
+                "reason": "均为未填写",
+            }],
+        )
+
+        self.assertEqual([len(result["issues"]) for result in merged], [1, 1])
+        self.assertEqual(stats["applied_groups"], 0)
+        self.assertEqual(stats["skipped_groups"], 1)
+        self.assertEqual(stats["removed_duplicate_issues"], 0)
 
     def test_keyword_triggered_fixed_instruction_is_routed_to_opening_summary(self) -> None:
         results = [{

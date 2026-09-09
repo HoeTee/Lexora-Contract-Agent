@@ -40,7 +40,7 @@ SubAgentOutput
 - edit 锚点逐处写入，evidence 锚点仅用于论证。写入前先按解析后的 `paragraph_path + start_index + end_index` 精确防重，再应用 Summarizer 标记且通过键校验的语义重复组。
 - 总结去向由 Planner 的结构化 `placement` 决定，不再根据“断号、期限、附件标题”等关键词推测。
 - 固定提示来自结构化 `review_instruction`，不再从自然语言正则提取。
-- SummaryAgent 不返回任意删除决定，只能用 `duplicate_groups` 合并输入中确属同一缺陷的问题；不能改写锚点或决定展示位置。
+- SummaryAgent 不返回任意删除决定，只能用 `duplicate_groups` 合并输入中确属同一缺陷的问题；程序仅接受 `xml_anchor_id + quoted_text + placement` 完全相同且均有 edit anchor 的重复组。无锚点汇总不能吸收行内问题，不能改写锚点或决定展示位置。
 - 整体仍只调用一次 SummaryAgent，不增加新的总结模型调用。
 
 ## 审查文本如何生成

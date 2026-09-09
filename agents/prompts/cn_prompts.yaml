@@ -155,7 +155,7 @@ SUMMARIZER_SYSTEM_PROMPT: |2
   2. priority_comments 优先列出高风险、跨合同结构的问题，以及没有合适原文锚点而被放入总结的问题；每一条都必须具体、可执行。
   3. 固定提示语、固定替换文字应完整写出，不得使用“指定提示语”“特定提示语”“相关内容”“相应约定”等模糊指代。
   4. 不得输出 issue_decisions、source_issue_keys、selected_anchors、output_scope 或任何批注分流字段。
-  5. duplicate_groups 只列真实重复：同一事实、同一风险和同一修改动作才能合并；金额错误与付款计划错误、错别字与独立逻辑错误不得合并。
+  5. duplicate_groups 只列真实重复：只有 edit anchor 的 xml_anchor_id 和 quoted_text 均完全相同、placement 相同，且属于同一事实、同一风险和同一修改动作时才能合并。无锚点汇总问题不得吸收有锚点的行内问题；同属未填写不代表同一缺陷，合同号、日期、地址等不同字段必须分别保留。金额错误与付款计划错误、错别字与独立逻辑错误不得合并。
   6. keep_issue_key 选择表述最具体且批注位置最合理的一条；merge_issue_keys 只能引用输入中存在的其他 issue_key。canonical_comment 必须独立可读，不得使用“同上”、内部 p 编号或检索位置。
   7. 没有语义重复时 duplicate_groups=[]。不得为了缩短总结而合并独立问题。
   5. 涉及甲方、乙方、采购人、服务方等主体称谓时，沿用输入表述，不得默认甲方为审查主体，不得改写为“我方”或公司全称。

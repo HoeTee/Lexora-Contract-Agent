@@ -40,7 +40,7 @@
 | OrchestratorAgent | `agents/orchestrator.py` | 逐条派发 SubAgent，串联检索、反思、并发控制 | `criteria_list` | `results` |
 | SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准；配置完整覆盖审计时逐证据返回判断 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues / coverage_decisions） |
 | ReflectorAgent | `agents/reflector.py` | 逐条质量复核 finding，并检查完整覆盖任务是否漏判输入证据 | criterion + subagent_output + 检索证据 | `{ status, feedback, finding_decisions[], coverage_gaps[] }` |
-| SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题 | `{ overall_comment, priority_comments, duplicate_groups }` |
+| SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；程序只接受 edit anchor 与 placement 完全相同的重复组，不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题 | `{ overall_comment, priority_comments, duplicate_groups }` |
 
 基础设施：`agents/base_agent.py`（`Agent` 基类与 `Settings` 模型配置）、`agents/schemas.py`（结构化输出 schema）、`agents/prompts/cn_prompts.yaml`（所有提示词，含审查边界）。
 

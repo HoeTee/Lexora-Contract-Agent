@@ -83,6 +83,22 @@ def _issue_key(result_index: int, result: dict, issue: dict) -> str:
     return f"{result_index}:{result.get('criterion_id', '')}:{issue.get('issue_id', '')}"
 
 
+def _edit_anchor_signature(issue: dict) -> tuple[tuple[str, str, str], ...] | None:
+    """Return the exact editable source locations represented by an issue."""
+    anchors = [
+        (
+            str(anchor.get("xml_anchor_type") or ""),
+            str(anchor.get("xml_anchor_id") or ""),
+            "".join(str(anchor.get("quoted_text") or "").split()),
+        )
+        for anchor in issue.get("anchors") or []
+        if anchor.get("role", "edit") == "edit"
+    ]
+    if not anchors or any(not all(anchor) for anchor in anchors):
+        return None
+    return tuple(sorted(anchors))
+
+
 def apply_summary_duplicate_groups(
     results: list[dict],
     duplicate_groups: list[dict],
@@ -102,12 +118,31 @@ def apply_summary_duplicate_groups(
         keep_key = str(group.get("keep_issue_key") or "")
         merge_keys = [str(key) for key in group.get("merge_issue_keys") or []]
         members = [keep_key, *merge_keys]
+        member_records = [
+            (canonical[result_index], canonical[result_index]["issues"][issue_index])
+            for key in members
+            if key in issue_lookup
+            for result_index, issue_index in [issue_lookup[key]]
+        ]
+        anchor_signatures = {
+            signature
+            for _, issue in member_records
+            if (signature := _edit_anchor_signature(issue)) is not None
+        }
+        placements = {
+            str((result.get("placement") or {}).get("target", "inline"))
+            for result, _ in member_records
+        }
         if (
             not keep_key
             or not merge_keys
             or any(key not in issue_lookup for key in members)
             or keep_key in merged_keys
             or any(key in merged_keys for key in merge_keys)
+            or len(member_records) != len(members)
+            or len(anchor_signatures) != 1
+            or any(_edit_anchor_signature(issue) is None for _, issue in member_records)
+            or len(placements) != 1
         ):
             skipped_groups += 1
             continue
@@ -186,7 +221,9 @@ class SummarizerAgent(Agent):
         prompt = (
             "以下问题已完成精确范围防重，但仍可能存在跨审查要点或相邻位置的语义重复。"
             "请生成总体审查总结、优先修改建议，并只把真正描述同一缺陷的问题放入 duplicate_groups。"
-            "不同事实、不同修改动作不得合并；keep_issue_key 应选择更具体、更可执行的问题：\n"
+            "只有 edit anchor 的 xml_anchor_id 和 quoted_text 均完全相同，且 placement 相同的问题才允许合并。"
+            "无锚点汇总问题不得吸收有锚点的行内问题；同属未填写不代表同一缺陷，合同号、日期、地址等不同字段必须分别保留。"
+            "不同事实、不同位置、不同修改动作不得合并；keep_issue_key 应选择更具体、更可执行的问题：\n"
             + json.dumps(prompt_payload, ensure_ascii=False, indent=2)
         )
         parsed, _ = await chat_until_valid_json(
