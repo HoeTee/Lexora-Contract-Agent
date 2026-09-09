@@ -17,8 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from tools.docxindex.indexing import estimate_tokens
 from tools.docxindex.llm.client import LLMClient, LLMSettings
-from tools.docxindex.retrieval.route import load_criteria
-from tests.docxindex_ablation.run import ROOT, SUITE, read_json, write_json, write_csv
+from tests.docxindex_ablation.run import ROOT, SUITE, mandatory_criteria, read_json, write_json, write_csv
 
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -121,7 +120,7 @@ def new_ai_comments(output_docx, input_docx):
 
 def judge(args):
     client = LLMClient(LLMSettings.from_sources(config_path=ROOT / "config.yaml"), max_concurrency=1)
-    criteria = load_criteria(ROOT / "resources/criteria/criteria-formal.docx", 18)
+    criteria = mandatory_criteria()
     with (SUITE / "expected_cases_10.csv").open(encoding="utf-8-sig", newline="") as handle:
         expected = list(csv.DictReader(handle))
     recalls, verdicts = [], []

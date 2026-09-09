@@ -14,7 +14,7 @@
 | --- | --- | --- |
 | 1. 解析 ingest | MCP `ingest_file` | 把合同和审查标准 DOCX 转成 markdown |
 | 2. 建索引 build_index | MCP `contract_build_index` | 按 `retrieval.backend` 为合同建立临时 LlamaIndex 或 docxindex 索引 |
-| 3. 规划 plan | `routing.profile` + `PlannerAgent.extract_strategies` | 固定18条从 DOCX 和固定路线配置直接组装；用户上传标准才调用 Planner |
+| 3. 规划 plan | `routing.profile` + `PlannerAgent.extract_strategies` | 固定18条直接从 `criteria-routes.yaml` 组装；用户上传标准才调用 Planner |
 | 4. 执行+反思 execute | `OrchestratorAgent.execute_criteria` | 逐条审查标准，产出 `results` |
 | 5. 最终整理 summarize | Workflow 分流 + `SummarizerAgent.compile_summary_comment` | Workflow 按结构化 placement 和已确认 finding 分流；Summarizer 只生成总览 |
 | 6. 批注 generate | MCP `generate_docx_report` | 用已确认的原文批注结果与 `final_review` 生成批注版 DOCX |
@@ -136,7 +136,7 @@ results = await asyncio.gather(
 ## 数据流
 
 ```text
-固定 criteria-formal.docx + criteria-formal.routes.yaml -> 18个 mandatory tasks
+固定 criteria-routes.yaml -> 18个 mandatory tasks
 用户上传标准 DOCX -> deterministic split -> Planner -> uploaded tasks
 mandatory tasks + uploaded tasks -> criteria_list
 合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引

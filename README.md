@@ -89,10 +89,9 @@ profiles/
   tenant_profiles.json
   tenants/<tenant_id>/
     profiles.json
-    criteria/<username>.docx
 ```
 
-API 和 Web 任务都保存 `task.json`、`input/`、`output/` 和启用后的 `logs/`；API 任务还保存 criterion 恢复用的 `state/`。两类数据不能混用。
+API 和 Web 任务都保存 `task.json`、`input/`、`output/` 和启用后的 `logs/`；API 任务还保存 criterion 恢复用的 `state/`。两类数据不能混用。系统固定审查面来自 `resources/criteria/criteria-routes.yaml`；用户自定义审查要点仅作为单次任务输入上传并保存到该任务的 `input/`。
 
 ## 管理 CLI
 

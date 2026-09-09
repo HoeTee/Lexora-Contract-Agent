@@ -1,30 +1,18 @@
 from __future__ import annotations
 
 import re
-import shutil
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from config import DEFAULT_CRITERIA_PATH
-from endpoints.runtime.tenancy import tenant_user_criteria_path, validate_tenant_id
+from endpoints.runtime.tenancy import validate_tenant_id
 
 
 def safe_path_part(value: str, fallback: str = "item") -> str:
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "")).strip().strip(".")
     cleaned = re.sub(r"\s+", "_", cleaned)
     return cleaned or fallback
-
-
-def ensure_default_criteria_file(criteria_path: Path) -> Path:
-    default_criteria_path = Path(DEFAULT_CRITERIA_PATH)
-    if not criteria_path.exists():
-        if not default_criteria_path.exists():
-            raise FileNotFoundError(f"Default review criteria file was not found: {default_criteria_path}")
-        criteria_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(default_criteria_path, criteria_path)
-    return criteria_path
 
 
 @dataclass(frozen=True)
@@ -56,12 +44,6 @@ class ResolvedReviewTaskPaths:
         return self.data_dir / self.username
 
     @property
-    def criteria_path(self) -> Path:
-        if self.tenant_id:
-            return tenant_user_criteria_path(self.tenant_id, self.username)
-        return self.user_root / "criteria" / "criteria.docx"
-
-    @property
     def task_dir(self) -> Path:
         if self.tenant_id:
             return self.user_root / self.task_id
@@ -80,10 +62,6 @@ class ResolvedReviewTaskPaths:
         if self.tenant_id:
             return self.task_dir / "logs"
         return self.user_root / "logs"
-
-    @property
-    def uploaded_criteria_path(self) -> Path:
-        return self.input_dir / "criteria.docx"
 
     @property
     def contracts_dir(self) -> Path:
@@ -140,7 +118,6 @@ class ResolvedReviewTaskPaths:
         if self.tenant_id:
             for path in (self.input_dir, self.output_dir, self.task_log_dir, self.conversation_log_dir):
                 path.mkdir(parents=True, exist_ok=True)
-            ensure_default_criteria_file(self.criteria_path)
             return
 
         for path in (
@@ -151,7 +128,6 @@ class ResolvedReviewTaskPaths:
             self.user_root / "records",
         ):
             path.mkdir(parents=True, exist_ok=True)
-        ensure_default_criteria_file(self.criteria_path)
 
     def ensure_task_dirs(self) -> None:
         self.ensure_user_dirs()
@@ -186,11 +162,9 @@ def initialize_user_data_dir(data_dir: Path, username: str, *, tenant_id: str = 
     if tenant_id:
         user_root = data_dir / "web" / validate_tenant_id(tenant_id)
         user_root.mkdir(parents=True, exist_ok=True)
-        ensure_default_criteria_file(tenant_user_criteria_path(tenant_id, safe_username))
         return user_root
 
     user_root = data_dir / safe_username
     for child in ("criteria", "contracts", "reports_docx", "logs", "records"):
         (user_root / child).mkdir(parents=True, exist_ok=True)
-    ensure_default_criteria_file(user_root / "criteria" / "criteria.docx")
     return user_root

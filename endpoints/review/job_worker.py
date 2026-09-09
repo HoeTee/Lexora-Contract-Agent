@@ -130,7 +130,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                 write_task_log_event(client_dir, task_id, "review_started")
                 result = await workflow.run(
                     contract_path=task["input"]["contract_path"],
-                    criteria_path=task["input"]["criteria_path"],
+                    criteria_path=task["input"].get("criteria_path"),
                     output_path=task["output"]["result_path"],
                 )
             else:
@@ -145,7 +145,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                     write_task_log_event(client_dir, task_id, "review_started")
                     result = await workflow.run(
                         contract_path=task["input"]["contract_path"],
-                        criteria_path=task["input"]["criteria_path"],
+                        criteria_path=task["input"].get("criteria_path"),
                         output_path=task["output"]["result_path"],
                     )
         finally:

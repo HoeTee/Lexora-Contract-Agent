@@ -9,7 +9,6 @@ profiles/
   tenant_profiles.json
   tenants/<tenant_id>/
     profiles.json
-    criteria/<username>.docx
 
 data/web/<tenant_id>/<task_id>/
   task.json
@@ -20,7 +19,6 @@ data/web/<tenant_id>/<task_id>/
 
 - `tenant_profiles.json`：租户名称、启用状态和时间戳。
 - `profiles.json`：该租户的用户、角色、启用状态和密码哈希；不保存明文密码。
-- `criteria/<username>.docx`：用户默认审查标准。
 - `task.json`：任务状态、提交用户、文件名和时间戳，是 Web 任务状态源。
 
 用户只能读取同一 `tenant_id` 下属于自己用户名的任务。当前没有超级管理员前端；跨租户管理只能通过 CLI 完成。
@@ -70,7 +68,7 @@ GET /web/history
   -> 按当前 username 过滤
 ```
 
-普通用户可以上传合同、选择本次临时审查标准、查看历史和下载结果。租户管理员可以管理本租户用户、角色、密码、默认审查标准和用户审查历史。
+普通用户可以上传合同、选择本次任务的自定义审查标准、查看历史和下载结果。租户管理员可以管理本租户用户、角色、密码和用户审查历史。
 
 ## 页面状态边界
 
@@ -82,13 +80,7 @@ GET /web/history
 
 ## 审查标准
 
-本次上传审查标准时，文件只属于该任务并保存在 `input/`。未上传时使用：
-
-```text
-profiles/tenants/<tenant_id>/criteria/<username>.docx
-```
-
-管理员修改默认审查标准时写回该文件，不影响已创建任务的输入快照。
+本次上传审查标准时，文件只属于该任务并保存在 `input/`；系统会在硬性审查之外追加执行这些自定义要点。未上传时只执行 `resources/criteria/criteria-routes.yaml` 中的硬性审查，不读取任何用户默认 DOCX。
 
 ## Docker 持久化
 

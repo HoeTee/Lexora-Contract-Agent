@@ -460,7 +460,7 @@ def create_task(
     contract_path: Path,
     criteria_source: str,
     criteria_filename: str | None,
-    criteria_path: Path,
+    criteria_path: Path | None,
     result_filename: str,
     result_path: Path,
     model_config_meta: dict[str, Any] | None = None,
@@ -488,7 +488,7 @@ def create_task(
             "contract_path": str(contract_path),
             "criteria_source": criteria_source,
             "criteria_filename": criteria_filename,
-            "criteria_path": str(criteria_path),
+            "criteria_path": str(criteria_path) if criteria_path else None,
         },
         "output": {
             "result_filename": result_filename,

@@ -37,7 +37,6 @@ async def run():
                 base_url=f"http://127.0.0.1:{5111 if variant == 'baseline' else 5112}",
                 cases_dir=ROOT / "tests/criteria_formal_recall/cases",
                 expected_csv=ROOT / "tests/criteria_formal_recall/expected_cases_10.csv",
-                criteria=ROOT / "resources/criteria/criteria-formal.docx",
                 results_dir=directory,
                 api_task_root=ROOT / "data/api/review_timing" / variant / "api",
                 concurrency=1, poll_interval=3.0, task_timeout=1200.0,

@@ -12,8 +12,7 @@ from xml.etree import ElementTree as ET
 import zipfile
 
 from tests.docxindex_ablation.judge import new_ai_comments
-from tests.docxindex_ablation.run import ROOT, SUITE, read_json, sha, write_csv, write_json
-from tools.docxindex.retrieval.route import load_criteria
+from tests.docxindex_ablation.run import ROOT, SUITE, mandatory_criteria, read_json, sha, write_csv, write_json
 
 
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -36,7 +35,7 @@ def snapshot(output):
         raise ValueError("Production code differs from captured baseline; do not reuse its quality certificate")
     paths = {
         ROOT / "config.yaml": manifest["config_sha256"],
-        ROOT / "resources/criteria/criteria-formal.docx": manifest["criteria_sha256"],
+        ROOT / "resources/criteria/criteria-routes.yaml": manifest["routes_sha256"],
         SUITE / "expected_cases_10.csv": manifest["expected_sha256"],
     }
     with (SUITE / "expected_cases_10.csv").open(encoding="utf-8-sig", newline="") as handle:
@@ -77,7 +76,7 @@ def snapshot(output):
         "expected": expected,
         "criteria": {
             str(key): value
-            for key, value in load_criteria(ROOT / "resources/criteria/criteria-formal.docx", 18).items()
+            for key, value in mandatory_criteria().items()
         },
         "contracts": contracts,
     }

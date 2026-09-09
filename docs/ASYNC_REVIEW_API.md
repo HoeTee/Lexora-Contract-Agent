@@ -70,7 +70,7 @@ Authorization: <api_key>
 | --- | --- | --- |
 | 固定必填 | `Authorization` 请求头 | 所有请求都必填。 |
 | 固定必填 | multipart 的 `file`，或 JSON 的 `file_url` | 二选一，由 `Content-Type` 决定。 |
-| 固定可选 | `criteria_file` 或 `criteria_file_url` | 可选；不传时使用服务端默认审查标准。 |
+| 固定可选 | `criteria_file` 或 `criteria_file_url` | 可选；上传后在系统硬性审查之外追加执行，不传时只执行硬性审查。 |
 | 条件必填 | `api.meta_fields` 配置的业务字段 | `api.meta_required: true` 时全部必填；为 `false` 时可选。 |
 | 条件必填 | 六个请求级模型字段 | `api.require_request_model_config: true` 时全部必填；为 `false` 时不要传，服务端不会使用。 |
 
@@ -115,7 +115,7 @@ Authorization: <api_key>
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `file` | DOCX 文件 | 是 | 待审查的合同文件。 |
-| `criteria_file` | DOCX 文件 | 否 | 本次审查标准；不传时使用默认审查标准。 |
+| `criteria_file` | DOCX 文件 | 否 | 本次追加的用户审查标准；不传时只执行系统硬性审查。 |
 | `templateCode` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
 | `serialNo` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
 
@@ -129,7 +129,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs" `
   -F "serialNo=serial_001"
 ```
 
-需要为本次任务覆盖默认审查标准时，再增加可选的 `criteria_file`：
+需要为本次任务追加用户审查标准时，再增加可选的 `criteria_file`：
 
 ```powershell
 curl.exe -X POST "http://localhost:5000/api/review/jobs" `
@@ -155,7 +155,7 @@ Authorization: <api_key>
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `file_url` | URL 字符串 | 是 | 待审查合同 DOCX 的下载地址。 |
-| `criteria_file_url` | URL 字符串 | 否 | 本次审查标准 DOCX 的下载地址；不传时使用默认审查标准。 |
+| `criteria_file_url` | URL 字符串 | 否 | 本次追加的用户审查标准 DOCX 下载地址；不传时只执行系统硬性审查。 |
 | `templateCode` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
 | `serialNo` | 字符串 | 当前配置必填 | `api.meta_required: true`，因此必须是非空字符串。 |
 
@@ -168,7 +168,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs" `
   -d '{ "file_url": "https://example.com/contract.docx", "templateCode": "template_001", "serialNo": "serial_001" }'
 ```
 
-需要为本次任务覆盖默认审查标准时，再增加可选的 `criteria_file_url`：
+需要为本次任务追加用户审查标准时，再增加可选的 `criteria_file_url`：
 
 ```powershell
 curl.exe -X POST "http://localhost:5000/api/review/jobs" `
@@ -298,7 +298,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/status" `
   },
   "input": {
     "contract_filename": "contract.docx",
-    "criteria_source": "default",
+    "criteria_source": "mandatory",
     "criteria_filename": null,
     "stored": true
   },

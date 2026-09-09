@@ -23,7 +23,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 SUITE_ROOT = Path(__file__).resolve().parent
 DEFAULT_CASES_DIR = SUITE_ROOT / "cases"
 DEFAULT_EXPECTED_CSV = SUITE_ROOT / "expected_cases_10.csv"
-DEFAULT_CRITERIA = PROJECT_ROOT / "resources" / "criteria" / "criteria-formal.docx"
 DEFAULT_RESULTS_DIR = SUITE_ROOT / "results"
 DEFAULT_API_TASK_ROOT = PROJECT_ROOT / "data" / "api"
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -55,7 +54,6 @@ class Settings:
     api_key: str
     cases_dir: Path
     expected_csv: Path
-    criteria_path: Path
     results_root: Path
     api_task_root: Path
     concurrency: int
@@ -71,7 +69,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default=os.getenv("BASE_URL", "http://localhost:5000"))
     parser.add_argument("--cases-dir", type=Path, default=DEFAULT_CASES_DIR)
     parser.add_argument("--expected-csv", type=Path, default=DEFAULT_EXPECTED_CSV)
-    parser.add_argument("--criteria", type=Path, default=DEFAULT_CRITERIA)
     parser.add_argument("--results-dir", type=Path, default=DEFAULT_RESULTS_DIR)
     parser.add_argument("--api-task-root", type=Path, default=DEFAULT_API_TASK_ROOT)
     parser.add_argument("--concurrency", type=int, default=1)
@@ -115,7 +112,6 @@ def load_settings(args: argparse.Namespace) -> Settings:
         api_key=required_env("API_KEY"),
         cases_dir=args.cases_dir.resolve(),
         expected_csv=args.expected_csv.resolve(),
-        criteria_path=args.criteria.resolve(),
         results_root=args.results_dir.resolve(),
         api_task_root=args.api_task_root.resolve(),
         concurrency=args.concurrency,
@@ -142,10 +138,9 @@ def parse_json_response(response: httpx.Response) -> dict[str, Any]:
 
 
 async def submit_job(client: httpx.AsyncClient, settings: Settings, contract: Path, serial_no: str) -> str:
-    with contract.open("rb") as contract_stream, settings.criteria_path.open("rb") as criteria_stream:
+    with contract.open("rb") as contract_stream:
         files = {
             "file": (contract.name, contract_stream, DOCX_MEDIA_TYPE),
-            "criteria_file": (settings.criteria_path.name, criteria_stream, DOCX_MEDIA_TYPE),
         }
         form = {
             "templateCode": "criteria-formal-v1",
@@ -368,8 +363,6 @@ def write_recall_csv(path: Path, expected: list[dict[str, str]], records: list[d
 
 
 async def run_all(settings: Settings) -> int:
-    if not settings.criteria_path.is_file():
-        raise FileNotFoundError(f"criteria file was not found: {settings.criteria_path}")
     expected = read_expected_rows(settings.expected_csv)
     if settings.contract_ids:
         requested = set(settings.contract_ids)

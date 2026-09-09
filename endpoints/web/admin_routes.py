@@ -1,29 +1,21 @@
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, PlainTextResponse
+from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, RedirectResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 
-from config import DATA_DIR, DEFAULT_CRITERIA_PATH, PROJECT_ROOT
+from config import DATA_DIR, PROJECT_ROOT
 from endpoints.web.admin_services import (
     admin_summary,
     get_admin_user,
-    get_user_criteria_info,
     list_admin_users,
     list_user_log_tasks,
     list_user_review_history,
 )
-from endpoints.runtime.document_validation import (
-    DOCX_MEDIA_TYPE,
-    validate_criteria_content,
-    validate_uploaded_docx,
-)
 from endpoints.runtime.filenames import safe_upload_filename
-from endpoints.runtime.tenancy import tenant_user_criteria_path
 from endpoints.web.user_routes import ctx_path, get_request_ctx, sync_context_user
 from endpoints.web.user_management import (
     UserManagementError,
@@ -151,7 +143,6 @@ async def admin_user_detail(request: Request, target_username: str):
             request,
             target_user=user,
             history=list_user_review_history(tenant_id, target_username),
-            criteria=get_user_criteria_info(tenant_id, target_username),
             logs=list_user_log_tasks(tenant_id, target_username),
             error=error,
             success=success,
@@ -234,84 +225,6 @@ async def admin_delete_user(
     except UserManagementError as exc:
         set_admin_flash(request, error=str(exc))
         return admin_user_redirect(request, target_username)
-
-
-@admin_router.get("/users/{target_username}/criteria/download")
-async def admin_download_user_criteria(request: Request, target_username: str):
-    require_admin(request)
-    tenant_id = current_tenant_id(request)
-    user = get_admin_user(tenant_id, target_username)
-    if not user:
-        raise HTTPException(status_code=404, detail="未找到用户。")
-
-    path = tenant_user_criteria_path(tenant_id, target_username)
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="未找到用户默认审查要点。")
-    return FileResponse(
-        path,
-        media_type=DOCX_MEDIA_TYPE,
-        filename=f"{target_username}_criteria.docx",
-        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(target_username)}_criteria.docx"},
-    )
-
-
-@admin_router.post("/users/{target_username}/criteria/upload")
-async def admin_upload_user_criteria(
-    request: Request,
-    target_username: str,
-    criteria_file: UploadFile = File(...),
-):
-    require_admin(request)
-    tenant_id = current_tenant_id(request)
-    if not get_admin_user(tenant_id, target_username):
-        raise HTTPException(status_code=404, detail="未找到用户。")
-
-    try:
-        filename = safe_upload_filename(criteria_file.filename)
-        if not filename.lower().endswith(".docx"):
-            raise HTTPException(status_code=400, detail="审查要点文件格式必须是 DOCX。")
-
-        target_path = tenant_user_criteria_path(tenant_id, target_username)
-        temp_path = target_path.with_name("criteria.upload.tmp.docx")
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        with temp_path.open("wb") as f:
-            shutil.copyfileobj(criteria_file.file, f)
-        validate_uploaded_docx(temp_path)
-        validate_criteria_content(temp_path)
-        temp_path.replace(target_path)
-        request.session["admin_flash_success"] = "用户默认审查要点已更新。"
-    except HTTPException as exc:
-        request.session["admin_flash_error"] = exc.detail
-    except Exception:
-        request.session["admin_flash_error"] = "审查要点更新失败。"
-    finally:
-        temp_path = tenant_user_criteria_path(tenant_id, target_username).with_name("criteria.upload.tmp.docx")
-        if temp_path.exists():
-            temp_path.unlink()
-        await criteria_file.close()
-    return admin_user_redirect(request, target_username)
-
-
-@admin_router.post("/users/{target_username}/criteria/restore")
-async def admin_restore_user_criteria(request: Request, target_username: str):
-    require_admin(request)
-    tenant_id = current_tenant_id(request)
-    if not get_admin_user(tenant_id, target_username):
-        raise HTTPException(status_code=404, detail="未找到用户。")
-
-    default_path = Path(DEFAULT_CRITERIA_PATH)
-    target_path = tenant_user_criteria_path(tenant_id, target_username)
-    try:
-        if not default_path.exists():
-            raise HTTPException(status_code=404, detail="未找到系统默认审查要点。")
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(default_path, target_path)
-        request.session["admin_flash_success"] = "已恢复系统默认审查要点。"
-    except HTTPException as exc:
-        request.session["admin_flash_error"] = exc.detail
-    except Exception:
-        request.session["admin_flash_error"] = "恢复默认审查要点失败。"
-    return admin_user_redirect(request, target_username)
 
 
 @admin_router.get("/users/{target_username}/logs/{date}/{task_name}/api-events")

@@ -53,7 +53,7 @@ def report():
                     raise ValueError(f"Input mismatch {cid} {variant}")
             rows.append(row)
     provenance["contracts"] = {f"D{i:02}": sha(ROOT / f"tests/criteria_formal_recall/cases/D{i:02}.docx") for i in range(1, 6)}
-    provenance["criteria_sha256"] = sha(ROOT / "resources/criteria/criteria-formal.docx")
+    provenance["routes_sha256"] = sha(ROOT / "resources/criteria/criteria-routes.yaml")
     provenance["infrastructure"] = "Real app/workflow/MCP; isolated ports 5111/5112; in-process API dispatch; unchanged model limits, same Redis DB 2 via host port 6380"
     OUTPUT.mkdir(parents=True, exist_ok=True)
     (OUTPUT / "provenance.json").write_text(json.dumps(provenance, ensure_ascii=False, indent=2), encoding="utf-8")

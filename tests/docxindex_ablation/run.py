@@ -21,8 +21,8 @@ from unittest.mock import patch
 from tools.docxindex import retriever as retrieval
 from tools.docxindex.llm.client import LLMClient
 from tools.docxindex.llm.schemas import RouteResponse
-from tools.docxindex.retrieval.route import load_criteria
 from tools.docxindex.indexing import estimate_tokens
+from routing import load_mandatory_tasks
 from tests.docxindex_ablation.variants import treatment
 
 
@@ -30,6 +30,13 @@ ROOT = Path(__file__).resolve().parents[2]
 SUITE = ROOT / "tests" / "criteria_formal_recall"
 OPERATIONS = ("plan_route", "llm_query", "vector_search", "rerank_matches", "scan_matches")
 ORIGINALS = {name: getattr(retrieval, name) for name in OPERATIONS}
+
+
+def mandatory_criteria() -> dict[int, str]:
+    return {
+        number: f"{number}. {task['criterion']}"
+        for number, task in enumerate(load_mandatory_tasks(), 1)
+    }
 
 
 def write_json(path, value):
@@ -89,11 +96,12 @@ def capture(args):
     with csv_path.open(encoding="utf-8-sig", newline="") as handle:
         expected = list(csv.DictReader(handle))
     engine = retrieval.DocxIndexRetriever(ROOT / "config.yaml")
-    criteria = load_criteria(SUITE.parents[1] / "resources/criteria/criteria-formal.docx", 18)
+    criteria = mandatory_criteria()
+    routes_path = ROOT / "resources/criteria/criteria-routes.yaml"
     manifest = {
         "git": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
         "expected_sha256": sha(csv_path),
-        "criteria_sha256": sha(ROOT / "resources/criteria/criteria-formal.docx"),
+        "routes_sha256": sha(routes_path),
         "config_sha256": sha(ROOT / "config.yaml"),
         "model": engine.llm_settings.model,
         "retrieval": engine.retrieval_config.model_dump(),
@@ -104,7 +112,7 @@ def capture(args):
     }
     if (out / "manifest.json").exists():
         old = read_json(out / "manifest.json")
-        for key in ("git", "config_sha256", "expected_sha256", "criteria_sha256"):
+        for key in ("git", "config_sha256", "expected_sha256", "routes_sha256"):
             if old[key] != manifest[key]:
                 raise ValueError(f"Resume baseline mismatch: {key}")
         manifest = old

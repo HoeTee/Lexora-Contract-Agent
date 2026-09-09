@@ -5,7 +5,7 @@ from pathlib import Path
 
 from config import DATA_DIR
 from endpoints.runtime.auth import load_users, normalize_role
-from endpoints.runtime.tenancy import tenant_user_criteria_path, tenant_profiles_file
+from endpoints.runtime.tenancy import tenant_profiles_file
 from loggers.review_history import format_file_size, format_timestamp, load_history_records
 
 
@@ -58,19 +58,6 @@ def list_user_review_history(tenant_id: str, username: str) -> list[dict]:
         )
     rows.sort(key=lambda item: item.get("report_created_at") or "", reverse=True)
     return rows
-
-
-def get_user_criteria_info(tenant_id: str, username: str) -> dict:
-    path = tenant_user_criteria_path(tenant_id, username)
-    if not path.exists():
-        return {"exists": False, "size": "-", "updated_at": "-", "path": path}
-    stat = path.stat()
-    return {
-        "exists": True,
-        "size": format_file_size(stat.st_size),
-        "updated_at": format_timestamp(stat.st_mtime),
-        "path": path,
-    }
 
 
 def list_user_log_tasks(tenant_id: str, username: str) -> list[dict]:

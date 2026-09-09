@@ -18,7 +18,6 @@ from config import (
     API_RESULT_UPLOAD_ENABLED,
     API_URL_DOWNLOAD_MAX_BYTES,
     API_URL_DOWNLOAD_TIMEOUT_SECONDS,
-    DEFAULT_CRITERIA_PATH,
     QUEUE_ENABLED,
     infer_rerank_provider,
 )
@@ -69,7 +68,7 @@ class PreparedReviewSubmission:
     contract_path: Path
     criteria_source: str
     criteria_filename: str | None
-    criteria_path: Path
+    criteria_path: Path | None
     request_model_config: dict[str, str] | None
     meta_fields: dict[str, str]
 
@@ -332,9 +331,9 @@ async def submit_review_job(request: Request):
 async def _prepare_and_dispatch_submission(request: Request, client: ApiClient):
     content_type = request.headers.get("content-type", "").lower()
 
-    criteria_source = "default"
+    criteria_source = "mandatory"
     criteria_filename = None
-    selected_criteria_path = Path(DEFAULT_CRITERIA_PATH)
+    selected_criteria_path: Path | None = None
     request_model_config = None
     meta_fields: dict[str, str] = {}
 
@@ -625,7 +624,7 @@ async def _prepare_and_dispatch_submission(request: Request, client: ApiClient):
         contract_path=contract_path,
         criteria_source=criteria_source,
         criteria_filename=criteria_filename,
-        criteria_path=Path(selected_criteria_path),
+        criteria_path=selected_criteria_path,
         request_model_config=request_model_config,
         meta_fields=meta_fields,
     )

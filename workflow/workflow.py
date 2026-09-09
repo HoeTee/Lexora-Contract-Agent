@@ -32,7 +32,7 @@ from agents.summarizer import SummarizerAgent
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
-from routing import is_mandatory_criteria, load_mandatory_tasks, mandatory_source_manifest
+from routing import load_mandatory_tasks, mandatory_source_manifest
 from tools.document.reporting.docx_report import deduplicate_review_results_by_range
 
 
@@ -143,7 +143,7 @@ class ContractReviewWorkflow:
     async def run(
         self,
         contract_path: str,
-        criteria_path: str,
+        criteria_path: str | None = None,
         progress_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
         output_dir: str | None = None,
         output_path: str | None = None,
@@ -191,7 +191,7 @@ class ContractReviewWorkflow:
                 )
 
                 # Phase 1: Ingest files
-                await self._emit_progress(progress_callback, "ingesting", "Parsing contract and criteria files")
+                await self._emit_progress(progress_callback, "ingesting", "Parsing review input files")
                 async with self.trace.span("phase.ingest", run_type="phase"):
                     criteria_md, contract_md = await self._phase_ingest(contract_path, criteria_path)
 
@@ -205,10 +205,11 @@ class ContractReviewWorkflow:
                     index_metadata = await self._phase_build_index(contract_path)
 
                 # Phase 3: Plan tasks
-                criteria_file = Path(criteria_path)
+                criteria_file = Path(criteria_path) if criteria_path else None
                 self.criteria_source = {
-                    "filename": criteria_file.name,
-                    "sha256": hashlib.sha256(criteria_file.read_bytes()).hexdigest(),
+                    "source": "uploaded" if criteria_file else "mandatory",
+                    "filename": criteria_file.name if criteria_file else None,
+                    "sha256": hashlib.sha256(criteria_file.read_bytes()).hexdigest() if criteria_file else None,
                     "mandatory": mandatory_source_manifest(),
                 }
                 await self._emit_progress(progress_callback, "planning", "Extracting review criteria")
@@ -380,14 +381,18 @@ class ContractReviewWorkflow:
     async def _phase_ingest(
             self,
             contract_path: str,
-            criteria_path: str
+            criteria_path: str | None,
     ) -> tuple[str, str]:
-        """Phase 1: Ingest contract + criteria DOCX files."""
+        """Phase 1: ingest the contract and an optional uploaded criteria DOCX."""
         print("\n[Phase 1] Ingesting files...")
-        criteria_md = await self._ingest_markdown_file(criteria_path, "criteria")
+        criteria_md = (
+            await self._ingest_markdown_file(criteria_path, "criteria")
+            if criteria_path
+            else ""
+        )
         contract_md = await self._ingest_markdown_file(contract_path, "contract")
 
-        print(f"  Criteria: {len(criteria_md)} chars")
+        print(f"  Uploaded criteria: {len(criteria_md)} chars")
         print(f"  Contract: {len(contract_md)} chars")
         return criteria_md, contract_md
 
@@ -465,7 +470,7 @@ class ContractReviewWorkflow:
     async def _phase_plan(
             self,
             criteria_md: str,
-            criteria_path: str,
+            criteria_path: str | None,
     ) -> list[dict]:
         """Phase 3: split criteria deterministically, then extract per-criterion strategies."""
         print("\n[Phase 3] Planning tasks...")
@@ -491,7 +496,7 @@ class ContractReviewWorkflow:
         mandatory_tasks = load_mandatory_tasks()
         uploaded_tasks: list[dict] = []
         self._planner_tokens = 0
-        if not is_mandatory_criteria(criteria_path):
+        if criteria_path:
             skeletons = split_criteria_from_docx(criteria_path)
             for position, skeleton in enumerate(skeletons, 1):
                 skeleton["id"] = f"U{position:02d}"

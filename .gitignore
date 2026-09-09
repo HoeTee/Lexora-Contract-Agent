@@ -34,12 +34,10 @@ RAG_persist/
 *.tmp
 *.bak
 
-# Keep the committed fallback review criteria
+# Keep the committed mandatory review profile
 /resources/criteria/*
 !/resources/criteria/.gitkeep
-!/resources/criteria/criteria.docx
-!/resources/criteria/criteria-formal.docx
-!/resources/criteria/criteria-formal.routes.yaml
+!/resources/criteria/criteria-routes.yaml
 
 # Python environments, caches, and build artifacts
 __pycache__/

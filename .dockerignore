@@ -49,9 +49,7 @@ build/
 *.dotm
 *.pdf
 !resources/criteria/
-!resources/criteria/criteria.docx
-!resources/criteria/criteria-formal.docx
-!resources/criteria/criteria-formal.routes.yaml
+!resources/criteria/criteria-routes.yaml
 ~$*
 .~lock.*#
 *.tmp

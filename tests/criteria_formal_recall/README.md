@@ -1,6 +1,6 @@
 # criteria-formal 人工召回测试
 
-该目录使用10份不同合同测试 `resources/criteria/criteria-formal.docx` 的18个审查要点，
+该目录使用10份不同合同测试 `resources/criteria/criteria-routes.yaml` 的18个硬性审查要点，
 共180个审查用例。
 
 字段完整性按真实主流程验证：标准明确点名字段时由 `rule` 精确定位；要求检查全合同未填写内容时由 `scan` 分批交给 LLM 结合上下文判断。测试不通过正则预先认定占位符，也不把植入文本本身直接当成审查结论。
@@ -49,7 +49,7 @@ python tests/criteria_formal_recall/run_cases.py --concurrency 1 --task-timeout 
 python tests/criteria_formal_recall/run_cases.py --contract-id D03
 ```
 
-脚本明确上传 `criteria-formal.docx`，带批注合同和运行数据写入
+脚本不上传自定义审查要点，只验证固定 YAML 审查面；带批注合同和运行数据写入
 `results/<run_id>/`。运行时 `data/api/<task_id>/` 只用于读取正常API任务状态和结构化结果，
 测试集和测试报告不会写入项目 `data/`。
 

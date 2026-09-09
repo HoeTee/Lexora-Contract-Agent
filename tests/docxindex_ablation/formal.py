@@ -99,7 +99,6 @@ async def formal(args):
                     base_url=f"http://127.0.0.1:{5101 if variant == 'baseline' else 5102}",
                     cases_dir=SUITE / "cases",
                     expected_csv=SUITE / "expected_cases_10.csv",
-                    criteria=ROOT / "resources" / "criteria" / "criteria-formal.docx",
                     results_dir=directory,
                     api_task_root=ROOT / "data" / "api" / f"docxindex_ablation_{variant}" / "api",
                     concurrency=1,

@@ -9,7 +9,6 @@ from config import (
     API_CALLBACK_ENABLED,
     API_CALLBACK_FILE_FIELD,
     API_CALLBACK_URL,
-    DEFAULT_CRITERIA_PATH,
 )
 from endpoints.review.callbacks import post_api_review_callback
 from endpoints.review.job_worker import run_async_review_job
@@ -20,7 +19,6 @@ from endpoints.review.task_store import (
     output_dir,
     read_task,
     new_task_id,
-    save_task_input_copy,
     save_task_input_upload,
     task_api_events_path,
     write_task_log_event,
@@ -76,8 +74,8 @@ async def review_for_oa(
             meta_fields=meta_fields,
         )
 
-        selected_criteria_path = Path(DEFAULT_CRITERIA_PATH)
-        criteria_source = "default"
+        selected_criteria_path: Path | None = None
+        criteria_source = "mandatory"
         criteria_filename = None
         if criteria_file and criteria_file.filename:
             criteria_filename = safe_upload_filename(criteria_file.filename)
@@ -89,13 +87,6 @@ async def review_for_oa(
             validate_uploaded_docx(selected_criteria_path)
             validate_criteria_content(selected_criteria_path)
             criteria_source = "uploaded"
-        elif not selected_criteria_path.exists():
-            raise HTTPException(status_code=404, detail="Default review criteria file was not found.")
-        else:
-            selected_criteria_path = save_task_input_copy(
-                OA_CLIENT_DIR, task_id, selected_criteria_path, selected_criteria_path.name
-            )
-
         contract_path = save_task_input_upload(OA_CLIENT_DIR, task_id, file, filename)
         validate_uploaded_docx(contract_path)
         response_filename = build_report_display_name(filename)

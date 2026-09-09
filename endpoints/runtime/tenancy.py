@@ -68,15 +68,6 @@ def tenant_profiles_file(tenant_id: str) -> Path:
     return TENANTS_ROOT / validate_tenant_id(tenant_id) / "profiles.json"
 
 
-def tenant_criteria_dir(tenant_id: str) -> Path:
-    return TENANTS_ROOT / validate_tenant_id(tenant_id) / "criteria"
-
-
-def tenant_user_criteria_path(tenant_id: str, username: str) -> Path:
-    safe_username = safe_profile_name(username, "user")
-    return tenant_criteria_dir(tenant_id) / f"{safe_username}.docx"
-
-
 def safe_profile_name(value: str, fallback: str = "item") -> str:
     cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(value or "")).strip().strip(".")
     cleaned = re.sub(r"\s+", "_", cleaned)

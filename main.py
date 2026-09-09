@@ -9,7 +9,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from config import DEFAULT_CRITERIA_PATH, MCP_SERVER_TARGET
+from config import MCP_SERVER_TARGET
 from endpoints.runtime.document_validation import validate_criteria_content, validate_uploaded_docx
 from endpoints.runtime.filenames import build_report_display_name
 from loggers.agent_logger import reset_conversation_log_dir, set_conversation_log_dir
@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--criteria",
-        help="Optional review criteria DOCX path. Defaults to the system criteria file.",
+        help="Optional user review criteria DOCX path. Mandatory criteria always come from criteria-routes.yaml.",
     )
     parser.add_argument(
         "--output",
@@ -56,17 +56,14 @@ def resolve_output_path(contract_path: Path, output: str | None) -> Path:
 
 async def run_cli(contract: str, criteria: str | None = None, output: str | None = None) -> dict:
     contract_path = resolve_existing_docx(contract, "Contract")
-    criteria_path = (
-        resolve_existing_docx(criteria, "Review criteria")
-        if criteria
-        else resolve_existing_docx(DEFAULT_CRITERIA_PATH, "Default review criteria")
-    )
+    criteria_path = resolve_existing_docx(criteria, "Review criteria") if criteria else None
     output_path = resolve_output_path(contract_path, output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     validate_uploaded_docx(contract_path)
-    validate_uploaded_docx(criteria_path)
-    validate_criteria_content(criteria_path)
+    if criteria_path:
+        validate_uploaded_docx(criteria_path)
+        validate_criteria_content(criteria_path)
 
     with tempfile.TemporaryDirectory(prefix="contract-review-cli-") as temp_dir:
         temp_root = Path(temp_dir)
@@ -89,7 +86,7 @@ async def run_cli(contract: str, criteria: str | None = None, output: str | None
             )
             result = await workflow.run(
                 contract_path=str(contract_path),
-                criteria_path=str(criteria_path),
+                criteria_path=str(criteria_path) if criteria_path else None,
                 output_path=str(temp_output_path),
             )
         finally:

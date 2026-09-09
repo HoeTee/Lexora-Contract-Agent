@@ -140,16 +140,15 @@ volumes:
 
 输入文件来自远端部署宿主机；`.env`、`config.yaml` 和 Prompt 以只读方式供 API 与 worker 启动时读取，`profiles/` 和 `data/` 写入宿主机持久化目录，不写入镜像层。修改 Prompt 后，需要重启 API 服务和所有 worker。
 
-`profiles/` 可以为空。创建租户和用户后，程序会生成 `profiles/tenant_profiles.json`、`profiles/tenants/<tenant_id>/profiles.json` 和用户审查标准文件。该目录必须可写，因为管理 CLI、管理员后台和用户资料修改都会更新身份数据。
+`profiles/` 可以为空。创建租户和用户后，程序会生成 `profiles/tenant_profiles.json` 和 `profiles/tenants/<tenant_id>/profiles.json`；不会自动生成用户审查要点文件。该目录必须可写，因为管理 CLI、管理员后台和用户资料修改都会更新身份数据。
 
-固定18条标准及路线配置必须成对挂载到约定路径：
+固定18条标准及路线全部由一个只读 YAML 提供：
 
 ```yaml
-- ./criteria-formal.docx:/app/resources/criteria/criteria-formal.docx:ro
-- ./criteria-formal.routes.yaml:/app/resources/criteria/criteria-formal.routes.yaml:ro
+- ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
 ```
 
-输入来自远端宿主机当前目录；容器读取上述两个只读文件。不要用空目录覆盖 `/app/resources/criteria/`，也不要只替换 DOCX 而保留不匹配的路线配置。
+输入来自远端宿主机当前目录，容器只读该配置。用户自定义审查要点不通过 Compose 挂载；用户通过 API 或 Web 上传后，文件落入任务 `input/` 并通过 `./data:/app/data` 持久化，由 Planner 生成追加任务。
 
 ## 端口与健康检查
 
@@ -203,4 +202,4 @@ Celery task、broker、worker 与 workflow 内部并发的边界见 [智能体�
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：固定标准 DOCX 与 `criteria-formal.routes.yaml` 都必须随镜像或挂载目录提供。它们不写入 `config.yaml`；本地正式回归使用项目根目录 `docker-compose.yaml`，不能用部署包 compose 替代。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：`criteria-routes.yaml` 必须随镜像或挂载目录提供，不写入 `config.yaml`；用户 DOCX 只能通过 API/Web 上传。本地正式回归使用项目根目录 `docker-compose.yaml`，不能用部署包 compose 替代。

@@ -11,15 +11,15 @@
 最终审查必须展开结构树中的原文 node。
 ```
 
-当前审查要点来源：
+当前固定审查要点来源：
 
 ```text
-resources/criteria/criteria-formal.docx
+resources/criteria/criteria-routes.yaml
 ```
 
 ## 1. 审查要点与路由控制面
 
-`criteria-formal.docx` 的18条标准原文全部属于固定审查面；`criteria-formal.routes.yaml` 按 `criterion_number` 为每条提供固定 `RoutePlan`、`check_points`、`placement` 和可选 `review_instruction`。二者均位于 `resources/criteria/`，不通过 `config.yaml` 指定路径。
+`criteria-routes.yaml` 的每项 policy 直接提供 `id`、`section`、`criterion`、固定 `RoutePlan`、`check_points`、`placement` 和可选 `review_instruction`，是18条固定审查面的唯一运行时来源。用户审查要点 DOCX 只接受 API/Web 上传，不通过 Compose 挂载，也不作为固定配置。
 
 根目录 `routing/` 负责路线 schema、动态路线提示词和固定配置校验；`tools/docxindex/indexing/` 只建索引，`tools/docxindex/retrieval/` 只执行路线。用户上传标准仍允许使用全部五种路线，由 Planner 动态生成后交给同一执行器。
 

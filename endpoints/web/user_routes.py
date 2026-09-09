@@ -255,7 +255,7 @@ def build_history_record(paths, output_path: Path, task: dict) -> dict:
     contract_stat = paths.stored_contract_path.stat()
     report_stat = output_path.stat() if output_path.exists() else None
     task_input = task.get("input") if isinstance(task.get("input"), dict) else {}
-    criteria_source = task.get("criteria_source") or task_input.get("criteria_source", "default")
+    criteria_source = task.get("criteria_source") or task_input.get("criteria_source", "mandatory")
     return {
         "schema_version": HISTORY_SCHEMA_VERSION,
         "tenant_id": paths.tenant_id,
@@ -654,8 +654,8 @@ async def review_page(
                 status_code=400, 
                 detail="仅支持 DOCX 合同文件。",
             )
-        selected_criteria_path = paths.criteria_path
-        criteria_source = "default"
+        selected_criteria_path: Path | None = None
+        criteria_source = "mandatory"
         criteria_filename = None
         has_uploaded_criteria = bool(criteria_file and criteria_file.filename)
         if has_uploaded_criteria:
@@ -683,9 +683,6 @@ async def review_page(
                 original_filename=criteria_filename,
                 size_bytes=selected_criteria_path.stat().st_size,
             )
-        elif not paths.criteria_path.exists():
-            request.session["flash_error"] = f"未找到审查要点文件：{paths.criteria_path}"
-            return RedirectResponse(ctx_path("/web/work", ctx), status_code=303)
         contract_path = save_task_input_upload(
             client_dir,
             paths.task_id,

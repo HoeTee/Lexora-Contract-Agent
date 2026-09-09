@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from docx import Document
 
@@ -13,7 +13,7 @@ from workflow.workflow import ContractReviewWorkflow
 
 
 class MandatoryRoutingTests(unittest.TestCase):
-    def test_profile_maps_all_18_docx_criteria_to_fixed_routes(self) -> None:
+    def test_yaml_profile_defines_all_18_fixed_routes(self) -> None:
         tasks = load_mandatory_tasks()
 
         self.assertEqual(len(tasks), 18)
@@ -23,19 +23,45 @@ class MandatoryRoutingTests(unittest.TestCase):
         methods = {step["method"] for task in tasks for step in task["route"]["steps"]}
         self.assertEqual(methods, {"title", "region", "rule", "scan", "hybrid"})
 
-    def test_formal_criteria_phase_skips_planner_model_call(self) -> None:
+    def test_mandatory_only_phase_skips_planner_model_call(self) -> None:
         workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)
         workflow.state_store = None
         workflow.settings = None
         workflow.logger = SimpleNamespace(log=lambda **_kwargs: None)
 
         with patch("workflow.workflow.PlannerAgent", side_effect=AssertionError("Planner must be skipped")):
-            tasks = asyncio.run(
-                workflow._phase_plan("", "resources/criteria/criteria-formal.docx")
-            )
+            tasks = asyncio.run(workflow._phase_plan("", None))
 
         self.assertEqual(len(tasks), 18)
         self.assertEqual(workflow._planner_tokens, 0)
+
+    def test_uploaded_criteria_are_appended_as_planned_tasks(self) -> None:
+        workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)
+        workflow.state_store = None
+        workflow.settings = None
+        workflow.logger = SimpleNamespace(log=lambda **_kwargs: None)
+        planner = SimpleNamespace(
+            extract_strategies=AsyncMock(return_value={
+                "U01": {
+                    "route": {"steps": [{"method": "scan"}], "fallback": False},
+                    "placement": {"target": "inline", "note": ""},
+                }
+            }),
+            token_usage={"total_tokens": 12},
+        )
+        skeletons = [{"number": 1, "section": "用户标准", "criterion": "检查自定义事项"}]
+
+        with (
+            patch("workflow.workflow.split_criteria_from_docx", return_value=skeletons),
+            patch("workflow.workflow.PlannerAgent", return_value=planner),
+        ):
+            tasks = asyncio.run(workflow._phase_plan("custom", "uploaded-criteria.docx"))
+
+        self.assertEqual(len(tasks), 19)
+        self.assertEqual(tasks[-1]["id"], "U01")
+        self.assertEqual(tasks[-1]["review_source"], "uploaded")
+        planner.extract_strategies.assert_awaited_once()
+        self.assertEqual(workflow._planner_tokens, 12)
 
     def test_same_resolved_range_prefers_mandatory_over_uploaded(self) -> None:
         with TemporaryDirectory() as temp_dir:

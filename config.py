@@ -207,7 +207,6 @@ def infer_rerank_provider(model_name: str) -> str:
 MCP_SERVER_TARGET = "module:mcp_service.server.server"
 MCP_SERVER_URL = "http://localhost:8000/mcp"
 DOCS_DIR = str(PROJECT_ROOT_PATH / "docs")
-DEFAULT_CRITERIA_PATH = str(PROJECT_ROOT_PATH / "resources" / "criteria" / "criteria-formal.docx")
 REPORTS_DIR = str(PROJECT_ROOT_PATH / "reports")
 LOGS_DIR = str(PROJECT_ROOT_PATH / "logs" / "workflow")
 

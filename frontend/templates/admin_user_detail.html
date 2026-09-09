@@ -60,28 +60,6 @@
   </div>
 
   <section class="panel">
-    <div class="section-head">
-      <div><p class="eyebrow">审查要点</p><h2>默认审查要点</h2><p class="section-copy">管理该用户未上传临时审查要点时使用的默认文件。</p></div>
-      <span class="status-pill {{ 'status-enabled' if criteria.exists else 'status-disabled' }}">{{ "文件正常" if criteria.exists else "文件缺失" }}</span>
-    </div>
-    <div class="criteria-toolbar">
-      <div class="criteria-meta"><span>文件大小 <strong>{{ criteria.size }}</strong></span><span>更新时间 <strong>{{ criteria.updated_at }}</strong></span></div>
-      <div class="toolbar-actions">
-        {% if criteria.exists %}<a class="secondary-button compact-button" href="/web/admin/users/{{ target_user.username }}/criteria/download?ctx={{ ctx }}">下载</a>{% endif %}
-        <form method="post" action="/web/admin/users/{{ target_user.username }}/criteria/restore?ctx={{ ctx }}"><button type="submit" class="secondary-button compact-button">恢复系统默认</button></form>
-      </div>
-    </div>
-    <form method="post" action="/web/admin/users/{{ target_user.username }}/criteria/upload?ctx={{ ctx }}" enctype="multipart/form-data" class="criteria-upload-form">
-      <label class="compact-file-picker">
-        <input name="criteria_file" type="file" accept=".docx" required data-file-input>
-        <span class="secondary-button compact-button">选择 DOCX 文件</span>
-        <span class="compact-file-name" data-file-name>未选择文件</span>
-      </label>
-      <button type="submit" class="primary-button">上传并覆盖</button>
-    </form>
-  </section>
-
-  <section class="panel">
     <div class="section-head"><div><p class="eyebrow">审查历史</p><h2>成功任务</h2><p class="section-copy">共 {{ history|length }} 条成功记录。</p></div></div>
     {% if history %}
     <div class="table-frame">

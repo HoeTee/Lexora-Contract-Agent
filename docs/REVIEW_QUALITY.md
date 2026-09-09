@@ -2,7 +2,7 @@
 
 ## 范围与原则
 
-固定18条审查标准由 `resources/criteria/criteria-formal.docx` 提供权威原文，由同目录 `criteria-formal.routes.yaml` 提供固定路线和批注去向；它们跳过 Planner 和路由 LLM，但仍经过 Orchestrator、检索、SubAgent 与 Reflector。用户上传标准由 Planner 在现有 `title/rule/scan/region/hybrid` 五种路线中规划。此次不修改索引算法、进程并发或全局模型限流。
+固定18条审查标准及其路线、检查点和批注去向全部由 `resources/criteria/criteria-routes.yaml` 提供；它们跳过 Planner 和路由 LLM，但仍经过 Orchestrator、检索、SubAgent 与 Reflector。用户通过 API/Web 单独上传的 DOCX 才由 Planner 在现有 `title/rule/scan/region/hybrid` 五种路线中规划。此次不修改索引算法、进程并发或全局模型限流。
 
 审查依据是任务实际使用的标准原文。字段缺失不等于已填写值不一致；关键词命中不授权扩大禁用词范围。建议必须放回完整句子检查，不擅自改变起算条件、权利义务。名称中的书名号、编号、空格等引用格式差异不构成附件名称不一致。
 
