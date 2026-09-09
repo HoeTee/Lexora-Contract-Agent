@@ -36,12 +36,13 @@
 1. 字段完整性不使用业务正则判定。标准明确字段名时由 `rule` 定位，标准要求全合同检查且未限定字段时由 `scan` 分批交给 LLM 结合字段语义、相邻文字和表格关系判断。
 2. 已有反思调用接收检索证据、当前发现和先前未保留的发现；完整覆盖任务还接收逐证据决定并返回 coverage_gaps，不新增复核 Agent。
 3. Reflector 对每条 finding 返回 confirm/revise/remove。一个 finding 需修改不会连带屏蔽同一 criterion 中已确认的问题。
-4. 对“信息是否齐全”“包括……等”这类非穷举标准，scan 必须遍历批次内全部原文且不设候选 Top-K；Reviewer 必须逐项判断 scan 返回的字段候选，不能把示例字段当作封闭清单。
-4. pending_review 只写入 API 状态和日志；不得进入 AI 审查总结，不得暴露 criterion/finding 编号或 XML path。
-5. edit 位置逐处写入；evidence 永不产生批注。删除 merged_by_party 聚合器。旧结果含该 placement 时也按普通位置处理，不恢复聚合行为。
-6. Schema 要求每个 missing_value issue 只有一个 edit、每个 issue_id 唯一，并拒绝完全重复的 XML 位置、引用和缺陷类型；同段不同字段不因为同属 missing_value 就合并。不使用业务正则或模糊相似度阈值判断字段是否未填写。
-7. `issue_comment` 和 `comment_text` 禁止“同上”等上下文依赖表达及 `p311/path/node_id/检索结果N` 等内部定位；schema 失败后走现有定向重试。
-8. 保留输入 DOCX 已有人工及普通批注，替换作者为“AI 审查总结”的旧总结，确保最终只有一条总结。Summarizer 输入上限保持 90k。
+4. 同一审查输出中，两条 issue 不得复用完全相同的 edit 位置、缺陷类型和原文引用。校验错误会明确列出冲突的 issue_id：同一缺陷需合并，不同缺陷需缩小到各自的连续原文；字段标签整体不存在时使用 `anchors=[]`，不借用相邻正常文字挂批注。
+5. 对“信息是否齐全”“包括……等”这类非穷举标准，scan 必须遍历批次内全部原文且不设候选 Top-K；Reviewer 必须逐项判断 scan 返回的字段候选，不能把示例字段当作封闭清单。
+6. pending_review 只写入 API 状态和日志；不得进入 AI 审查总结，不得暴露 criterion/finding 编号或 XML path。
+7. edit 位置逐处写入；evidence 永不产生批注。删除 merged_by_party 聚合器。旧结果含该 placement 时也按普通位置处理，不恢复聚合行为。
+8. Schema 要求每个 missing_value issue 只有一个 edit、每个 issue_id 唯一，并拒绝完全重复的 XML 位置、引用和缺陷类型；同段不同字段不因为同属 missing_value 就合并。不使用业务正则或模糊相似度阈值判断字段是否未填写。
+9. `issue_comment` 和 `comment_text` 禁止“同上”等上下文依赖表达及 `p311/path/node_id/检索结果N` 等内部定位；schema 失败后走现有定向重试。
+10. 保留输入 DOCX 已有人工及普通批注，替换作者为“AI 审查总结”的旧总结，确保最终只有一条总结。Summarizer 输入上限保持 90k。
 
 ## 任务与状态
 

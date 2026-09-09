@@ -173,7 +173,7 @@ class SubAgentOutput(StrictOutputModel):
         issue_ids = [issue.issue_id for issue in self.issues]
         if len(issue_ids) != len(set(issue_ids)):
             raise ValueError("each issue must have a unique issue_id")
-        edit_keys: set[tuple[str, str, str, str]] = set()
+        edit_keys: dict[tuple[str, str, str, str], str] = {}
         for issue in self.issues:
             for anchor in issue.anchors:
                 if anchor.role != "edit":
@@ -185,8 +185,18 @@ class SubAgentOutput(StrictOutputModel):
                     anchor.defect_type,
                 )
                 if key in edit_keys:
-                    raise ValueError("duplicate edit anchor and defect type across issues")
-                edit_keys.add(key)
+                    first_issue_id = edit_keys[key]
+                    raise ValueError(
+                        "duplicate edit location across issues "
+                        f"{first_issue_id} and {issue.issue_id}: "
+                        f"{anchor.xml_anchor_type}/{anchor.xml_anchor_id}, "
+                        f"defect_type={anchor.defect_type}, quoted_text={anchor.quoted_text!r}. "
+                        "If both describe one defect, merge them into one issue. If they describe "
+                        "different defects, each quoted_text must be the narrow continuous source "
+                        "text that directly contains its own defect. When a field is wholly absent "
+                        "and has no source location, use anchors=[] instead of borrowing adjacent text."
+                    )
+                edit_keys[key] = issue.issue_id
         coverage_keys = [
             (decision.xml_anchor_type, decision.xml_anchor_id)
             for decision in self.coverage_decisions

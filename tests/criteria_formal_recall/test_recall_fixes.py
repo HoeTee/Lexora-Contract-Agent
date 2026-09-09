@@ -32,6 +32,30 @@ from workflow.workflow import _prepare_inline_results
 
 
 class AnchorEvidenceValidationTests(unittest.TestCase):
+    def test_duplicate_edit_error_names_both_issues_and_repair_rule(self) -> None:
+        anchor = {
+            "role": "edit",
+            "defect_type": "missing_value",
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "path:body/p31",
+            "quoted_text": "乙方：某公司 地址：【未填写】",
+            "comment_text": "请填写该字段。",
+        }
+        issues = []
+        for issue_id in ("H01.1", "H01.2"):
+            issues.append({
+                "issue_id": issue_id,
+                "risk_level": "low",
+                "issue_comment": "字段未填写。",
+                "anchors": [anchor],
+                "reasoning": "原文为占位内容。",
+                "criterion": "基础信息齐全。",
+                "check_point": "逐字段检查。",
+            })
+
+        with self.assertRaisesRegex(ValueError, r"H01\.1 and H01\.2.*anchors=\[\]"):
+            SubAgentOutput.model_validate({"status": "issues_found", "issues": issues})
+
     def test_blank_field_examples_are_semantic_scan_instructions(self) -> None:
         prompt = scan_prompt(
             "检查合同所有字段是否填写完整",
