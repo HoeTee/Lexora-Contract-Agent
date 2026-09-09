@@ -47,6 +47,8 @@ def _finding_entries(opinion: dict) -> dict[str, dict]:
             local_issue = deepcopy(issue)
             if anchor:
                 local_issue["anchors"] = [deepcopy(anchor), *deepcopy(evidence)]
+                if len(edits) > 1:
+                    local_issue["issue_id"] = f"{issue.get('issue_id')}.{edit_index + 1}"
             entries[key] = {"issue": local_issue, "anchor": deepcopy(anchor)}
     return entries
 

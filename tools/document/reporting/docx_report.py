@@ -262,16 +262,16 @@ class DocxReportGenerator:
     def _collect_paragraph_anchors(parent, path_prefix: str = "body/") -> list[ParagraphAnchor]:
         """Collect commentable paragraphs from body text and nested table cells."""
         anchors: list[ParagraphAnchor] = []
-        seen_elements: set[int] = set()
+        seen_elements: set[CT_P] = set()
 
         for block_index, block in DocxReportGenerator._iter_indexed_blocks(parent):
             if isinstance(block, Paragraph):
                 block_text = block.text.strip()
                 normalized_text = DocxReportGenerator._normalize_text(block_text)
-                element_id = id(block._element)
-                if not normalized_text or element_id in seen_elements:
+                element = block._element
+                if not normalized_text or element in seen_elements:
                     continue
-                seen_elements.add(element_id)
+                seen_elements.add(element)
                 anchors.append(
                     ParagraphAnchor(
                         paragraph=block,
@@ -353,14 +353,14 @@ class DocxReportGenerator:
     def _collect_paragraph_text_views(parent, path_prefix: str = "body/") -> list[ParagraphTextView]:
         """Collect paragraph text views from body text and nested table cells."""
         views: list[ParagraphTextView] = []
-        seen_elements: set[int] = set()
+        seen_elements: set[CT_P] = set()
 
         for block_index, block in DocxReportGenerator._iter_indexed_blocks(parent):
             if isinstance(block, Paragraph):
-                element_id = id(block._element)
-                if element_id in seen_elements:
+                element = block._element
+                if element in seen_elements:
                     continue
-                seen_elements.add(element_id)
+                seen_elements.add(element)
                 view = DocxReportGenerator._build_paragraph_text_view(
                     block,
                     f"{path_prefix}p{block_index}",

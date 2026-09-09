@@ -44,6 +44,8 @@
 
 同一审查要点在 Reflector 修订后由程序按原文 edit anchor 恢复已有 `issue_id`；新增问题若占用了已有编号，程序分配无碰撞后缀。修订模型或修订结果校验失败时保留上一份已通过 schema 的结果并标记为 `pending_review`。单个要点的异常记录为该要点 `ERROR`，只要仍有至少一个有效要点，工作流继续生成总结和 DOCX；只有全部要点均失败时才终止整份任务。
 
+SubAgent 的一个 issue 含多个 edit anchor 时，FindingLedger 按锚点拆成独立 finding，并为拆分结果生成唯一的局部 `issue_id`；原 issue 的判断内容不变，每个位置仍分别进入 Reflector 与批注写入器。
+
 基础设施：`agents/base_agent.py`（`Agent` 基类与 `Settings` 模型配置）、`agents/schemas.py`（结构化输出 schema）、`agents/prompts/cn_prompts.yaml`（所有提示词，含审查边界）。
 
 ## 智能体结构化输出 schema

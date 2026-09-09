@@ -25,8 +25,27 @@ def xpath_one(element: etree._Element, query: str) -> etree._Element | None:
 
 
 def text_of(element: etree._Element) -> str:
-    parts = element.xpath(".//w:t/text() | .//w:delText/text()", namespaces=NS)
-    return "".join(str(part) for part in parts).strip()
+    """Return text visible in the current Word revision view."""
+    parts: list[str] = []
+    for text_element in element.xpath(".//w:t", namespaces=NS):
+        if has_ancestor_within(text_element, element, {"del", "moveFrom"}):
+            continue
+        parts.append(text_element.text or "")
+    return "".join(parts).strip()
+
+
+def has_ancestor_within(
+    element: etree._Element,
+    stop: etree._Element,
+    local_names: set[str],
+) -> bool:
+    """Return whether an ancestor before ``stop`` has one of the local names."""
+    parent = element.getparent()
+    while parent is not None and parent is not stop:
+        if etree.QName(parent).localname in local_names:
+            return True
+        parent = parent.getparent()
+    return False
 
 
 def xml_path(element: etree._Element) -> str:

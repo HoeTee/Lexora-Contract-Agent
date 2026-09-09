@@ -32,6 +32,7 @@ from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
 from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.llm.prompts import scan_prompt
+from tools.docxindex.parser import read_docx_items
 from tools.docxindex.retriever import _format_anchor_context, _should_use_fallback
 from tools.docxindex.retrieval.rule import _literal_terms
 from workflow.workflow import _incomplete_review_notices, _prepare_inline_results
@@ -1080,6 +1081,80 @@ class RevisionIdentityTests(unittest.TestCase):
         self.assertEqual(ids_by_comment["账号未填写。"], "1.9")
         self.assertEqual(ids_by_comment["开户银行未填写。"], "1.9.new1")
         self.assertEqual(len(set(ids_by_comment.values())), 3)
+
+
+class VisibleRevisionTextTests(unittest.TestCase):
+    @staticmethod
+    def _append_text(parent, text: str, *, text_tag: str = "w:t") -> None:
+        run = OxmlElement("w:r")
+        text_element = OxmlElement(text_tag)
+        text_element.text = text
+        run.append(text_element)
+        parent.append(run)
+
+    def test_index_and_report_use_same_current_revision_text(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "tracked.docx"
+            document = Document()
+            paragraph = document.add_paragraph()
+            self._append_text(paragraph._p, "当前文字")
+
+            deleted = OxmlElement("w:del")
+            self._append_text(deleted, "已删除文字", text_tag="w:delText")
+            paragraph._p.append(deleted)
+
+            moved_from = OxmlElement("w:moveFrom")
+            self._append_text(moved_from, "已移走文字")
+            paragraph._p.append(moved_from)
+
+            inserted = OxmlElement("w:ins")
+            self._append_text(inserted, "新增文字")
+            paragraph._p.append(inserted)
+            document.save(path)
+
+            items = read_docx_items(path)
+            report_nodes = build_docx_anchor_nodes(str(path))
+
+        paragraph_item = next(item for item in items if item.kind == "p")
+        paragraph_node = next(node for node in report_nodes if node.anchor_type == "paragraph")
+        self.assertEqual(paragraph_item.raw_text, "当前文字新增文字")
+        self.assertEqual(paragraph_item.text, paragraph_node.text)
+        self.assertNotIn("已删除文字", paragraph_item.text)
+        self.assertNotIn("已移走文字", paragraph_item.text)
+
+    def test_anchor_collectors_do_not_drop_later_paragraphs_when_object_ids_recycle(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "many-paragraphs.docx"
+            document = Document()
+            for index in range(300):
+                document.add_paragraph(f"第{index + 1}个可见段落")
+            document.save(path)
+
+            anchor_nodes = build_docx_anchor_nodes(str(path))
+            report_document = Document(path)
+            report_views = DocxReportGenerator._collect_paragraph_text_views(report_document)
+
+        paragraph_nodes = [node for node in anchor_nodes if node.anchor_type == "paragraph"]
+        self.assertEqual(len(paragraph_nodes), 300)
+        self.assertEqual(len(report_views), 300)
+        self.assertEqual(paragraph_nodes[-1].anchor_id, "path:body/p300")
+        self.assertEqual(report_views[-1].path, "body/p300")
+
+
+class FindingEntryIdentityTests(unittest.TestCase):
+    def test_multi_edit_issue_gets_unique_local_issue_ids(self) -> None:
+        issue = _subagent_output("3", "两个位置分别需要修改。", "path:body/p64")["issues"][0]
+        second_anchor = {
+            **issue["anchors"][0],
+            "xml_anchor_id": "path:body/p65",
+            "quoted_text": "第二处原文",
+        }
+        issue["anchors"].append(second_anchor)
+        opinion = {"status": "issues_found", "issues": [issue], "coverage_decisions": []}
+
+        entries = _FindingLedger(opinion).current(opinion)
+
+        self.assertEqual([entry["issue_id"] for entry in entries], ["3.1", "3.2"])
 
 
 class PreparedContractValidationTests(unittest.TestCase):

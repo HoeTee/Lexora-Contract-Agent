@@ -169,6 +169,8 @@ scripts/docxindex/outputs/index/{合同目录名}/document_index.json
 
 `p_...` / `tbl_...` 不是业务 ID，而是检索结果和批注工具之间的桥梁。
 
+索引文本与批注定位统一采用 Word 当前可见修订视图：读取普通及 `w:ins` 中的 `w:t`，忽略 `w:del`、`w:moveFrom` 及 `w:delText`。XML 子节点仍保留在原位置，`body_child_index` 和生成的 `path:body/p...`、`path:body/tbl...` 不会因为过滤删除文字而重新编号。
+
 ## 6. 顶层区域
 
 结构树必须保留四个顶层区域：

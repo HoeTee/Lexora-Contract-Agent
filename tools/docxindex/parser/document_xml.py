@@ -12,7 +12,7 @@ from tools.docxindex.schema import BodyItem
 from .numbering_xml import NumberingResolver, apply_numbering_prefix
 from .package import DocxPackage
 from .styles_xml import load_styles, style_outline
-from .xml_utils import NS, attr_value, text_of, w_tag, xml_path, xpath_one
+from .xml_utils import NS, attr_value, has_ancestor_within, text_of, w_tag, xml_path, xpath_one
 
 
 def table_text(element: etree._Element) -> str:
@@ -57,7 +57,9 @@ def paragraph_item(
     total_chars = 0
     bold_chars = 0
     sizes: list[int] = []
-    for run in element.xpath("./w:r", namespaces=NS):
+    for run in element.xpath(".//w:r", namespaces=NS):
+        if has_ancestor_within(run, element, {"del", "moveFrom"}):
+            continue
         run_text = text_of(run)
         if not run_text:
             continue

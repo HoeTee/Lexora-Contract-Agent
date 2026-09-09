@@ -82,15 +82,15 @@ def build_docx_anchor_nodes(docx_path: str) -> list[DocxAnchorNode]:
     """Build paragraph/table retrieval nodes with stable DOCX XML anchor metadata."""
     doc = Document(docx_path)
     nodes: list[DocxAnchorNode] = []
-    seen_paragraphs: set[int] = set()
+    seen_paragraphs: set[CT_P] = set()
 
     def walk(parent, path_prefix: str) -> None:
         for block_index, block in iter_indexed_blocks(parent):
             if isinstance(block, Paragraph):
-                element_id = id(block._element)
-                if element_id in seen_paragraphs:
+                element = block._element
+                if element in seen_paragraphs:
                     continue
-                seen_paragraphs.add(element_id)
+                seen_paragraphs.add(element)
                 path = f"{path_prefix}p{block_index}"
                 text = paragraph_visible_text(block).strip()
                 if text:
