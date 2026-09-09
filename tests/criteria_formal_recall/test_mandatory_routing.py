@@ -22,6 +22,7 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertTrue(all(not task["fallback_llm_route"] for task in tasks))
         self.assertEqual(tasks[11]["dedupe_domain"], "language_quality")
         self.assertEqual(tasks[14]["dedupe_domain"], "language_quality")
+        self.assertTrue(tasks[10]["evidence_pair_required"])
         methods = {step["method"] for task in tasks for step in task["route"]["steps"]}
         self.assertEqual(methods, {"title", "region", "rule", "scan", "hybrid"})
 

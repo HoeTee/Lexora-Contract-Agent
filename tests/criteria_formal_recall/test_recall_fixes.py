@@ -545,6 +545,44 @@ class WorkflowPresentationTests(unittest.TestCase):
         self.assertEqual(len(confirmed), 1)
         self.assertEqual(confirmed[0]["finding_id"], finding_id)
 
+    def test_finding_id_stays_stable_when_comment_and_anchor_are_revised(self) -> None:
+        opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
+        ledger = _FindingLedger(opinion)
+        original_id = ledger.current(opinion)[0]["finding_id"]
+        revised = json.loads(json.dumps(opinion, ensure_ascii=False))
+        revised["issues"][0]["issue_comment"] = "修正后的独立问题说明。"
+        revised["issues"][0]["anchors"] = []
+        ledger.observe(revised)
+
+        self.assertEqual(ledger.current(revised)[0]["finding_id"], original_id)
+        self.assertEqual(ledger.missing(revised), [])
+
+    def test_comparison_policy_requires_edit_and_evidence(self) -> None:
+        opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
+        self.assertEqual(
+            len(OrchestratorAgent._policy_output_errors(
+                opinion,
+                {"evidence_pair_required": True},
+            )),
+            1,
+        )
+        opinion["issues"][0]["anchors"].append({
+            "role": "evidence",
+            "defect_type": "inconsistency",
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "path:attachments/p2",
+            "quoted_text": "附件对照原文。",
+            "comment_text": "",
+        })
+
+        self.assertEqual(
+            OrchestratorAgent._policy_output_errors(
+                opinion,
+                {"evidence_pair_required": True},
+            ),
+            [],
+        )
+
     def test_ambiguous_different_advice_is_not_merged_only_by_criterion(self) -> None:
         for result in self.results:
             result["issues"][0]["anchors"][0]["quoted_text"] = "乙方向甲方发贷。"

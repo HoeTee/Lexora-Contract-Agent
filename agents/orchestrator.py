@@ -36,22 +36,13 @@ _PLACEMENT_DIRECTIVES = {
 }
 
 def _finding_entries(opinion: dict) -> dict[str, dict]:
-    """Index review findings by their edit location and defect type."""
+    """Index findings by the SubAgent's stable issue id and edit ordinal."""
     entries: dict[str, dict] = {}
     for issue in opinion.get("issues", []):
         edits = [anchor for anchor in issue.get("anchors", []) if anchor.get("role", "edit") == "edit"]
         evidence = [anchor for anchor in issue.get("anchors", []) if anchor.get("role") == "evidence"]
-        for anchor in edits or [None]:
-            identity = (
-                [
-                    anchor.get("xml_anchor_type"),
-                    anchor.get("xml_anchor_id"),
-                    "".join(anchor.get("quoted_text", "").split()),
-                    anchor.get("defect_type", "other"),
-                ]
-                if anchor
-                else [issue.get("check_point"), issue.get("issue_comment")]
-            )
+        for edit_index, anchor in enumerate(edits or [None]):
+            identity = [issue.get("issue_id"), edit_index]
             key = hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()[:20]
             local_issue = deepcopy(issue)
             if anchor:
@@ -479,6 +470,21 @@ class OrchestratorAgent:
             errors.append(f"标记为 issue 的证据没有对应 edit 批注：{missing_issues}")
         return errors
 
+    @staticmethod
+    def _policy_output_errors(parsed_opinion: dict, criterion: dict) -> list[str]:
+        """Validate output invariants explicitly declared by a routing policy."""
+        if not criterion.get("evidence_pair_required"):
+            return []
+        errors = []
+        for issue in parsed_opinion.get("issues") or []:
+            roles = {anchor.get("role", "edit") for anchor in issue.get("anchors") or []}
+            if not {"edit", "evidence"}.issubset(roles):
+                errors.append(
+                    f"issue {issue.get('issue_id')} 必须同时包含正文 edit 和附件 evidence；"
+                    "只有单侧证据时删除该问题"
+                )
+        return errors
+
     async def _build_missing_text_review_notes(
         self,
         parsed_opinion: dict,
@@ -696,6 +702,22 @@ class OrchestratorAgent:
                     "SubAgent complete-region coverage audit failed: "
                     + "; ".join(self._coverage_audit_errors(parsed_opinion, context))
                 )
+        for _ in range(2):
+            policy_errors = self._policy_output_errors(parsed_opinion, criterion)
+            if not policy_errors:
+                break
+            parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                sub_agent,
+                "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
+                + "\n请返回完整修正后的 JSON，不得保留无双侧证据的对照问题。",
+                SubAgentOutput,
+                SUB_AGENT_EXPECTED_JSON,
+            )
+        else:
+            raise AgentOutputValidationError(
+                "SubAgent routing-policy output validation failed: "
+                + "; ".join(self._policy_output_errors(parsed_opinion, criterion))
+            )
         anchor_validation = self._validate_and_repair_anchors(parsed_opinion, context)
 
         if self.logger:
@@ -813,6 +835,21 @@ class OrchestratorAgent:
                                 "SubAgent complete-region coverage audit failed after reflection: "
                                 + "; ".join(remaining_errors)
                             )
+                policy_errors = self._policy_output_errors(parsed_opinion, criterion)
+                if policy_errors:
+                    parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                        sub_agent,
+                        "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
+                        + "\n请删除无法提供正文 edit 与附件 evidence 双侧证据的对照问题。",
+                        SubAgentOutput,
+                        SUB_AGENT_EXPECTED_JSON,
+                    )
+                    remaining_policy_errors = self._policy_output_errors(parsed_opinion, criterion)
+                    if remaining_policy_errors:
+                        raise AgentOutputValidationError(
+                            "SubAgent routing-policy output validation failed after reflection: "
+                            + "; ".join(remaining_policy_errors)
+                        )
                 round_validation = self._validate_and_repair_anchors(parsed_opinion, context)
                 for key, value in round_validation.items():
                     anchor_validation[key] = anchor_validation.get(key, 0) + value
