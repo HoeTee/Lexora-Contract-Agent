@@ -74,10 +74,32 @@ def _preserve_revision_issue_ids(previous: dict, revised: dict) -> dict:
         if (identity := _issue_edit_identity(issue)) is not None
     }
     normalized = deepcopy(revised)
-    for issue in normalized.get("issues", []):
+    issues = normalized.get("issues", [])
+
+    # Reserve restored IDs first. A newly inserted finding may reuse an ordinal
+    # that belongs to a later existing finding after the model renumbers the list.
+    restored_ids: set[str] = set()
+    unmatched_issues: list[dict] = []
+    for issue in issues:
         identity = _issue_edit_identity(issue)
         if identity in previous_ids:
-            issue["issue_id"] = previous_ids[identity]
+            restored_id = previous_ids[identity]
+            issue["issue_id"] = restored_id
+            restored_ids.add(restored_id)
+        else:
+            unmatched_issues.append(issue)
+
+    used_ids = set(restored_ids)
+    for issue in unmatched_issues:
+        proposed_id = str(issue.get("issue_id") or "issue")
+        candidate = proposed_id
+        suffix = 1
+        while candidate in used_ids:
+            candidate = f"{proposed_id}.new{suffix}"
+            suffix += 1
+        issue["issue_id"] = candidate
+        used_ids.add(candidate)
+
     return SubAgentOutput.model_validate(normalized).model_dump(mode="json")
 
 
@@ -252,7 +274,12 @@ class OrchestratorAgent:
             SubAgentOutput,
             SUB_AGENT_EXPECTED_JSON,
         )
-        normalized = _preserve_revision_issue_ids(previous, revised)
+        try:
+            normalized = _preserve_revision_issue_ids(previous, revised)
+        except ValueError as exc:
+            raise AgentOutputValidationError(
+                f"{sub_agent.name} revision identity normalization failed: {exc}"
+            ) from exc
         return normalized, json.dumps(normalized, ensure_ascii=False)
 
     async def _get_tools(self) -> list[dict]:
@@ -943,66 +970,86 @@ class OrchestratorAgent:
                     break
                 print(f"[Orchestrator] {cid}: REJECT round {round_num+1}, refining...")
                 previous_opinion = parsed_opinion
-                parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
-                    sub_agent,
-                    f"请根据以下质量审查反馈，补充和完善你的审查结果：\n\n{review.get('feedback', '')}",
-                    previous_opinion,
-                )
-                review_context = self._review_evidence_context(context, sub_agent)
-                repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
-                for key, value in repair_stats.items():
-                    anchor_validation[key] = anchor_validation.get(key, 0) + value
-                if coverage_audit:
-                    coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
-                    if coverage_errors:
-                        previous_opinion = parsed_opinion
-                        parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
-                            sub_agent,
-                            "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
-                            + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
-                            previous_opinion,
-                        )
-                        review_context = self._review_evidence_context(context, sub_agent)
-                        repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
-                        for key, value in repair_stats.items():
-                            anchor_validation[key] = anchor_validation.get(key, 0) + value
-                        remaining_errors = self._coverage_audit_errors(parsed_opinion, context)
-                        if remaining_errors:
-                            raise AgentOutputValidationError(
-                                "SubAgent complete-region coverage audit failed after reflection: "
-                                + "; ".join(remaining_errors)
-                            )
-                policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
-                if policy_errors:
-                    previous_opinion = parsed_opinion
+                try:
                     parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                         sub_agent,
-                        "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
-                        + "\n请删除无法提供正文 edit 与附件 evidence 双侧证据的对照问题。",
+                        f"请根据以下质量审查反馈，补充和完善你的审查结果：\n\n{review.get('feedback', '')}",
                         previous_opinion,
                     )
                     review_context = self._review_evidence_context(context, sub_agent)
                     repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
                     for key, value in repair_stats.items():
                         anchor_validation[key] = anchor_validation.get(key, 0) + value
-                    remaining_policy_errors = self._policy_output_errors(
-                        parsed_opinion,
-                        criterion,
-                        review_context,
+                    if coverage_audit:
+                        coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
+                        if coverage_errors:
+                            previous_opinion = parsed_opinion
+                            parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
+                                sub_agent,
+                                "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
+                                + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
+                                previous_opinion,
+                            )
+                            review_context = self._review_evidence_context(context, sub_agent)
+                            repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+                            for key, value in repair_stats.items():
+                                anchor_validation[key] = anchor_validation.get(key, 0) + value
+                            remaining_errors = self._coverage_audit_errors(parsed_opinion, context)
+                            if remaining_errors:
+                                raise AgentOutputValidationError(
+                                    "SubAgent complete-region coverage audit failed after reflection: "
+                                    + "; ".join(remaining_errors)
+                                )
+                    policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
+                    if policy_errors:
+                        previous_opinion = parsed_opinion
+                        parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
+                            sub_agent,
+                            "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
+                            + "\n请删除无法提供正文 edit 与附件 evidence 双侧证据的对照问题。",
+                            previous_opinion,
+                        )
+                        review_context = self._review_evidence_context(context, sub_agent)
+                        repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+                        for key, value in repair_stats.items():
+                            anchor_validation[key] = anchor_validation.get(key, 0) + value
+                        remaining_policy_errors = self._policy_output_errors(
+                            parsed_opinion,
+                            criterion,
+                            review_context,
+                        )
+                        if remaining_policy_errors:
+                            raise AgentOutputValidationError(
+                                "SubAgent routing-policy output validation failed after reflection: "
+                                + "; ".join(remaining_policy_errors)
+                            )
+                    if coverage_audit:
+                        remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
+                        if remaining_coverage_errors:
+                            raise AgentOutputValidationError(
+                                "SubAgent complete-region coverage audit failed after reflection repair: "
+                                + "; ".join(remaining_coverage_errors)
+                            )
+                    ledger.observe(parsed_opinion)
+                except (AgentOutputValidationError, ModelCallError) as exc:
+                    parsed_opinion = previous_opinion
+                    quality_status = "pending_review"
+                    print(
+                        f"[Orchestrator] {cid}: refinement unavailable; "
+                        f"preserving the latest schema-valid review: {exc}"
                     )
-                    if remaining_policy_errors:
-                        raise AgentOutputValidationError(
-                            "SubAgent routing-policy output validation failed after reflection: "
-                            + "; ".join(remaining_policy_errors)
+                    if self.logger:
+                        self.logger.log(
+                            phase="Reflect",
+                            sender=f"SubAgent_{cid}",
+                            receiver="Orchestrator",
+                            action=f"revision_fallback({cid}, round={round_num+1})",
+                            input_summary=review.get("feedback", ""),
+                            output_summary=f"{type(exc).__name__}: {exc}",
+                            tokens=sub_agent.token_usage.get("total_tokens", 0),
+                            duration=round(time.time() - start, 2),
                         )
-                if coverage_audit:
-                    remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
-                    if remaining_coverage_errors:
-                        raise AgentOutputValidationError(
-                            "SubAgent complete-region coverage audit failed after reflection repair: "
-                            + "; ".join(remaining_coverage_errors)
-                        )
-                ledger.observe(parsed_opinion)
+                    break
         else:
             print(f"[Orchestrator] {cid}: Max {MAX_REFLECTION_ROUNDS} rounds reached")
 
@@ -1125,14 +1172,10 @@ class OrchestratorAgent:
         results = await asyncio.gather(*execute_tasks, return_exceptions=True)
 
         final_results = []
-        fatal_errors: list[tuple[str, Exception]] = []
         for i, result in enumerate(results):
             if isinstance(result, Exception):
                 criterion = criteria_list[i]
                 cid = str(criterion["id"])
-                if not isinstance(result, (AgentOutputValidationError, ModelCallError)):
-                    fatal_errors.append((cid, result))
-                    continue
                 print(f"[Orchestrator] Error on criterion {cid}: {result}")
                 final_results.append(
                     {
@@ -1152,10 +1195,6 @@ class OrchestratorAgent:
                 )
             else:
                 final_results.append(result)
-
-        if fatal_errors:
-            cid, error = fatal_errors[0]
-            raise RuntimeError(f"Unexpected criterion execution failure in {cid}: {error}") from error
 
         if final_results and all(result.get("status") == "ERROR" for result in final_results):
             raise RuntimeError("All criteria failed; no valid review result is available for reporting.")

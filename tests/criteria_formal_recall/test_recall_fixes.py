@@ -953,6 +953,30 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "All criteria failed"):
             await orchestrator.execute_criteria(self._criteria())
 
+    async def test_unexpected_single_criterion_error_keeps_other_result(self) -> None:
+        orchestrator = OrchestratorAgent()
+
+        async def execute(criterion: dict, *, max_attempts: int) -> dict:
+            self.assertEqual(max_attempts, 2)
+            if criterion["id"] == "H01":
+                raise ValueError("post-revision validation failed")
+            return {
+                "criterion_id": criterion["id"],
+                "criterion": criterion["criterion"],
+                "section": criterion["section"],
+                "issues": [],
+                "status": "COMPLIANT",
+                "quality_status": "not_required",
+                "tokens": 0,
+            }
+
+        orchestrator._execute_criterion_with_recovery = execute  # type: ignore[method-assign]
+
+        results = await orchestrator.execute_criteria(self._criteria())
+
+        self.assertEqual([result["status"] for result in results], ["ERROR", "COMPLIANT"])
+        self.assertEqual(results[0]["error_type"], "ValueError")
+
 
 class SummarizerPromptBudgetTests(unittest.TestCase):
     def test_summary_output_replaces_internal_numbering_jargon(self) -> None:
@@ -1022,6 +1046,40 @@ class RevisionIdentityTests(unittest.TestCase):
         normalized = _preserve_revision_issue_ids(previous, revised)
 
         self.assertEqual(normalized["issues"][0]["issue_id"], "2")
+
+    def test_revision_assigns_collision_free_id_to_inserted_finding(self) -> None:
+        previous = {
+            "status": "issues_found",
+            "applicability_reason": "",
+            "issues": [
+                _subagent_output("1.9", "账号未填写。", "path:body/p37")["issues"][0],
+                {
+                    **_subagent_output("1.10", "首部提示缺失。", "path:body/p40")["issues"][0],
+                    "anchors": [],
+                },
+            ],
+            "coverage_decisions": [],
+        }
+        revised = {
+            "status": "issues_found",
+            "applicability_reason": "",
+            "issues": [
+                _subagent_output("1.9", "开户银行未填写。", "path:body/p36")["issues"][0],
+                _subagent_output("1.10", "账号未填写。", "path:body/p37")["issues"][0],
+                {
+                    **_subagent_output("1.11", "首部提示缺失。", "path:body/p40")["issues"][0],
+                    "anchors": [],
+                },
+            ],
+            "coverage_decisions": [],
+        }
+
+        normalized = _preserve_revision_issue_ids(previous, revised)
+
+        ids_by_comment = {issue["issue_comment"]: issue["issue_id"] for issue in normalized["issues"]}
+        self.assertEqual(ids_by_comment["账号未填写。"], "1.9")
+        self.assertEqual(ids_by_comment["开户银行未填写。"], "1.9.new1")
+        self.assertEqual(len(set(ids_by_comment.values())), 3)
 
 
 class PreparedContractValidationTests(unittest.TestCase):
