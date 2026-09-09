@@ -25,10 +25,10 @@ resources/criteria/criteria-routes.yaml
 
 | 路线 | 固定审查要点示例 | 执行方式 |
 |---|---|---|
-| `title` | 2、5、8、13 | 返回完整一级标题目录供模型判断 |
+| `title` | 2、5、8、13、18 | 返回完整一级标题目录供模型判断；18用它核对实际附件标题 |
 | `rule` | 9、16 | 对标准明确给出的词语执行全文精确检索 |
 | `scan` | 3、12、15 | 按 token 分批遍历全部原文 anchor 并让模型筛选候选 |
-| `region` | 1、4、6、10、11、17、18 | 完整或语义读取固定区域、标题章节；多区域分别保留证据 |
+| `region` | 1、4、6、10、11、17、18 | 完整或语义读取固定区域、标题章节；18只在正文中检索附件引用 |
 | `hybrid` | 7、14 | 无法可靠限定标题或区域时执行全局结构语义检索，向量只补结构缺口 |
 
 固定路线并不跳过审查 Agent：只跳过动态 Planner 和路由 LLM，随后仍进入 Orchestrator、检索、SubAgent 和 Reflector。
@@ -124,7 +124,7 @@ scripts/docxindex/outputs/index/{合同目录名}/document_index.json
 | 阅读顺序 | `word/document.xml` 的 `w:body` 直接子节点 | 保证结构树顺序 |
 | 段落 | `w:body > w:p` | 生成 paragraph anchor 和文本 |
 | 表格 | `w:body > w:tbl` | 生成 table anchor 和 TableNode |
-| 段落文本 | `w:t`、`w:delText` | 标题识别、node text、关键词检索 |
+| 段落文本 | 当前可见的 `w:t`（含 `w:ins`，排除 `w:del` / `w:moveFrom`） | 标题识别、node text、关键词检索 |
 | direct outline | `w:pPr/w:outlineLvl` | 标题强证据 |
 | style outline | `w:pPr/w:pStyle -> word/styles.xml` | 标题强证据 |
 | 样式继承 | `styles.xml` 中 `w:basedOn` 链 | 计算 effective outline |

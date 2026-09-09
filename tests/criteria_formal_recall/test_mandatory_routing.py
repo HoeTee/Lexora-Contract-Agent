@@ -67,6 +67,31 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertIn("同一个标题 edit 最多承载一个章节整体问题", joined_check_points)
         self.assertIn("必须锚定直接包含该问题的具体原文", joined_check_points)
 
+    def test_h18_compares_body_references_with_titles_without_attachment_bodies(self) -> None:
+        task = load_mandatory_tasks()[17]
+
+        self.assertEqual(
+            task["route"]["steps"],
+            [
+                {
+                    "method": "region",
+                    "terms": [],
+                    "regions": ["body"],
+                    "all_titles": False,
+                    "anchor_terms": [],
+                    "coverage": "relevant",
+                },
+                {
+                    "method": "title",
+                    "terms": [],
+                    "regions": [],
+                    "all_titles": True,
+                    "anchor_terms": [],
+                    "coverage": "relevant",
+                },
+            ],
+        )
+
     def test_mandatory_only_phase_skips_planner_model_call(self) -> None:
         workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)
         workflow.state_store = None

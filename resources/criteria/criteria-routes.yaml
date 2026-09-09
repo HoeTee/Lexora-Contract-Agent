@@ -297,10 +297,8 @@ policies:
       regions:
       - body
       coverage: relevant
-    - method: region
-      regions:
-      - attachments
-      coverage: complete
+    - method: title
+      all_titles: true
     fallback: false
   placement:
     target: inline
