@@ -51,6 +51,36 @@ def _finding_entries(opinion: dict) -> dict[str, dict]:
     return entries
 
 
+def _issue_edit_identity(issue: dict) -> tuple | None:
+    """Return the stable source defect represented by one issue."""
+    edits = [
+        (
+            anchor.get("xml_anchor_type", ""),
+            anchor.get("xml_anchor_id", ""),
+            "".join(str(anchor.get("quoted_text", "")).split()),
+            anchor.get("defect_type", ""),
+        )
+        for anchor in issue.get("anchors", [])
+        if anchor.get("role", "edit") == "edit"
+    ]
+    return tuple(edits) if edits else None
+
+
+def _preserve_revision_issue_ids(previous: dict, revised: dict) -> dict:
+    """Keep issue IDs stable when a revision still describes the same source defect."""
+    previous_ids = {
+        identity: issue.get("issue_id", "")
+        for issue in previous.get("issues", [])
+        if (identity := _issue_edit_identity(issue)) is not None
+    }
+    normalized = deepcopy(revised)
+    for issue in normalized.get("issues", []):
+        identity = _issue_edit_identity(issue)
+        if identity in previous_ids:
+            issue["issue_id"] = previous_ids[identity]
+    return SubAgentOutput.model_validate(normalized).model_dump(mode="json")
+
+
 class _FindingLedger:
     """Keep per-finding reflection decisions inside the orchestrator."""
 
@@ -98,8 +128,11 @@ class _FindingLedger:
         decisions = {item["finding_id"]: item for item in review.get("finding_decisions", [])}
         unknown_ids = sorted(set(decisions) - required_ids)
         missing_ids = sorted(required_ids - set(decisions))
-        if not unknown_ids and not missing_ids:
-            self.decisions.update(decisions)
+        self.decisions.update({
+            finding_id: decision
+            for finding_id, decision in decisions.items()
+            if finding_id in required_ids
+        })
         self.history.append(
             {
                 "round": round_number,
@@ -204,6 +237,23 @@ class OrchestratorAgent:
         self.tools = None
         self._warned_missing_subagent_tools = False
         self.retrieval_tokens = 0  # Track MCP tool internal LLM tokens
+
+    @staticmethod
+    async def _revise_subagent_output(
+        sub_agent: Agent,
+        prompt: str,
+        previous: dict,
+    ) -> tuple[dict, str]:
+        """Request a revision and restore IDs for defects that remain at the same source."""
+        revised, _ = await chat_until_valid_json(
+            sub_agent,
+            prompt
+            + "\n修订同一原文缺陷时必须保留原 issue_id；只有新增的独立缺陷才能使用新 issue_id。",
+            SubAgentOutput,
+            SUB_AGENT_EXPECTED_JSON,
+        )
+        normalized = _preserve_revision_issue_ids(previous, revised)
+        return normalized, json.dumps(normalized, ensure_ascii=False)
 
     async def _get_tools(self) -> list[dict]:
         """Cache MCP tools list."""
@@ -731,12 +781,12 @@ class OrchestratorAgent:
                 coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
                 if not coverage_errors:
                     break
-                parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                previous_opinion = parsed_opinion
+                parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                     sub_agent,
                     "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
                     + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
-                    SubAgentOutput,
-                    SUB_AGENT_EXPECTED_JSON,
+                    previous_opinion,
                 )
             else:
                 raise AgentOutputValidationError(
@@ -748,12 +798,12 @@ class OrchestratorAgent:
             policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
             if not policy_errors:
                 break
-            parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+            previous_opinion = parsed_opinion
+            parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                 sub_agent,
                 "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
                 + "\n请返回完整修正后的 JSON，不得保留无双侧证据的对照问题。",
-                SubAgentOutput,
-                SUB_AGENT_EXPECTED_JSON,
+                previous_opinion,
             )
             review_context = self._review_evidence_context(context, sub_agent)
         else:
@@ -856,22 +906,22 @@ class OrchestratorAgent:
                 if round_num + 1 == MAX_REFLECTION_ROUNDS:
                     break
                 print(f"[Orchestrator] {cid}: REJECT round {round_num+1}, refining...")
-                parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                previous_opinion = parsed_opinion
+                parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                     sub_agent,
                     f"请根据以下质量审查反馈，补充和完善你的审查结果：\n\n{review.get('feedback', '')}",
-                    SubAgentOutput,
-                    SUB_AGENT_EXPECTED_JSON,
+                    previous_opinion,
                 )
                 review_context = self._review_evidence_context(context, sub_agent)
                 if coverage_audit:
                     coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
                     if coverage_errors:
-                        parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                        previous_opinion = parsed_opinion
+                        parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                             sub_agent,
                             "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
                             + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
-                            SubAgentOutput,
-                            SUB_AGENT_EXPECTED_JSON,
+                            previous_opinion,
                         )
                         remaining_errors = self._coverage_audit_errors(parsed_opinion, context)
                         if remaining_errors:
@@ -881,12 +931,12 @@ class OrchestratorAgent:
                             )
                 policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
                 if policy_errors:
-                    parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                    previous_opinion = parsed_opinion
+                    parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                         sub_agent,
                         "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
                         + "\n请删除无法提供正文 edit 与附件 evidence 双侧证据的对照问题。",
-                        SubAgentOutput,
-                        SUB_AGENT_EXPECTED_JSON,
+                        previous_opinion,
                     )
                     review_context = self._review_evidence_context(context, sub_agent)
                     remaining_policy_errors = self._policy_output_errors(

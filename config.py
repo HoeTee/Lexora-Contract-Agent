@@ -223,6 +223,12 @@ LLM_BASE_URL = _as_str(cfg("llm", "base_url"), "llm.base_url")
 LLM_NAME = env_optional("LLM_MODEL_NAME") if API_REQUIRE_REQUEST_MODEL_CONFIG and env_optional("LLM_MODEL_NAME") else _as_str(cfg("llm", "name"), "llm.name")
 LLM_ENABLE_THINKING = _parse_bool(cfg("llm", "enable_thinking"), "llm.enable_thinking")
 MAX_CONTEXT_TOKENS = _as_int(cfg("llm", "max_context_tokens"), "llm.max_context_tokens")
+MAX_PROMPT_TOKENS = _as_int(
+    cfg_optional("llm", "max_prompt_tokens", 88_000),
+    "llm.max_prompt_tokens",
+)
+if not 0 < MAX_PROMPT_TOKENS < 90_000:
+    raise RuntimeError("llm.max_prompt_tokens must be greater than 0 and lower than 90000")
 MAX_RESULT_TOKENS = _as_int(cfg("llm", "max_result_tokens"), "llm.max_result_tokens")
 MAX_TOOL_CALLS = _as_int(cfg("llm", "max_tool_calls"), "llm.max_tool_calls")
 TEMPERATURE = _as_float(cfg("llm", "temperature"), "llm.temperature")
@@ -459,5 +465,6 @@ LOGGING_ENABLED = _parse_bool(
 print(f"[config] Retrieval mode : {RETRIEVAL_BACKEND} temporary contract retrieval (MCP)")
 print(
     f"[config] LLM            : {LLM_NAME}  "
-    f"(ctx={MAX_CONTEXT_TOKENS:,}  out={MAX_RESULT_TOKENS:,}  tools={MAX_TOOL_CALLS})"
+    f"(ctx={MAX_CONTEXT_TOKENS:,}  prompt<={MAX_PROMPT_TOKENS:,}  "
+    f"out={MAX_RESULT_TOKENS:,}  tools={MAX_TOOL_CALLS})"
 )

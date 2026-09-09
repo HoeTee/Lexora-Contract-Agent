@@ -14,6 +14,7 @@ from config import (
     LLM_NAME,
     MAX_TOOL_CALLS,
     MAX_CONTEXT_TOKENS,
+    MAX_PROMPT_TOKENS,
     MAX_RESULT_TOKENS,
     MODEL_CALL_TIMEOUT_SECONDS,
     MODEL_CALL_MAX_RETRIES,
@@ -24,6 +25,27 @@ from config import (
 from endpoints.runtime.errors import ModelCallError
 from endpoints.runtime.llm_semaphore import LLMGlobalSemaphoreTimeout, llm_global_semaphore
 import json
+import tiktoken
+
+
+_PROMPT_ENCODING = tiktoken.get_encoding("cl100k_base")
+_CHAT_MESSAGE_OVERHEAD_TOKENS = 16
+_CHAT_REQUEST_OVERHEAD_TOKENS = 64
+
+
+def estimate_chat_prompt_tokens(messages: list, tools: list | None = None) -> int:
+    """Estimate one complete chat request, including tool schemas."""
+    payload = json.dumps(
+        {"messages": messages, "tools": tools or []},
+        ensure_ascii=False,
+        separators=(",", ":"),
+        default=str,
+    )
+    return (
+        len(_PROMPT_ENCODING.encode(payload))
+        + len(messages) * _CHAT_MESSAGE_OVERHEAD_TOKENS
+        + _CHAT_REQUEST_OVERHEAD_TOKENS
+    )
 
 MODEL_API_ERRORS = (
     APITimeoutError,
@@ -56,6 +78,7 @@ class Agent:
         debug: bool = False,
         max_tool_calls: int = MAX_TOOL_CALLS,
         max_context_tokens: int = MAX_CONTEXT_TOKENS,
+        max_prompt_tokens: int = MAX_PROMPT_TOKENS,
         max_result_tokens: int = MAX_RESULT_TOKENS,
     ) -> None:
         """
@@ -86,6 +109,7 @@ class Agent:
         self.debug = debug
         self.MAX_TOOL_CALLS = max_tool_calls
         self.MAX_CONTEXT_TOKENS = max_context_tokens
+        self.MAX_PROMPT_TOKENS = max_prompt_tokens
         self.MAX_RESULT_TOKENS = max_result_tokens
 
         # Token tracking
@@ -109,12 +133,23 @@ class Agent:
 
     # ==================== Context ====================
 
-    def _check_context_limits(self):
+    def _check_context_limits(self) -> int:
         total_chars = sum(len(str(msg.get("content", ""))) for msg in self.messages)
         estimated = self._estimate_tokens(total_chars)
-        self._log(f"Pre-request: {len(self.messages)} messages, ~{estimated} tokens")
+        prompt_tokens = estimate_chat_prompt_tokens(self.messages, self.tools)
+        self._log(
+            f"Pre-request: {len(self.messages)} messages, "
+            f"~{estimated} content tokens, ~{prompt_tokens} complete prompt tokens"
+        )
+        if prompt_tokens > self.MAX_PROMPT_TOKENS:
+            raise ValueError(
+                f"{self.name} prompt exceeds the configured per-call safety limit "
+                f"({prompt_tokens} estimated tokens > {self.MAX_PROMPT_TOKENS}); "
+                "the model call was not sent"
+            )
         if estimated > self.MAX_CONTEXT_TOKENS:
             print(f"[{self.name}] ⚠️ Context tokens ({estimated}) approaching limit!")
+        return prompt_tokens
 
     def _truncate_text(self, text: str, max_tokens: int = None) -> str:
         if max_tokens is None:
@@ -220,7 +255,7 @@ class Agent:
 
     async def execute(self) -> str:
         while True:
-            self._check_context_limits()
+            prompt_token_estimate = self._check_context_limits()
             self.step_count += 1
             current_step = self.step_count
 
@@ -249,6 +284,8 @@ class Agent:
                         messages=self.messages,
                         tools=self.tools,
                         step=current_step,
+                        prompt_token_estimate=prompt_token_estimate,
+                        prompt_token_limit=self.MAX_PROMPT_TOKENS,
                     ),
                     metadata={
                         "temperature": self.settings.temperature,

@@ -48,6 +48,8 @@ def llm_inputs(
     messages: list[dict[str, Any]],
     tools: list[dict[str, Any]] | None,
     step: int,
+    prompt_token_estimate: int,
+    prompt_token_limit: int,
 ) -> dict[str, Any]:
     return {
         "agent": agent_name,
@@ -55,6 +57,8 @@ def llm_inputs(
         "step": step,
         "message_count": len(messages),
         "input_chars": _messages_size(messages),
+        "estimated_prompt_tokens": prompt_token_estimate,
+        "prompt_token_limit": prompt_token_limit,
         "tool_count": len(tools or []),
         "tool_names": [
             tool.get("function", {}).get("name")

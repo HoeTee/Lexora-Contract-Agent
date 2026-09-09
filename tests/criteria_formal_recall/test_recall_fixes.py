@@ -11,7 +11,12 @@ import zipfile
 from docx import Document
 from docx.oxml import OxmlElement
 
-from agents.orchestrator import OrchestratorAgent, _FindingLedger
+from agents.base_agent import estimate_chat_prompt_tokens
+from agents.orchestrator import (
+    OrchestratorAgent,
+    _FindingLedger,
+    _preserve_revision_issue_ids,
+)
 from agents.prompts.cn_prompts import load_prompts
 from agents.schemas import ReflectorOutput, SubAgentOutput, SummaryOutput
 from agents.summarizer import (
@@ -29,6 +34,30 @@ from tools.docxindex.llm.prompts import scan_prompt
 from tools.docxindex.retriever import _should_use_fallback
 from tools.docxindex.retrieval.rule import _literal_terms
 from workflow.workflow import _prepare_inline_results
+
+
+def _subagent_output(issue_id: str, comment: str, anchor_id: str) -> dict:
+    return {
+        "status": "issues_found",
+        "applicability_reason": "",
+        "issues": [{
+            "issue_id": issue_id,
+            "risk_level": "low",
+            "issue_comment": comment,
+            "anchors": [{
+                "role": "edit",
+                "defect_type": "missing_value",
+                "xml_anchor_type": "paragraph",
+                "xml_anchor_id": anchor_id,
+                "quoted_text": "地址：【未填写】",
+                "comment_text": comment,
+            }],
+            "reasoning": "原文字段没有填写。",
+            "criterion": "检查字段是否填写。",
+            "check_point": "逐字段检查。",
+        }],
+        "coverage_decisions": [],
+    }
 
 
 class AnchorEvidenceValidationTests(unittest.TestCase):
@@ -524,6 +553,36 @@ class WorkflowPresentationTests(unittest.TestCase):
         self.assertEqual(len(confirmed), 1)
         self.assertEqual(confirmed[0]["finding_id"], finding_id)
 
+    def test_partial_reflector_decisions_are_not_discarded(self) -> None:
+        opinion = {
+            "status": "issues_found",
+            "issues": [
+                self.results[0]["issues"][0],
+                self.results[1]["issues"][0],
+            ],
+        }
+        ledger = _FindingLedger(opinion)
+        first_id = ledger.current(opinion)[0]["finding_id"]
+
+        passed = ledger.review(
+            opinion,
+            {
+                "status": "REJECT",
+                "feedback": "另一项仍需判断",
+                "finding_decisions": [
+                    {"finding_id": first_id, "decision": "confirm", "reason": "事实成立"}
+                ],
+            },
+            1,
+        )
+
+        self.assertFalse(passed)
+        self.assertEqual(
+            [issue["finding_id"] for issue in ledger.confirmed_issues(opinion)],
+            [first_id],
+        )
+        self.assertEqual(len(ledger.unresolved_issues(opinion)), 1)
+
     def test_confirmed_finding_survives_later_model_omission(self) -> None:
         opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
         ledger = _FindingLedger(opinion)
@@ -720,17 +779,54 @@ class SummarizerPromptBudgetTests(unittest.TestCase):
 
     def test_conservative_bound_rejects_prompt_above_hard_limit(self) -> None:
         messages = [
-            {"role": "user", "content": "x" * SUMMARIZER_MAX_PROMPT_TOKENS},
+            {"role": "user", "content": " x" * (SUMMARIZER_MAX_PROMPT_TOKENS + 1)},
         ]
         bound = conservative_message_token_upper_bound(messages)
 
         self.assertGreater(bound, SUMMARIZER_MAX_PROMPT_TOKENS)
         summarizer = SummarizerAgent.__new__(SummarizerAgent)
+        summarizer.name = "Summarizer"
         summarizer.messages = messages
+        summarizer.tools = []
         summarizer.MAX_CONTEXT_TOKENS = 254_000
+        summarizer.MAX_PROMPT_TOKENS = SUMMARIZER_MAX_PROMPT_TOKENS
         summarizer.debug = False
-        with self.assertRaisesRegex(ValueError, "90000-token safety limit"):
+        with self.assertRaisesRegex(ValueError, "per-call safety limit"):
             summarizer._check_context_limits()
+
+    def test_global_prompt_budget_includes_tool_schema(self) -> None:
+        messages = [{"role": "user", "content": "检查合同"}]
+        tools = [{
+            "type": "function",
+            "function": {
+                "name": "contract_search",
+                "description": " x" * 1000,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }]
+
+        self.assertGreater(
+            estimate_chat_prompt_tokens(messages, tools),
+            estimate_chat_prompt_tokens(messages),
+        )
+
+
+class RevisionIdentityTests(unittest.TestCase):
+    def test_revision_restores_issue_id_for_same_source_defect(self) -> None:
+        previous = _subagent_output("1.8", "地址未填写。", "path:body/p31")
+        revised = _subagent_output("1.5", "该地址字段仍未填写。", "path:body/p31")
+
+        normalized = _preserve_revision_issue_ids(previous, revised)
+
+        self.assertEqual(normalized["issues"][0]["issue_id"], "1.8")
+
+    def test_revision_keeps_new_id_for_different_source_defect(self) -> None:
+        previous = _subagent_output("1", "期限不明确。", "path:body/p160")
+        revised = _subagent_output("2", "签订日期未填写。", "path:body/p17")
+
+        normalized = _preserve_revision_issue_ids(previous, revised)
+
+        self.assertEqual(normalized["issues"][0]["issue_id"], "2")
 
 
 class PreparedContractValidationTests(unittest.TestCase):

@@ -4,7 +4,8 @@ import json
 import re
 from copy import deepcopy
 
-from agents.base_agent import Agent
+from agents.base_agent import Agent, estimate_chat_prompt_tokens
+from config import MAX_PROMPT_TOKENS
 from agents.json_utils import chat_until_valid_json
 from agents.prompts.cn_prompts import SUMMARIZER_SYSTEM_PROMPT
 from agents.schemas import SummaryContentOutput, SummaryOutput
@@ -28,8 +29,7 @@ SUMMARY_EXPECTED_JSON = """
 }
 """
 
-SUMMARIZER_MAX_PROMPT_TOKENS = 90_000
-_CHAT_MESSAGE_OVERHEAD_TOKENS = 64
+SUMMARIZER_MAX_PROMPT_TOKENS = MAX_PROMPT_TOKENS
 
 
 def _normalize_user_facing_text(value: str) -> str:
@@ -139,13 +139,8 @@ def apply_summary_duplicate_groups(
 
 
 def conservative_message_token_upper_bound(messages: list[dict]) -> int:
-    """Return a byte-based upper bound for one chat request's prompt tokens."""
-    content_bytes = sum(
-        len(str(message.get("role", "")).encode("utf-8"))
-        + len(str(message.get("content", "")).encode("utf-8"))
-        for message in messages
-    )
-    return content_bytes + len(messages) * _CHAT_MESSAGE_OVERHEAD_TOKENS
+    """Compatibility wrapper around the global chat prompt estimator."""
+    return estimate_chat_prompt_tokens(messages)
 
 
 def normalize_summary_output(summary: dict) -> dict:
@@ -179,15 +174,6 @@ class SummarizerAgent(Agent):
             name="Summarizer",
             **kwargs,
         )
-
-    def _check_context_limits(self):
-        super()._check_context_limits()
-        upper_bound = conservative_message_token_upper_bound(self.messages)
-        if upper_bound > SUMMARIZER_MAX_PROMPT_TOKENS:
-            raise ValueError(
-                "Summarizer prompt exceeds the 90000-token safety limit "
-                f"(conservative upper bound: {upper_bound})."
-            )
 
     async def compile_summary_comment(self, results: list[dict]) -> dict:
         """Generate overall_comment and priority_comments from canonical issues."""

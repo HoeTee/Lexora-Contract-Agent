@@ -26,6 +26,36 @@ class MandatoryRoutingTests(unittest.TestCase):
         methods = {step["method"] for task in tasks for step in task["route"]["steps"]}
         self.assertEqual(methods, {"title", "region", "rule", "scan", "hybrid"})
 
+    def test_h01_treats_each_explicit_empty_field_as_a_local_defect(self) -> None:
+        task = load_mandatory_tasks()[0]
+
+        self.assertIn("相邻位置存在另一个同名字段或实际值不能推翻", task["check_points"][0])
+
+    def test_h07_scopes_date_and_term_checks_without_attachments(self) -> None:
+        task = load_mandatory_tasks()[6]
+
+        self.assertEqual(
+            task["route"]["steps"],
+            [
+                {
+                    "method": "region",
+                    "terms": [],
+                    "regions": ["frontmatter"],
+                    "all_titles": False,
+                    "anchor_terms": [],
+                    "coverage": "complete",
+                },
+                {
+                    "method": "region",
+                    "terms": ["合同期限", "履行期限", "服务期限", "交付期限"],
+                    "regions": ["body"],
+                    "all_titles": False,
+                    "anchor_terms": [],
+                    "coverage": "relevant",
+                },
+            ],
+        )
+
     def test_mandatory_only_phase_skips_planner_model_call(self) -> None:
         workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)
         workflow.state_store = None

@@ -3,6 +3,8 @@ llm:
   name: "qwen3.6-27b"
   enable_thinking: false
   max_context_tokens: 254000
+  # Hard per-request prompt budget; must remain below 90000 for intranet models.
+  max_prompt_tokens: 88000
   max_result_tokens: 64000
   max_tool_calls: 25
   temperature: 0.0

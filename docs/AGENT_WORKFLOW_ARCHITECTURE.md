@@ -100,6 +100,9 @@ class SummaryOutput:
    - 固定任务直接使用强制路由已提供的证据，不对 `anchors=[]` 问题反复执行缺失文本补充检索；用户上传要点仍可执行该补充检索。每轮 Reflector 使用独立会话，避免完整证据在历史消息中叠加。
    - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`；一个 finding 需修改不会连带删除同一 criterion 中已经确认的问题。
    - 全部 finding 决策完整且满足 PASS 才结束；达到上限或反思异常时标记 `quality_status=pending_review`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。
+   - 修订仍指向同一 edit 原文缺陷时，Orchestrator 恢复原 `issue_id`，避免模型改号导致 finding 身份漂移。
+
+每次 Planner、SubAgent、Reflector、Summarizer 等 `Agent` 调用在发送前统一计算完整消息及工具 schema 的 token 预算。`llm.max_prompt_tokens` 默认 88k 且配置值必须小于 90k；超限请求不会发送，trace 的 LLM input 记录 `estimated_prompt_tokens` 和 `prompt_token_limit`。
 5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。
 
 并发与容错（`execute_criteria`）：
