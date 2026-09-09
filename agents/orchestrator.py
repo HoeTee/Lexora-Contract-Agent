@@ -336,6 +336,7 @@ class OrchestratorAgent:
     def _retrieval_anchor_evidence(context: str) -> list[dict[str, str]]:
         """Parse the anchor-scoped contract text included in retrieval context."""
         pattern = re.compile(
+            r"(?:source_region:\s*([^\n]+)\s*\n)?"
             r"xml_anchor_type:\s*(paragraph|table)\s*\n"
             r"xml_anchor_id:\s*([^\n]+)\s*\n"
             r"内容：\s*\n(.*?)(?=\n\n---\n\n|\Z)",
@@ -343,13 +344,30 @@ class OrchestratorAgent:
         )
         return [
             {
-                "xml_anchor_type": match.group(1).strip(),
-                "xml_anchor_id": match.group(2).strip(),
-                "content": match.group(3).strip(),
+                "source_region": (match.group(1) or "").strip(),
+                "xml_anchor_type": match.group(2).strip(),
+                "xml_anchor_id": match.group(3).strip(),
+                "content": match.group(4).strip(),
             }
             for match in pattern.finditer(context or "")
-            if match.group(3).strip()
+            if match.group(4).strip()
         ]
+
+    def _review_evidence_context(self, base_context: str, sub_agent: Agent) -> str:
+        """Include contract-search evidence gathered by the SubAgent itself."""
+        contexts = [base_context]
+        seen = {base_context}
+        for message in sub_agent.messages:
+            if message.get("role") != "tool":
+                continue
+            content = str(message.get("content") or "").strip()
+            if "xml_anchor_id:" not in content:
+                continue
+            prepared = self._prepare_review_context(content)
+            if prepared not in seen:
+                seen.add(prepared)
+                contexts.append(prepared)
+        return "\n\n--- SubAgent 补充检索证据 ---\n\n".join(contexts)
 
     @staticmethod
     def _normalized_span(text: str, quote: str) -> str | None:
@@ -471,10 +489,20 @@ class OrchestratorAgent:
         return errors
 
     @staticmethod
-    def _policy_output_errors(parsed_opinion: dict, criterion: dict) -> list[str]:
+    def _policy_output_errors(
+        parsed_opinion: dict,
+        criterion: dict,
+        context: str = "",
+    ) -> list[str]:
         """Validate output invariants explicitly declared by a routing policy."""
-        if not criterion.get("evidence_pair_required"):
+        evidence_region = str(criterion.get("evidence_region") or "").strip()
+        if not evidence_region:
             return []
+        allowed_evidence = {
+            (item["xml_anchor_type"], item["xml_anchor_id"])
+            for item in OrchestratorAgent._retrieval_anchor_evidence(context)
+            if item.get("source_region") == evidence_region
+        }
         errors = []
         for issue in parsed_opinion.get("issues") or []:
             roles = {anchor.get("role", "edit") for anchor in issue.get("anchors") or []}
@@ -482,6 +510,18 @@ class OrchestratorAgent:
                 errors.append(
                     f"issue {issue.get('issue_id')} 必须同时包含正文 edit 和附件 evidence；"
                     "只有单侧证据时删除该问题"
+                )
+                continue
+            invalid_evidence = [
+                anchor.get("xml_anchor_id")
+                for anchor in issue.get("anchors") or []
+                if anchor.get("role") == "evidence"
+                and (anchor.get("xml_anchor_type"), anchor.get("xml_anchor_id")) not in allowed_evidence
+            ]
+            if invalid_evidence:
+                errors.append(
+                    f"issue {issue.get('issue_id')} 的 evidence 不来自 {evidence_region} region："
+                    f"{invalid_evidence}"
                 )
         return errors
 
@@ -685,6 +725,7 @@ class OrchestratorAgent:
             SubAgentOutput,
             SUB_AGENT_EXPECTED_JSON,
         )
+        review_context = self._review_evidence_context(context, sub_agent)
         if coverage_audit:
             for _ in range(2):
                 coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
@@ -702,8 +743,9 @@ class OrchestratorAgent:
                     "SubAgent complete-region coverage audit failed: "
                     + "; ".join(self._coverage_audit_errors(parsed_opinion, context))
                 )
+        review_context = self._review_evidence_context(context, sub_agent)
         for _ in range(2):
-            policy_errors = self._policy_output_errors(parsed_opinion, criterion)
+            policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
             if not policy_errors:
                 break
             parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
@@ -713,12 +755,13 @@ class OrchestratorAgent:
                 SubAgentOutput,
                 SUB_AGENT_EXPECTED_JSON,
             )
+            review_context = self._review_evidence_context(context, sub_agent)
         else:
             raise AgentOutputValidationError(
                 "SubAgent routing-policy output validation failed: "
-                + "; ".join(self._policy_output_errors(parsed_opinion, criterion))
+                + "; ".join(self._policy_output_errors(parsed_opinion, criterion, review_context))
             )
-        anchor_validation = self._validate_and_repair_anchors(parsed_opinion, context)
+        anchor_validation = self._validate_and_repair_anchors(parsed_opinion, review_context)
 
         if self.logger:
             self.logger.log(
@@ -767,7 +810,7 @@ class OrchestratorAgent:
                 criterion_text,
                 check_points,
                 parsed_opinion,
-                context=context,
+                context=review_context,
                 missing_findings=ledger.missing(parsed_opinion),
                 current_findings=ledger.current(parsed_opinion),
             )
@@ -819,6 +862,7 @@ class OrchestratorAgent:
                     SubAgentOutput,
                     SUB_AGENT_EXPECTED_JSON,
                 )
+                review_context = self._review_evidence_context(context, sub_agent)
                 if coverage_audit:
                     coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
                     if coverage_errors:
@@ -835,7 +879,7 @@ class OrchestratorAgent:
                                 "SubAgent complete-region coverage audit failed after reflection: "
                                 + "; ".join(remaining_errors)
                             )
-                policy_errors = self._policy_output_errors(parsed_opinion, criterion)
+                policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
                 if policy_errors:
                     parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
                         sub_agent,
@@ -844,13 +888,18 @@ class OrchestratorAgent:
                         SubAgentOutput,
                         SUB_AGENT_EXPECTED_JSON,
                     )
-                    remaining_policy_errors = self._policy_output_errors(parsed_opinion, criterion)
+                    review_context = self._review_evidence_context(context, sub_agent)
+                    remaining_policy_errors = self._policy_output_errors(
+                        parsed_opinion,
+                        criterion,
+                        review_context,
+                    )
                     if remaining_policy_errors:
                         raise AgentOutputValidationError(
                             "SubAgent routing-policy output validation failed after reflection: "
                             + "; ".join(remaining_policy_errors)
                         )
-                round_validation = self._validate_and_repair_anchors(parsed_opinion, context)
+                round_validation = self._validate_and_repair_anchors(parsed_opinion, review_context)
                 for key, value in round_validation.items():
                     anchor_validation[key] = anchor_validation.get(key, 0) + value
                 ledger.observe(parsed_opinion)

@@ -559,10 +559,17 @@ class WorkflowPresentationTests(unittest.TestCase):
 
     def test_comparison_policy_requires_edit_and_evidence(self) -> None:
         opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
+        context = (
+            "source_region: attachments\n"
+            "xml_anchor_type: paragraph\n"
+            "xml_anchor_id: path:body/p200\n"
+            "内容：\n附件对照原文。"
+        )
         self.assertEqual(
             len(OrchestratorAgent._policy_output_errors(
                 opinion,
-                {"evidence_pair_required": True},
+                {"evidence_region": "attachments"},
+                context,
             )),
             1,
         )
@@ -570,7 +577,7 @@ class WorkflowPresentationTests(unittest.TestCase):
             "role": "evidence",
             "defect_type": "inconsistency",
             "xml_anchor_type": "paragraph",
-            "xml_anchor_id": "path:attachments/p2",
+            "xml_anchor_id": "path:body/p200",
             "quoted_text": "附件对照原文。",
             "comment_text": "",
         })
@@ -578,7 +585,8 @@ class WorkflowPresentationTests(unittest.TestCase):
         self.assertEqual(
             OrchestratorAgent._policy_output_errors(
                 opinion,
-                {"evidence_pair_required": True},
+                {"evidence_region": "attachments"},
+                context,
             ),
             [],
         )

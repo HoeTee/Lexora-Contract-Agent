@@ -33,7 +33,7 @@ class MandatoryPolicy(BaseModel):
     route: RoutePlan
     placement: Placement
     coverage_audit: bool = False
-    evidence_pair_required: bool = False
+    evidence_region: str = ""
     dedupe_priority: int = Field(default=0, ge=0)
     dedupe_domain: str = ""
 
@@ -83,7 +83,7 @@ def load_mandatory_tasks() -> list[dict[str, Any]]:
             "review_source": "mandatory",
             "policy_id": policy.id,
             "coverage_audit": policy.coverage_audit,
-            "evidence_pair_required": policy.evidence_pair_required,
+            "evidence_region": policy.evidence_region,
             "dedupe_priority": policy.dedupe_priority,
             "dedupe_domain": policy.dedupe_domain,
         })

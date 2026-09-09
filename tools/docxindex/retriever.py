@@ -673,6 +673,9 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
             selection_reason = str(node.get("selection_reason") or "").strip()
             if selection_reason:
                 header += f"\n检索候选判定理由：{selection_reason}"
+            source_region = str(node.get("node_id") or "").split("/", 1)[0]
+            if source_region:
+                header += f"\nsource_region: {source_region}"
             header += f"\nxml_anchor_type: {anchor_type}\nxml_anchor_id: {anchor_id}"
             parts.append(f"{header}\n内容：\n{text}")
     return "\n\n---\n\n".join(parts) if parts else "未找到相关合同内容。"

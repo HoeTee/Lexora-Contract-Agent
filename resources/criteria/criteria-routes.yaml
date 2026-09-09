@@ -179,7 +179,7 @@ policies:
   placement:
     target: inline
     note: 锚定需要修改的正文，附件对应内容作为证据。
-  evidence_pair_required: true
+  evidence_region: attachments
 - id: H12
   section: 其他基本问题
   criterion: 是否有错别字。
