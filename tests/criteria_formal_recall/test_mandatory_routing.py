@@ -55,6 +55,17 @@ class MandatoryRoutingTests(unittest.TestCase):
                 },
             ],
         )
+        joined_check_points = "\n".join(task["check_points"])
+        self.assertIn("必须分别生成两个 issue", joined_check_points)
+        self.assertIn("不得借用合同名称、主体名称", joined_check_points)
+
+    def test_h06_only_section_level_problem_uses_payment_title(self) -> None:
+        task = load_mandatory_tasks()[5]
+
+        self.assertEqual(task["placement"]["target"], "inline")
+        joined_check_points = "\n".join(task["check_points"])
+        self.assertIn("同一个标题 edit 最多承载一个章节整体问题", joined_check_points)
+        self.assertIn("必须锚定直接包含该问题的具体原文", joined_check_points)
 
     def test_mandatory_only_phase_skips_planner_model_call(self) -> None:
         workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)

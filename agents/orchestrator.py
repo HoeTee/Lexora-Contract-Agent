@@ -789,10 +789,12 @@ class OrchestratorAgent:
                     previous_opinion,
                 )
             else:
-                raise AgentOutputValidationError(
-                    "SubAgent complete-region coverage audit failed: "
-                    + "; ".join(self._coverage_audit_errors(parsed_opinion, context))
-                )
+                remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
+                if remaining_coverage_errors:
+                    raise AgentOutputValidationError(
+                        "SubAgent complete-region coverage audit failed: "
+                        + "; ".join(remaining_coverage_errors)
+                    )
         review_context = self._review_evidence_context(context, sub_agent)
         for _ in range(2):
             policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
@@ -807,10 +809,16 @@ class OrchestratorAgent:
             )
             review_context = self._review_evidence_context(context, sub_agent)
         else:
-            raise AgentOutputValidationError(
-                "SubAgent routing-policy output validation failed: "
-                + "; ".join(self._policy_output_errors(parsed_opinion, criterion, review_context))
+            remaining_policy_errors = self._policy_output_errors(
+                parsed_opinion,
+                criterion,
+                review_context,
             )
+            if remaining_policy_errors:
+                raise AgentOutputValidationError(
+                    "SubAgent routing-policy output validation failed: "
+                    + "; ".join(remaining_policy_errors)
+                )
         anchor_validation = self._validate_and_repair_anchors(parsed_opinion, review_context)
 
         if self.logger:

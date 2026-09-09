@@ -44,6 +44,9 @@
 9. `issue_comment` 和 `comment_text` 禁止“同上”等上下文依赖表达及 `p311/path/node_id/检索结果N` 等内部定位；schema 失败后走现有定向重试。
 10. 保留输入 DOCX 已有人工及普通批注，替换作者为“AI 审查总结”的旧总结，确保最终只有一条总结。所有 `Agent` 模型请求共用 `llm.max_prompt_tokens` 硬限制，默认 88k；预算包含完整消息和工具 schema，超限时禁止发送。Summarizer 不再维护单独的例外上限。
 11. Reflector ledger 以稳定 `issue_id` 和 edit 序号识别 finding；SubAgent 修订同一原文缺陷时，即使模型改写了 ID，Orchestrator 也会根据 edit 原文身份恢复原 ID，避免同一问题被误认为新增 finding。Reflector 一轮遗漏部分 finding 时，已返回的合法决定仍会分别保存，遗漏项继续保持 unresolved，不再整轮丢弃。对路由配置 `evidence_region: attachments` 的正文/附件对照标准，每个问题必须同时含正文 `edit` 和来自附件 region 的 `evidence`，否则在进入 Reflector 前定向重试。SubAgent 通过工具追加获得的检索证据也会合并进后续锚点校验与复核上下文。
+12. 支付方式等章节审查不再把所有问题强制锚定标题：只有章节整体问题可以使用标题 edit，发票、金额、比例、付款节点等具体问题必须锚定各自原文；整条约定缺失且没有直接位置时使用 `anchors=[]`。
+13. 同一标准同时检查不同区域时，不得把不同修改动作合并为一条批注。例如合同首部日期未填写与正文期限表述模糊必须分别形成 issue，并分别锚定日期字段和期限条款；任何一项整体不存在时才使用 `anchors=[]`。
+14. coverage/policy 定向修订在最后一次修订后会重新校验最终输出；最终结果已经合格时继续执行，只有仍存在校验错误时才令该标准失败，错误信息不得为空。
 
 ## 任务与状态
 
