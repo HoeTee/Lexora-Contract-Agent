@@ -723,22 +723,24 @@ class OrchestratorAgent:
                 "review_source": criterion.get("review_source", "uploaded"),
                 "policy_id": criterion.get("policy_id", ""),
                 "dedupe_priority": int(criterion.get("dedupe_priority") or 0),
+                "dedupe_domain": str(criterion.get("dedupe_domain") or ""),
                 "applicability_reason": parsed_opinion.get("applicability_reason", ""),
                 "tokens": sub_agent.token_usage.get("total_tokens", 0) + evidence_tokens,
                 "error_message": None,
                 "anchor_validation": anchor_validation,
             }
 
-        # Step 3: Reflection loop. Each criterion needs its own reflector state;
-        # sharing one ReflectorAgent across concurrent criteria mixes messages.
-        reflector = ReflectorAgent(settings=self.settings)
+        # Step 3: Reflection loop. Use a fresh reflector conversation per round;
+        # otherwise complete retrieval evidence is duplicated in message history.
         ledger = _FindingLedger(parsed_opinion)
         quality_status = "pending_review"
-        supplementary_evidence: list[str] = []
+        reflector_tokens = 0
         for round_num in range(MAX_REFLECTION_ROUNDS):
-            missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion, cid)
-            if missing_text_review_notes.startswith("[") and missing_text_review_notes not in supplementary_evidence:
-                supplementary_evidence.append(missing_text_review_notes)
+            if criterion.get("review_source") == "mandatory":
+                missing_text_review_notes = "强制路由已提供当前标准的完整检索证据，不再重复执行缺失文本补充检索。"
+            else:
+                missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion, cid)
+            reflector = ReflectorAgent(settings=self.settings)
             reflector_input = self._build_reflector_input(
                 criterion_text,
                 check_points,
@@ -752,8 +754,9 @@ class OrchestratorAgent:
                 cid=cid,
                 round_num=round_num + 1,
                 reflector_input=reflector_input,
-                missing_text_review_notes="\n".join(supplementary_evidence) or missing_text_review_notes,
+                missing_text_review_notes=missing_text_review_notes,
             )
+            reflector_tokens += reflector.token_usage.get("total_tokens", 0)
             if review is None:
                 break
 
@@ -817,7 +820,7 @@ class OrchestratorAgent:
         else:
             print(f"[Orchestrator] {cid}: Max {MAX_REFLECTION_ROUNDS} rounds reached")
 
-        total_tokens = evidence_tokens + sub_agent.token_usage.get("total_tokens", 0) + reflector.token_usage.get("total_tokens", 0)
+        total_tokens = evidence_tokens + sub_agent.token_usage.get("total_tokens", 0) + reflector_tokens
         status_map = {
             "compliant": "COMPLIANT",
             "issues_found": "ISSUES_FOUND",
@@ -843,6 +846,7 @@ class OrchestratorAgent:
             "review_source": criterion.get("review_source", "uploaded"),
             "policy_id": criterion.get("policy_id", ""),
             "dedupe_priority": int(criterion.get("dedupe_priority") or 0),
+            "dedupe_domain": str(criterion.get("dedupe_domain") or ""),
             "applicability_reason": parsed_opinion.get("applicability_reason", ""),
             "tokens": total_tokens,
             "error_message": None,

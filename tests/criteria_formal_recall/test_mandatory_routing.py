@@ -20,6 +20,8 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertEqual([task["id"] for task in tasks], [f"H{i:02d}" for i in range(1, 19)])
         self.assertTrue(all(task["review_source"] == "mandatory" for task in tasks))
         self.assertTrue(all(not task["fallback_llm_route"] for task in tasks))
+        self.assertEqual(tasks[11]["dedupe_domain"], "language_quality")
+        self.assertEqual(tasks[14]["dedupe_domain"], "language_quality")
         methods = {step["method"] for task in tasks for step in task["route"]["steps"]}
         self.assertEqual(methods, {"title", "region", "rule", "scan", "hybrid"})
 
@@ -114,6 +116,42 @@ class MandatoryRoutingTests(unittest.TestCase):
 
         self.assertEqual(results[0]["issues"], [])
         self.assertEqual(len(results[1]["issues"]), 1)
+
+    def test_contained_ranges_in_same_domain_keep_higher_priority(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "contract.docx"
+            document = Document()
+            document.add_paragraph("不得贿赂贵方项目和管理人员。")
+            document.save(path)
+            typo = _result("H12", "mandatory", "项目不能作为贿赂对象。")
+            grammar = _result("H15", "mandatory", "建议改为项目人员和管理人员。")
+            typo["issues"][0]["anchors"][0]["quoted_text"] = "贿赂贵方项目和管理人员。"
+            grammar["issues"][0]["anchors"][0]["quoted_text"] = "不得贿赂贵方项目和管理人员。"
+            typo.update(dedupe_priority=100, dedupe_domain="language_quality")
+            grammar.update(dedupe_priority=200, dedupe_domain="language_quality")
+
+            results, stats = deduplicate_review_results_by_range(str(path), [typo, grammar])
+
+        self.assertEqual([len(result["issues"]) for result in results], [0, 1])
+        self.assertEqual(stats["removed_overlap_anchors"], 1)
+
+    def test_contained_ranges_in_different_domains_are_preserved(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "contract.docx"
+            document = Document()
+            document.add_paragraph("合同金额人民币捌万元整。")
+            document.save(path)
+            first = _result("H12", "mandatory", "文字问题。")
+            second = _result("H14", "mandatory", "金额问题。")
+            first["issues"][0]["anchors"][0]["quoted_text"] = "人民币捌万元整"
+            second["issues"][0]["anchors"][0]["quoted_text"] = "合同金额人民币捌万元整。"
+            first["dedupe_domain"] = "language_quality"
+            second["dedupe_domain"] = "amount"
+
+            results, stats = deduplicate_review_results_by_range(str(path), [first, second])
+
+        self.assertEqual([len(result["issues"]) for result in results], [1, 1])
+        self.assertEqual(stats["removed_overlap_anchors"], 0)
 
 
 def _result(criterion_id: str, source: str, comment: str) -> dict:

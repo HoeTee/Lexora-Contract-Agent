@@ -97,7 +97,7 @@ class SummaryOutput:
 2. SubAgent 审查：以 `SUB_AGENT_BASE_PROMPT` 创建 `SubAgent_<cid>`，只向模型暴露 `workflow.subagent_allowed_tools` 白名单中的 MCP 工具，输出 `SubAgentOutput`，`status` 为 `compliant` / `issues_found` / `not_applicable`，`issues[].anchors` 含 `xml_anchor_type`、`xml_anchor_id`、`quoted_text`、`comment_text` 等字段。
 3. 若 `status == compliant`：短路，跳过反思直接返回。
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：
-   - 对 `quoted_text` 为空的“缺失类” issue 以固定 `hybrid` 路由再检索一次，生成 `missing_text_review_notes` 供 Reflector 判断；该补充检索不再调用路由 LLM，也不会新增审查模型调用。
+   - 固定任务直接使用强制路由已提供的证据，不对 `anchors=[]` 问题反复执行缺失文本补充检索；用户上传要点仍可执行该补充检索。每轮 Reflector 使用独立会话，避免完整证据在历史消息中叠加。
    - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`；一个 finding 需修改不会连带删除同一 criterion 中已经确认的问题。
    - 全部 finding 决策完整且满足 PASS 才结束；达到上限或反思异常时标记 `quality_status=pending_review`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。
 5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。
@@ -142,12 +142,12 @@ mandatory tasks + uploaded tasks -> criteria_list
 合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引
 每条 criterion: 检索 context -> SubAgent(可调用白名单工具) -> (Reflector 反思循环) -> 单条结果
 所有单条结果 -> Workflow 按 placement 和 edit/evidence 分流
-已确认问题 -> 按 DOCX paragraph_path/start_index/end_index 精确防重（mandatory 优先，同来源按 dedupe_priority）
+已确认问题 -> 按 DOCX paragraph_path/start_index/end_index 精确防重（mandatory 优先，同来源按 dedupe_priority），再对配置为同一 dedupe_domain 的跨要点包含范围防重
 精确防重结果 -> Summarizer 标记语义重复 -> Workflow 校验并应用合并 -> final_review
 已确认 edit anchors + final_review -> generate_docx_report -> 批注版 DOCX
 ```
 
-Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。完全相同字符范围只保留一条：固定任务优先于上传任务，同来源按路线配置的 `dedupe_priority` 选择，顺序仅作为同优先级兜底。不同字符范围只有在 Summarizer 明确判定为同一事实、同一风险和同一修改动作时才合并。固定提示来自路线配置的 `review_instruction`，不由正则猜测去向。
+Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。完全相同字符范围只保留一条：固定任务优先于上传任务，同来源按路线配置的 `dedupe_priority` 选择，顺序仅作为同优先级兜底。对显式配置为同一 `dedupe_domain` 的不同强制要点，同段中一个字符范围完全包含另一范围时，也按优先级保留一条；未配置领域、同一要点内或仅部分相交时不自动合并。其他不同范围只有在 Summarizer 明确判定为同一事实、同一风险和同一修改动作时才合并。固定提示来自路线配置的 `review_instruction`，不由正则猜测去向。
 
 ## 架构边界
 

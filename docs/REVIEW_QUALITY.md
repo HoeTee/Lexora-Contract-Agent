@@ -31,7 +31,7 @@
 
 ## 执行与写入
 
-固定任务和用户任务完成反思后，工作流会用原始 DOCX 解析每个 edit anchor 的 `paragraph_path/start_index/end_index`。完全相同字符范围只保留一个：固定任务优先于用户任务，同来源按 `dedupe_priority` 选择。随后现有 Summarizer 在同一次调用中标记跨要点语义重复，Workflow 只应用键值合法的合并组；不同事实不得合并。这两层都发生在 DOCX Writer 之前。
+固定任务和用户任务完成反思后，工作流会用原始 DOCX 解析每个 edit anchor 的 `paragraph_path/start_index/end_index`。完全相同字符范围只保留一个：固定任务优先于用户任务，同来源按 `dedupe_priority` 选择。对不同强制要点中配置了相同 `dedupe_domain` 的包含范围，同样按优先级去重；未配置领域或独立事实不会被该规则合并。随后现有 Summarizer 在同一次调用中标记其他跨要点语义重复，Workflow 只应用键值合法的合并组；不同事实不得合并。这三层都发生在 DOCX Writer 之前。
 
 1. 字段完整性不使用业务正则判定。标准明确字段名时由 `rule` 定位，标准要求全合同检查且未限定字段时由 `scan` 分批交给 LLM 结合字段语义、相邻文字和表格关系判断。
 2. 已有反思调用接收检索证据、当前发现和先前未保留的发现；完整覆盖任务还接收逐证据决定并返回 coverage_gaps，不新增复核 Agent。

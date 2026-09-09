@@ -183,7 +183,7 @@ policies:
   section: 其他基本问题
   criterion: 是否有错别字。
   check_points:
-  - 逐段检查合同中的明确错别字，只报告可由原文直接证明的问题。
+  - 仅检查可以指出具体错字并给出唯一正字的明确错别字；不检查语病、重复词、标点、金额计算、模板残留或逻辑与措辞问题。
   route:
     steps:
     - method: scan
@@ -192,6 +192,7 @@ policies:
     target: inline
     note: 锚定具体错别字。
   dedupe_priority: 100
+  dedupe_domain: language_quality
 - id: H13
   section: 其他基本问题
   criterion: 是否标题顺序杂乱。
@@ -236,6 +237,7 @@ policies:
     target: inline
     note: 锚定具体语病原文且每处只保留一条批注。
   dedupe_priority: 200
+  dedupe_domain: language_quality
 - id: H16
   section: 其他基本问题
   criterion: 是否存在如下相关招标单位、谈判单位、投标单位等其他流程中相关敏感词：招标单位、中标单位、投标单位、谈判单位、谈判响应单位、采购人、投标人、入围单位、征集单位。
