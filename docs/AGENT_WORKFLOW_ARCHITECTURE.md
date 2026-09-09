@@ -93,7 +93,7 @@ class SummaryOutput:
 
 `OrchestratorAgent.execute_single_criterion` 负责一条审查标准的完整处理：
 
-1. 检索：调用 MCP `contract_search`（query = 标准 + 检查要点），由 `retrieval.backend` 选择 LlamaIndex 或 docxindex，得到合同相关片段 `context`。检索结果会加一段 guardrail 提示，并提供 `xml_anchor_type/xml_anchor_id` 给 SubAgent 复用。
+1. 检索：调用 MCP `contract_search`（query = 标准 + 检查要点），由 `retrieval.backend` 选择 LlamaIndex 或 docxindex，得到合同相关片段 `context`。检索证据不添加展示序号，只提供 `xml_anchor_type/xml_anchor_id` 给 SubAgent 逐字符复用，避免展示序号与真实段落锚点混淆。
 2. SubAgent 审查：以 `SUB_AGENT_BASE_PROMPT` 创建 `SubAgent_<cid>`，只向模型暴露 `workflow.subagent_allowed_tools` 白名单中的 MCP 工具，输出 `SubAgentOutput`，`status` 为 `compliant` / `issues_found` / `not_applicable`，`issues[].anchors` 含 `xml_anchor_type`、`xml_anchor_id`、`quoted_text`、`comment_text` 等字段。
 3. 若 `status == compliant`：短路，跳过反思直接返回。
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：

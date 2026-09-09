@@ -239,11 +239,13 @@ class LlamaIndexRAG:
         response = query_engine.query(query)
 
         parts = []
-        for i, source_node in enumerate(response.source_nodes, 1):
+        for source_node in response.source_nodes:
             score = getattr(source_node, "score", None)
             text = source_node.get_content()
             metadata = getattr(source_node, "metadata", None) or {}
-            header = f"## {result_title} {i}"
+            # Keep the LLM-facing header free of ordinals so it cannot be
+            # mistaken for the stable xml_anchor_id below.
+            header = f"## {result_title}"
             source_file = metadata.get("source_file")
             xml_anchor_type = metadata.get("xml_anchor_type")
             xml_anchor_id = metadata.get("xml_anchor_id")

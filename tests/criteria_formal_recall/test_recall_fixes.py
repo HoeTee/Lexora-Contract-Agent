@@ -32,7 +32,7 @@ from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
 from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.llm.prompts import scan_prompt
-from tools.docxindex.retriever import _should_use_fallback
+from tools.docxindex.retriever import _format_anchor_context, _should_use_fallback
 from tools.docxindex.retrieval.rule import _literal_terms
 from workflow.workflow import _incomplete_review_notices, _prepare_inline_results
 
@@ -183,6 +183,32 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
         self.assertEqual(stats, {"valid": 0, "repaired": 1, "dropped": 0})
         self.assertEqual(output["issues"][0]["anchors"][0]["xml_anchor_id"], "path:body/p15")
 
+    def test_exact_quote_match_wins_over_short_containment_candidate(self) -> None:
+        context = (
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p4\n"
+            "内容：\n深信服科技股份有限公司\n\n---\n\n"
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p19\n"
+            "内容：\n甲方：浙江农村商业联合银行股份有限公司\n\n---\n\n"
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p31\n"
+            "内容：\n乙方：深信服科技股份有限公司 地址：【未填写】"
+        )
+        output = {
+            "issues": [{
+                "anchors": [{
+                    "role": "edit",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p19",
+                    "quoted_text": "乙方：深信服科技股份有限公司 地址：【未填写】",
+                    "comment_text": "请填写乙方地址。",
+                }],
+            }],
+        }
+
+        stats = OrchestratorAgent()._validate_and_repair_anchors(output, context)
+
+        self.assertEqual(stats, {"valid": 0, "repaired": 1, "dropped": 0})
+        self.assertEqual(output["issues"][0]["anchors"][0]["xml_anchor_id"], "path:body/p31")
+
     def test_unprovable_model_anchor_is_removed_before_docx_write(self) -> None:
         context = "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p1\n内容：\n合同正文"
         output = {
@@ -200,6 +226,29 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
 
         self.assertEqual(stats, {"valid": 0, "repaired": 0, "dropped": 1})
         self.assertEqual(output["issues"][0]["anchors"], [])
+
+    def test_retrieval_context_omits_display_ordinals(self) -> None:
+        index = {
+            "anchor_map": {
+                "anchor-31": {
+                    "body_child_index": 31,
+                    "type": "p",
+                    "raw_text": "乙方：深信服科技股份有限公司 地址：【未填写】",
+                }
+            }
+        }
+        nodes = [{
+            "node_id": "frontmatter/node-1",
+            "title": "合同首部",
+            "start_index": 31,
+            "end_index": 31,
+        }]
+
+        rendered = _format_anchor_context(index, nodes)
+
+        self.assertIn("## 合同检索证据", rendered)
+        self.assertNotIn("合同检索结果 1", rendered)
+        self.assertIn("xml_anchor_id: path:body/p31", rendered)
 
 
 class MissingTextReviewTests(unittest.IsolatedAsyncioTestCase):
@@ -777,6 +826,36 @@ class WorkflowPresentationTests(unittest.TestCase):
 
         self.assertEqual(len(errors), 1)
         self.assertIn("path:body/p9", errors[0])
+
+    def test_complete_region_coverage_rejects_issue_anchor_marked_compliant(self) -> None:
+        orchestrator = OrchestratorAgent()
+        context = (
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p31\n"
+            "内容：\n乙方：深信服科技股份有限公司 地址：【未填写】"
+        )
+        output = {
+            "issues": [{
+                "anchors": [{
+                    "role": "edit",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p31",
+                    "quoted_text": "乙方：深信服科技股份有限公司 地址：【未填写】",
+                    "comment_text": "请填写乙方地址。",
+                }],
+            }],
+            "coverage_decisions": [{
+                "xml_anchor_type": "paragraph",
+                "xml_anchor_id": "path:body/p31",
+                "decision": "compliant",
+                "reason": "已审查",
+            }],
+        }
+
+        errors = orchestrator._coverage_audit_errors(output, context)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("未标记为 issue", errors[0])
+        self.assertIn("path:body/p31", errors[0])
 
 
 class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):

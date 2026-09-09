@@ -666,7 +666,10 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
             if not text:
                 continue
             seen.add(anchor_id)
-            header = f"## 合同检索结果 {len(parts) + 1}"
+            # Do not expose a display ordinal beside the real paragraph/table ID.
+            # LLM reviewers only need the stable XML anchor and may otherwise
+            # confuse a result number such as 19 with path:body/p19.
+            header = "## 合同检索证据"
             title = str(node.get("title") or "").strip()
             if title:
                 header += f"\n检索片段标题：{title}"

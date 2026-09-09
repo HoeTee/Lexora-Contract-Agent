@@ -327,10 +327,7 @@ class OrchestratorAgent:
                 contexts = [str(item) for item in payload["contexts"] if str(item).strip()]
                 if not contexts:
                     contexts = ["未找到相关内容。"]
-        context = "\n\n".join(
-            f"# 检索证据批次 {index}/{len(contexts)}\n{item}"
-            for index, item in enumerate(contexts, 1)
-        )
+        context = "\n\n".join(f"# 检索证据批次\n{item}" for item in contexts)
         retrieval_tokens = estimate_tokens(context)
 
         if self.logger:
@@ -358,15 +355,16 @@ class OrchestratorAgent:
         )
         normalized_context = re.sub(r"\n{3,}", "\n\n", normalized_context).strip()
         guidance = (
-            '注意：下面内容中的”检索结果1/2””相关度分数””检索片段标题”等仅是检索系统包装信息，'
+            '注意：下面内容中的“相关度分数”“检索片段标题”等仅是检索系统包装信息，'
             '不是合同原始条款标题或所在位置。输出”所在位置”时只能填写合同原文中真实出现的条款、'
             '章节或段落位置；若合同原文未标明具体条款编号，请写”合同缺失审查要点要求书写的内容”，'
             '绝对不要照抄检索包装标题。'
         )
         anchor_guidance = (
-            "每条检索结果会提供 xml_anchor_type 和 xml_anchor_id。"
-            "输出 anchors 时必须原样复用对应检索结果中的 xml_anchor_type/xml_anchor_id；"
-            "quoted_text 只能摘录该 anchor 对应合同文本中的单一连续片段。"
+            "每条检索证据会提供 xml_anchor_type 和 xml_anchor_id。"
+            "输出 anchors 时必须从 quoted_text 所在的同一证据对象逐字符复制 xml_anchor_type/xml_anchor_id；"
+            "禁止根据证据展示顺序、批次编号、正文顺序或段落内容自行构造 xml_anchor_id。"
+            "输出前必须确认 quoted_text 是该 xml_anchor_id 对应合同文本中的单一连续片段。"
         )
         return f"{guidance}\n{anchor_guidance}\n\n{normalized_context}"
 
@@ -475,16 +473,21 @@ class OrchestratorAgent:
                         stats["repaired"] += 1
                         continue
 
-                candidates: list[tuple[dict[str, str], str]] = []
+                exact_candidates: list[tuple[dict[str, str], str]] = []
+                containment_candidates: list[tuple[dict[str, str], str]] = []
                 for item in evidence:
                     candidate_quote = self._normalized_span(item["content"], quote)
                     if candidate_quote:
-                        candidates.append((item, candidate_quote))
+                        exact_candidates.append((item, candidate_quote))
                         continue
                     normalized_content = self._normalize_anchor_text(item["content"])
                     if len(normalized_content) >= 4 and normalized_content in normalized_quote:
-                        candidates.append((item, item["content"]))
+                        containment_candidates.append((item, item["content"]))
 
+                # A full quote match is authoritative. Short evidence text may
+                # also appear inside that quote (for example a party name), but
+                # must not make an otherwise unique exact match ambiguous.
+                candidates = exact_candidates or containment_candidates
                 unique_candidates = {
                     (item["xml_anchor_type"], item["xml_anchor_id"], candidate_quote): (item, candidate_quote)
                     for item, candidate_quote in candidates
@@ -536,6 +539,17 @@ class OrchestratorAgent:
         )
         if missing_issues:
             errors.append(f"标记为 issue 的证据没有对应 edit 批注：{missing_issues}")
+        issue_decision_keys = {
+            (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or ""))
+            for item in decisions
+            if item.get("decision") == "issue"
+        }
+        conflicting_issue_anchors = sorted(issue_anchor_keys - issue_decision_keys)
+        if conflicting_issue_anchors:
+            errors.append(
+                "edit 批注对应的 coverage_decisions 未标记为 issue："
+                f"{conflicting_issue_anchors}"
+            )
         return errors
 
     @staticmethod
@@ -776,6 +790,7 @@ class OrchestratorAgent:
             SUB_AGENT_EXPECTED_JSON,
         )
         review_context = self._review_evidence_context(context, sub_agent)
+        anchor_validation = self._validate_and_repair_anchors(parsed_opinion, review_context)
         if coverage_audit:
             for _ in range(2):
                 coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
@@ -788,6 +803,10 @@ class OrchestratorAgent:
                     + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
                     previous_opinion,
                 )
+                review_context = self._review_evidence_context(context, sub_agent)
+                repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+                for key, value in repair_stats.items():
+                    anchor_validation[key] = anchor_validation.get(key, 0) + value
             else:
                 remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
                 if remaining_coverage_errors:
@@ -808,6 +827,9 @@ class OrchestratorAgent:
                 previous_opinion,
             )
             review_context = self._review_evidence_context(context, sub_agent)
+            repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+            for key, value in repair_stats.items():
+                anchor_validation[key] = anchor_validation.get(key, 0) + value
         else:
             remaining_policy_errors = self._policy_output_errors(
                 parsed_opinion,
@@ -819,7 +841,13 @@ class OrchestratorAgent:
                     "SubAgent routing-policy output validation failed: "
                     + "; ".join(remaining_policy_errors)
                 )
-        anchor_validation = self._validate_and_repair_anchors(parsed_opinion, review_context)
+        if coverage_audit:
+            remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
+            if remaining_coverage_errors:
+                raise AgentOutputValidationError(
+                    "SubAgent complete-region coverage audit failed after output repair: "
+                    + "; ".join(remaining_coverage_errors)
+                )
 
         if self.logger:
             self.logger.log(
@@ -921,6 +949,9 @@ class OrchestratorAgent:
                     previous_opinion,
                 )
                 review_context = self._review_evidence_context(context, sub_agent)
+                repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+                for key, value in repair_stats.items():
+                    anchor_validation[key] = anchor_validation.get(key, 0) + value
                 if coverage_audit:
                     coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
                     if coverage_errors:
@@ -931,6 +962,10 @@ class OrchestratorAgent:
                             + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
                             previous_opinion,
                         )
+                        review_context = self._review_evidence_context(context, sub_agent)
+                        repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+                        for key, value in repair_stats.items():
+                            anchor_validation[key] = anchor_validation.get(key, 0) + value
                         remaining_errors = self._coverage_audit_errors(parsed_opinion, context)
                         if remaining_errors:
                             raise AgentOutputValidationError(
@@ -947,6 +982,9 @@ class OrchestratorAgent:
                         previous_opinion,
                     )
                     review_context = self._review_evidence_context(context, sub_agent)
+                    repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+                    for key, value in repair_stats.items():
+                        anchor_validation[key] = anchor_validation.get(key, 0) + value
                     remaining_policy_errors = self._policy_output_errors(
                         parsed_opinion,
                         criterion,
@@ -957,9 +995,13 @@ class OrchestratorAgent:
                             "SubAgent routing-policy output validation failed after reflection: "
                             + "; ".join(remaining_policy_errors)
                         )
-                round_validation = self._validate_and_repair_anchors(parsed_opinion, review_context)
-                for key, value in round_validation.items():
-                    anchor_validation[key] = anchor_validation.get(key, 0) + value
+                if coverage_audit:
+                    remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
+                    if remaining_coverage_errors:
+                        raise AgentOutputValidationError(
+                            "SubAgent complete-region coverage audit failed after reflection repair: "
+                            + "; ".join(remaining_coverage_errors)
+                        )
                 ledger.observe(parsed_opinion)
         else:
             print(f"[Orchestrator] {cid}: Max {MAX_REFLECTION_ROUNDS} rounds reached")
