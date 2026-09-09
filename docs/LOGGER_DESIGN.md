@@ -30,7 +30,7 @@ API 与 Web 日志不能混用。Web 历史按 `tenant_id` 定位任务，再按
 
 `trace.json` 只保存摘要化输入输出；完整审查结果放在 `review_outputs.json`。日志不得记录完整 API key、密码或带签名 query string 的 URL。
 
-`phase.summarize` span 会记录确定性展示整理的审计字段：`raw_issue_count`、`canonical_issue_count`、`presentation_issue_count`、`presentation_anchor_count`、`inline_source_issue_keys` 和 `summary_issue_comments`。这些字段用于判断原始问题经过跨要点去重后进入了正文批注还是总体总结；Summarizer 不再产生删除或锚点决策。
+`phase.summarize` span 会记录 `raw_issue_count`、`confirmed_issue_count`、`presentation_issue_count`、`presentation_anchor_count`、`opening_notices` 和 `semantic_deduplication`。`semantic_deduplication` 包含已应用、跳过及删除的问题数量；Summarizer 只标记重复组，Workflow 校验 issue_key 后执行，不允许模型改变锚点或任意删除独立问题。
 
 事件名称以 `loggers/api_event_logger.py` 和实际调用点为准，不在文档中维护第二份枚举。
 

@@ -17,6 +17,8 @@ policies:
   placement:
     target: inline
     note: 未填写字段分别批注在对应首部原文处。
+  coverage_audit: true
+  dedupe_priority: 300
 - id: H02
   section: 合同框架
   criterion: 合同框架内需要具备至少以下标题：保密条款、验收、知识产权、甲方义务、乙方义务、甲方违约责任、乙方违约责任、不可抗力、（合同的补充、变更与解除）、诚信廉洁合作承诺、适用法律及合同争议解决、合同的生效及合同份数、双方约定的其他事项、附件。
@@ -189,6 +191,7 @@ policies:
   placement:
     target: inline
     note: 锚定具体错别字。
+  dedupe_priority: 100
 - id: H13
   section: 其他基本问题
   criterion: 是否标题顺序杂乱。
@@ -219,6 +222,7 @@ policies:
   placement:
     target: inline
     note: 不一致时锚定金额原文。
+  dedupe_priority: 300
 - id: H15
   section: 其他基本问题
   criterion: 是否存在语句语病，例如挨着重复这类“一致一致”、一句话主语缺失。
@@ -231,6 +235,7 @@ policies:
   placement:
     target: inline
     note: 锚定具体语病原文且每处只保留一条批注。
+  dedupe_priority: 200
 - id: H16
   section: 其他基本问题
   criterion: 是否存在如下相关招标单位、谈判单位、投标单位等其他流程中相关敏感词：招标单位、中标单位、投标单位、谈判单位、谈判响应单位、采购人、投标人、入围单位、征集单位。

@@ -17,7 +17,9 @@
 | `xml_anchor_type / xml_anchor_id / quoted_text` | 保持原有 XML 定位契约，原文必须连续、逐字匹配。 |
 | `anchors[].comment_text` | edit 必须有具体修改意见，最多 300 字符；evidence 必须为空。超长通过校验重试，禁止静默截断。 |
 | `issue_comment` | 完整问题概述，最多 600 字符；不能以概括替代真实字段对应的修改位置。 |
+| `SubAgent.coverage_decisions[]` | 仅对配置了完整覆盖审计的固定标准启用；每个输入证据锚点必须有 `issue/compliant/not_applicable` 判断。 |
 | `Reflector.finding_decisions[]` | 每项为 `finding_id`、`decision(confirm/revise/remove)` 和非空 `reason`；每条 finding 必须独立决定。 |
+| `Reflector.coverage_gaps[]` | 列出检索证据已经出现、但 SubAgent 未形成对应问题的漏检；非空时不能 PASS。 |
 | `quality_status` | `passed`：当前输出通过反思及发现完整性检查；`pending_review`：未通过、模型异常或存在未解释丢失；`not_required`：初次无问题，沿用已有短路流程，不能解释为已反思。 |
 | `quality_history` | 逐轮结果快照和反思反馈，供日志诊断；不交给 Summarizer。 |
 | `finding_decisions` | 逐条确认、修改或撤回决定；语义理由仍由 LLM 判断。 |
@@ -29,16 +31,17 @@
 
 ## 执行与写入
 
-固定任务和用户任务完成反思后，工作流会用原始 DOCX 解析每个 edit anchor 的 `paragraph_path/start_index/end_index`。只有两类来源落在完全相同字符范围时才冲突，固定任务保留、用户任务删除；同一段落内不同字符范围、无法解析的锚点以及同来源结果均保留。该步骤发生在 Summarizer 和 DOCX Writer 之前。
+固定任务和用户任务完成反思后，工作流会用原始 DOCX 解析每个 edit anchor 的 `paragraph_path/start_index/end_index`。完全相同字符范围只保留一个：固定任务优先于用户任务，同来源按 `dedupe_priority` 选择。随后现有 Summarizer 在同一次调用中标记跨要点语义重复，Workflow 只应用键值合法的合并组；不同事实不得合并。这两层都发生在 DOCX Writer 之前。
 
 1. 字段完整性不使用业务正则判定。标准明确字段名时由 `rule` 定位，标准要求全合同检查且未限定字段时由 `scan` 分批交给 LLM 结合字段语义、相邻文字和表格关系判断。
-2. 已有反思调用接收检索证据、当前发现和先前未保留的发现；不新增复核 Agent。
+2. 已有反思调用接收检索证据、当前发现和先前未保留的发现；完整覆盖任务还接收逐证据决定并返回 coverage_gaps，不新增复核 Agent。
 3. Reflector 对每条 finding 返回 confirm/revise/remove。一个 finding 需修改不会连带屏蔽同一 criterion 中已确认的问题。
 4. 对“信息是否齐全”“包括……等”这类非穷举标准，scan 必须遍历批次内全部原文且不设候选 Top-K；Reviewer 必须逐项判断 scan 返回的字段候选，不能把示例字段当作封闭清单。
 4. pending_review 只写入 API 状态和日志；不得进入 AI 审查总结，不得暴露 criterion/finding 编号或 XML path。
 5. edit 位置逐处写入；evidence 永不产生批注。删除 merged_by_party 聚合器。旧结果含该 placement 时也按普通位置处理，不恢复聚合行为。
 6. Schema 要求每个 missing_value issue 只有一个 edit、每个 issue_id 唯一，并拒绝完全重复的 XML 位置、引用和缺陷类型；同段不同字段不因为同属 missing_value 就合并。不使用业务正则或模糊相似度阈值判断字段是否未填写。
-7. 保留输入 DOCX 已有人工及普通批注，替换作者为“AI 审查总结”的旧总结，确保最终只有一条总结。Summarizer 输入上限保持 90k。
+7. `issue_comment` 和 `comment_text` 禁止“同上”等上下文依赖表达及 `p311/path/node_id/检索结果N` 等内部定位；schema 失败后走现有定向重试。
+8. 保留输入 DOCX 已有人工及普通批注，替换作者为“AI 审查总结”的旧总结，确保最终只有一条总结。Summarizer 输入上限保持 90k。
 
 ## 任务与状态
 

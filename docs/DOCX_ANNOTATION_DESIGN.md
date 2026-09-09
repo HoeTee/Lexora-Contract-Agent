@@ -26,9 +26,10 @@
 SubAgentOutput
   -> Reflector 逐条确认 finding
   -> Orchestrator 输出 confirmed issues 与内部 unresolved_issues
-  -> Workflow 按 placement 和 anchor.role 分流
-  -> SummaryAgent 读取 confirmed issues
-  -> LLM 只输出 overall_comment、priority_comments
+  -> Workflow 按精确 DOCX 字符范围防重
+  -> SummaryAgent 读取带 issue_key 的 confirmed issues
+  -> LLM 同时输出 overall_comment、priority_comments、duplicate_groups
+  -> Workflow 校验并应用跨要点语义重复合并，再按 placement 和 anchor.role 分流
   -> 程序把 opening_notices 追加到 final_review
   -> DOCX 批注生成器使用 confirmed edit anchors 和 final_review
 ```
@@ -36,11 +37,11 @@ SubAgentOutput
 其中：
 
 - 每个 finding 独立确认；已确认 finding 可写入，未确认 finding 只保留在任务状态和日志，不能显示“待复核”或内部 path。
-- edit 锚点逐处写入，evidence 锚点仅用于论证。写入前按 `xml_anchor_type + xml_anchor_id + quoted_text + 修改动作` 精确去重；missing_value 在同一字段位置只写一次。
+- edit 锚点逐处写入，evidence 锚点仅用于论证。写入前先按解析后的 `paragraph_path + start_index + end_index` 精确防重，再应用 Summarizer 标记且通过键校验的语义重复组。
 - 总结去向由 Planner 的结构化 `placement` 决定，不再根据“断号、期限、附件标题”等关键词推测。
 - 固定提示来自结构化 `review_instruction`，不再从自然语言正则提取。
-- SummaryAgent 不再返回 `issue_decisions`，不能删除问题、改写锚点或决定展示位置。
-- 整体仍只调用一次 SummaryAgent，不增加新的 LLM 调用。
+- SummaryAgent 不返回任意删除决定，只能用 `duplicate_groups` 合并输入中确属同一缺陷的问题；不能改写锚点或决定展示位置。
+- 整体仍只调用一次 SummaryAgent，不增加新的总结模型调用。
 
 ## 审查文本如何生成
 

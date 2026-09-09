@@ -469,24 +469,44 @@ def _region_node_ids(index: dict[str, Any], regions: list[str]) -> set[str]:
 
 def _complete_scope_matches(index: dict[str, Any], roots: list[str]) -> list[dict[str, Any]]:
     nodes = {str(node.get("node_id") or ""): node for node in index.get("nodes") or []}
-    result = []
+    result: list[dict[str, Any]] = []
     for root_id in roots:
-        node = nodes.get(root_id)
-        if not node:
+        root = nodes.get(root_id)
+        if not root:
             continue
-        result.append(
-            {
-                "node_id": root_id,
-                "title": node.get("title"),
-                "summary": node.get("summary"),
-                "start_index": node.get("start_index"),
-                "end_index": node.get("end_index"),
-                "start_anchor": node.get("start_anchor"),
-                "end_anchor": node.get("end_anchor"),
-                "token_estimate": node.get("token_estimate"),
-                "sources": ["region_complete"],
-            }
-        )
+        selected = [root]
+        if not str(root.get("text") or "").strip():
+            descendants = [
+                node
+                for node_id, node in nodes.items()
+                if node_id.startswith(f"{root_id}/") and str(node.get("text") or "").strip()
+            ]
+            descendant_ids = {str(node.get("node_id") or "") for node in descendants}
+            expanded = [
+                node
+                for node in descendants
+                if not any(
+                    ancestor != str(node.get("node_id") or "")
+                    and str(node.get("node_id") or "").startswith(f"{ancestor}/")
+                    for ancestor in descendant_ids
+                )
+            ]
+            if expanded:
+                selected = expanded
+        for node in selected:
+            result.append(
+                {
+                    "node_id": node.get("node_id"),
+                    "title": node.get("title"),
+                    "summary": node.get("summary"),
+                    "start_index": node.get("start_index"),
+                    "end_index": node.get("end_index"),
+                    "start_anchor": node.get("start_anchor"),
+                    "end_anchor": node.get("end_anchor"),
+                    "token_estimate": node.get("token_estimate"),
+                    "sources": ["region_complete"],
+                }
+            )
     return result
 
 

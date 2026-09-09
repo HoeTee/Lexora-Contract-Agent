@@ -188,7 +188,8 @@ SUB_AGENT_EXPECTED_JSON = """
       "criterion": "当前审查标准原文",
       "check_point": "该 issue 对应的具体检查点"
     }
-  ]
+  ],
+  "coverage_decisions": []
 }
 """
 
@@ -442,6 +443,42 @@ class OrchestratorAgent:
             issue["anchors"] = repaired_anchors
         return stats
 
+    def _coverage_audit_errors(self, parsed_opinion: dict, context: str) -> list[str]:
+        """Validate one semantic decision for every evidence anchor in an audited region."""
+        evidence = self._retrieval_anchor_evidence(context)
+        expected = {
+            (item["xml_anchor_type"], item["xml_anchor_id"])
+            for item in evidence
+        }
+        decisions = parsed_opinion.get("coverage_decisions") or []
+        actual = {
+            (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or ""))
+            for item in decisions
+        }
+        errors: list[str] = []
+        missing = sorted(expected - actual)
+        unknown = sorted(actual - expected)
+        if missing:
+            errors.append(f"coverage_decisions 缺少证据锚点：{missing}")
+        if unknown:
+            errors.append(f"coverage_decisions 包含不存在的证据锚点：{unknown}")
+
+        issue_anchor_keys = {
+            (str(anchor.get("xml_anchor_type") or ""), str(anchor.get("xml_anchor_id") or ""))
+            for issue in parsed_opinion.get("issues") or []
+            for anchor in issue.get("anchors") or []
+            if anchor.get("role", "edit") == "edit"
+        }
+        missing_issues = sorted(
+            (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or ""))
+            for item in decisions
+            if item.get("decision") == "issue"
+            and (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or "")) not in issue_anchor_keys
+        )
+        if missing_issues:
+            errors.append(f"标记为 issue 的证据没有对应 edit 批注：{missing_issues}")
+        return errors
+
     async def _build_missing_text_review_notes(
         self,
         parsed_opinion: dict,
@@ -580,6 +617,7 @@ class OrchestratorAgent:
         placement = criterion.get("placement") if isinstance(criterion.get("placement"), dict) else {}
         placement_target = placement.get("target", "inline")
         review_instruction = (criterion.get("review_instruction") or "").strip()
+        coverage_audit = bool(criterion.get("coverage_audit"))
 
         # Step 1: Retrieve relevant contract sections
         context, evidence_tokens = await self._retrieve_context(
@@ -619,6 +657,13 @@ class OrchestratorAgent:
             "必须逐条作出实质判断。原文确为未填写时必须分别输出 issue，只有能从该原文看出已实际填写或不属于标准范围时才可排除。\n\n"
             f"以下是合同原文中与此标准相关的内容：\n\n{context}\n\n"
         )
+        if coverage_audit:
+            task_prompt += (
+                "完整覆盖审计：必须对上述每一个检索证据锚点输出一条 coverage_decisions。"
+                "decision=issue 时必须同时生成锚定同一 xml_anchor_id 的 edit issue；"
+                "decision=compliant/not_applicable 时在 reason 中说明与当前标准的关系。"
+                "不得因为已经发现部分问题就跳过合同号、日期、联系方式等其他字段。\n\n"
+            )
         if review_instruction:
             task_prompt = (
                 task_prompt
@@ -634,6 +679,23 @@ class OrchestratorAgent:
             SubAgentOutput,
             SUB_AGENT_EXPECTED_JSON,
         )
+        if coverage_audit:
+            for _ in range(2):
+                coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
+                if not coverage_errors:
+                    break
+                parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                    sub_agent,
+                    "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
+                    + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
+                    SubAgentOutput,
+                    SUB_AGENT_EXPECTED_JSON,
+                )
+            else:
+                raise AgentOutputValidationError(
+                    "SubAgent complete-region coverage audit failed: "
+                    + "; ".join(self._coverage_audit_errors(parsed_opinion, context))
+                )
         anchor_validation = self._validate_and_repair_anchors(parsed_opinion, context)
 
         if self.logger:
@@ -647,7 +709,7 @@ class OrchestratorAgent:
             )
 
         # If sub-agent found no issues at all across all check points, short-circuit
-        if parsed_opinion["status"] == "compliant":
+        if parsed_opinion["status"] == "compliant" and not coverage_audit:
             print(f"[Orchestrator] {cid}: All check points compliant, skipping reflection.")
             return {
                 "criterion_id": cid,
@@ -660,6 +722,7 @@ class OrchestratorAgent:
                 "review_instruction": review_instruction,
                 "review_source": criterion.get("review_source", "uploaded"),
                 "policy_id": criterion.get("policy_id", ""),
+                "dedupe_priority": int(criterion.get("dedupe_priority") or 0),
                 "applicability_reason": parsed_opinion.get("applicability_reason", ""),
                 "tokens": sub_agent.token_usage.get("total_tokens", 0) + evidence_tokens,
                 "error_message": None,
@@ -694,6 +757,17 @@ class OrchestratorAgent:
             if review is None:
                 break
 
+            coverage_gaps = review.get("coverage_gaps") or []
+            if coverage_gaps:
+                gap_feedback = "\n".join(
+                    f"漏检 {gap.get('xml_anchor_id')}: {gap.get('quoted_text')}；{gap.get('reason')}"
+                    for gap in coverage_gaps
+                )
+                review["feedback"] = (
+                    str(review.get("feedback") or "").strip()
+                    + "\n请补充以下覆盖缺口：\n"
+                    + gap_feedback
+                ).strip()
             status = review["status"]
             if self.logger:
                 self.logger.log(
@@ -720,6 +794,22 @@ class OrchestratorAgent:
                     SubAgentOutput,
                     SUB_AGENT_EXPECTED_JSON,
                 )
+                if coverage_audit:
+                    coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
+                    if coverage_errors:
+                        parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
+                            sub_agent,
+                            "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
+                            + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
+                            SubAgentOutput,
+                            SUB_AGENT_EXPECTED_JSON,
+                        )
+                        remaining_errors = self._coverage_audit_errors(parsed_opinion, context)
+                        if remaining_errors:
+                            raise AgentOutputValidationError(
+                                "SubAgent complete-region coverage audit failed after reflection: "
+                                + "; ".join(remaining_errors)
+                            )
                 round_validation = self._validate_and_repair_anchors(parsed_opinion, context)
                 for key, value in round_validation.items():
                     anchor_validation[key] = anchor_validation.get(key, 0) + value
@@ -752,6 +842,7 @@ class OrchestratorAgent:
             "review_instruction": review_instruction,
             "review_source": criterion.get("review_source", "uploaded"),
             "policy_id": criterion.get("policy_id", ""),
+            "dedupe_priority": int(criterion.get("dedupe_priority") or 0),
             "applicability_reason": parsed_opinion.get("applicability_reason", ""),
             "tokens": total_tokens,
             "error_message": None,

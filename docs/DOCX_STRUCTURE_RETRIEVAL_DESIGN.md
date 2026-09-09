@@ -745,7 +745,7 @@ structure_tree > input_tokens
 
 向量检索不用于构建结构树，也不是与结构树并列执行的独立检索。当前有三个受控调用位置：
 
-- `region`：用固定 region 或标题关键词定位范围。`coverage=relevant` 时执行范围内结构语义，并在结果少于 10 个时用向量补齐；`coverage=complete` 时完整读取范围并按 `output_tokens` 分页；
+- `region`：用固定 region 或标题关键词定位范围。`coverage=relevant` 时执行范围内结构语义，并在结果少于 10 个时用向量补齐；`coverage=complete` 时完整读取范围并按 `output_tokens` 分页。范围根节点有聚合正文时直接使用；根节点无正文时展开其非空子节点，确保附件标题和附件内容不会因空根节点而丢失；
 - `hybrid`：先对全局结构树执行结构语义；结构结果少于 10 个时，向量补齐缺口；
 - `fallback`：仅当 `RoutePlan.fallback=true` 且路线只有可安全扩大的 `title/rule` 时执行同一套全局语义检索。
 

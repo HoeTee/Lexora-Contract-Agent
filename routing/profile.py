@@ -32,6 +32,8 @@ class MandatoryPolicy(BaseModel):
     review_instruction: str = ""
     route: RoutePlan
     placement: Placement
+    coverage_audit: bool = False
+    dedupe_priority: int = Field(default=0, ge=0)
 
 
 class MandatoryProfile(BaseModel):
@@ -78,5 +80,7 @@ def load_mandatory_tasks() -> list[dict[str, Any]]:
             "fallback_llm_route": False,
             "review_source": "mandatory",
             "policy_id": policy.id,
+            "coverage_audit": policy.coverage_audit,
+            "dedupe_priority": policy.dedupe_priority,
         })
     return tasks

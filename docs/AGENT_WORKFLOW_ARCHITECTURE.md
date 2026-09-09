@@ -16,7 +16,7 @@
 | 2. 建索引 build_index | MCP `contract_build_index` | 按 `retrieval.backend` 为合同建立临时 LlamaIndex 或 docxindex 索引 |
 | 3. 规划 plan | `routing.profile` + `PlannerAgent.extract_strategies` | 固定18条直接从 `criteria-routes.yaml` 组装；用户上传标准才调用 Planner |
 | 4. 执行+反思 execute | `OrchestratorAgent.execute_criteria` | 逐条审查标准，产出 `results` |
-| 5. 最终整理 summarize | Workflow 分流 + `SummarizerAgent.compile_summary_comment` | Workflow 按结构化 placement 和已确认 finding 分流；Summarizer 只生成总览 |
+| 5. 最终整理 summarize | Workflow 分流 + `SummarizerAgent.compile_summary_comment` | Summarizer 在同一次调用中生成总览并标记跨要点语义重复；Workflow 校验并应用合并结果 |
 | 6. 批注 generate | MCP `generate_docx_report` | 用已确认的原文批注结果与 `final_review` 生成批注版 DOCX |
 
 每个阶段会通过 `progress_callback` 上报阶段名，便于前端展示进度：`ingesting`、`building_index`、`planning`、`reviewing`、`summarizing`、`generating_docx`、`completed`。
@@ -25,7 +25,7 @@
 
 ### 批注意义与证据边界
 
-`agents/prompts/cn_prompts.yaml` 中 SubAgent 负责判定，现有 Reflector 独立复核；不增加 LLM 调用阶段：
+`agents/prompts/cn_prompts.yaml` 中 SubAgent 负责判定，现有 Reflector 独立复核；不增加新的 Agent 类型：
 
 - “照抄”等编辑指令不作为最终意见，也不能在目标文字不明确时编造提示语。通用提醒返回 `anchors=[]` 进入总结；具体缺陷才锚定问题原文。
 - 字段是否未填写由 LLM 结合字段名称、相邻文字、表格关系和合同语境判断，不由业务正则硬匹配。`[合同中心-合同编码]`、`#乙方合同号#【     】`、字段后的 `XX` 是提示词示例；`【5‰】`、`【5%】` 等已有值和条件性补件说明是反例。批注必须直接引用对应字段和未填写位置。
@@ -38,9 +38,9 @@
 | --- | --- | --- | --- | --- |
 | PlannerAgent | `agents/planner.py` | 只为用户上传标准提取五种路线和批注去向 | 用户标准 skeleton | `CriterionStrategy` |
 | OrchestratorAgent | `agents/orchestrator.py` | 逐条派发 SubAgent，串联检索、反思、并发控制 | `criteria_list` | `results` |
-| SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准，可调用白名单允许的 MCP 工具 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues） |
-| ReflectorAgent | `agents/reflector.py` | 逐条质量复核 SubAgent finding | criterion + subagent_output + 补充检索 | `{ status, feedback, finding_decisions[] }` |
-| SummarizerAgent | `agents/summarizer.py` | 根据程序整理后的完整问题清单生成总览，不拥有删除问题或选择锚点的权限 | `summarizer_results` | `{ overall_comment, priority_comments }` |
+| SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准；配置完整覆盖审计时逐证据返回判断 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues / coverage_decisions） |
+| ReflectorAgent | `agents/reflector.py` | 逐条质量复核 finding，并检查完整覆盖任务是否漏判输入证据 | criterion + subagent_output + 检索证据 | `{ status, feedback, finding_decisions[], coverage_gaps[] }` |
+| SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题 | `{ overall_comment, priority_comments, duplicate_groups }` |
 
 基础设施：`agents/base_agent.py`（`Agent` 基类与 `Settings` 模型配置）、`agents/schemas.py`（结构化输出 schema）、`agents/prompts/cn_prompts.yaml`（所有提示词，含审查边界）。
 
@@ -142,12 +142,12 @@ mandatory tasks + uploaded tasks -> criteria_list
 合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引
 每条 criterion: 检索 context -> SubAgent(可调用白名单工具) -> (Reflector 反思循环) -> 单条结果
 所有单条结果 -> Workflow 按 placement 和 edit/evidence 分流
-已确认问题 -> 按 DOCX paragraph_path/start_index/end_index 去重（同位置 mandatory 优先）
-去重结果 -> Summarizer -> final_review
+已确认问题 -> 按 DOCX paragraph_path/start_index/end_index 精确防重（mandatory 优先，同来源按 dedupe_priority）
+精确防重结果 -> Summarizer 标记语义重复 -> Workflow 校验并应用合并 -> final_review
 已确认 edit anchors + final_review -> generate_docx_report -> 批注版 DOCX
 ```
 
-`raw results` 继续写入审查日志。Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。只有固定任务与上传任务解析到完全相同的 `paragraph_path/start_index/end_index` 时，上传批注才被固定批注替代；同来源批注及不同字符范围不按该优先规则删除。固定提示来自路线配置的 `review_instruction`，不由正则猜测去向。
+Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。完全相同字符范围只保留一条：固定任务优先于上传任务，同来源按路线配置的 `dedupe_priority` 选择，顺序仅作为同优先级兜底。不同字符范围只有在 Summarizer 明确判定为同一事实、同一风险和同一修改动作时才合并。固定提示来自路线配置的 `review_instruction`，不由正则猜测去向。
 
 ## 架构边界
 

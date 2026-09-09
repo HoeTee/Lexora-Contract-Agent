@@ -81,7 +81,7 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertEqual(len(results[1]["issues"]), 1)
         self.assertEqual(stats["removed_duplicate_issues"], 1)
 
-    def test_same_source_findings_are_not_removed_by_priority_rule(self) -> None:
+    def test_same_source_exact_range_keeps_higher_priority_finding(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "contract.docx"
             document = Document()
@@ -89,11 +89,31 @@ class MandatoryRoutingTests(unittest.TestCase):
             document.save(path)
             first = _result("H01", "mandatory", "请填写乙方名称。")
             second = _result("H10", "mandatory", "乙方名称未填写。")
+            first["dedupe_priority"] = 100
+            second["dedupe_priority"] = 200
 
             results, stats = deduplicate_review_results_by_range(str(path), [first, second])
 
-        self.assertEqual([len(result["issues"]) for result in results], [1, 1])
-        self.assertEqual(stats["removed_duplicate_issues"], 0)
+        self.assertEqual([len(result["issues"]) for result in results], [0, 1])
+        self.assertEqual(stats["removed_duplicate_issues"], 1)
+
+    def test_uploaded_exact_range_never_overrides_mandatory(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "contract.docx"
+            document = Document()
+            document.add_paragraph("乙方：#乙方名称#")
+            document.save(path)
+            mandatory = _result("H01", "mandatory", "请填写乙方名称。")
+            uploaded = _result("U01", "uploaded", "请核实乙方名称。")
+            uploaded["dedupe_priority"] = 999
+
+            results, _ = deduplicate_review_results_by_range(
+                str(path),
+                [uploaded, mandatory],
+            )
+
+        self.assertEqual(results[0]["issues"], [])
+        self.assertEqual(len(results[1]["issues"]), 1)
 
 
 def _result(criterion_id: str, source: str, comment: str) -> dict:

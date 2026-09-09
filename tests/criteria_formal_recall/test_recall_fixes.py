@@ -17,6 +17,7 @@ from agents.schemas import ReflectorOutput, SubAgentOutput, SummaryOutput
 from agents.summarizer import (
     SUMMARIZER_MAX_PROMPT_TOKENS,
     SummarizerAgent,
+    apply_summary_duplicate_groups,
     conservative_message_token_upper_bound,
     normalize_summary_output,
 )
@@ -459,7 +460,7 @@ class WorkflowPresentationTests(unittest.TestCase):
             },
         ]
 
-    def test_summary_schema_rejects_removed_issue_decisions_field(self) -> None:
+    def test_summary_schema_rejects_unknown_issue_decisions_field(self) -> None:
         with self.assertRaises(ValueError):
             SummaryOutput.model_validate({
                 "overall_comment": "总结",
@@ -533,6 +534,31 @@ class WorkflowPresentationTests(unittest.TestCase):
         inline, _ = _prepare_inline_results(self.results)
         self.assertEqual(len(inline), 2)
 
+    def test_summary_duplicate_group_removes_semantic_duplicate_issue(self) -> None:
+        first = json.loads(json.dumps(self.results[0], ensure_ascii=False))
+        second = json.loads(json.dumps(self.results[0], ensure_ascii=False))
+        first["criterion_id"] = "H12"
+        second["criterion_id"] = "H15"
+        second["issues"][0]["issue_id"] = "H15.1"
+        second["issues"][0]["anchors"][0]["xml_anchor_id"] = "path:body/p2"
+
+        merged, stats = apply_summary_duplicate_groups(
+            [first, second],
+            [{
+                "keep_issue_key": "0:H12:C12.1",
+                "merge_issue_keys": ["1:H15:H15.1"],
+                "canonical_comment": "删除重复的“原因”，改为“因乙方原因”。",
+                "reason": "同一处重复词问题",
+            }],
+        )
+
+        self.assertEqual([len(result["issues"]) for result in merged], [1, 0])
+        self.assertEqual(stats["removed_duplicate_issues"], 1)
+        self.assertEqual(
+            merged[0]["issues"][0]["anchors"][0]["comment_text"],
+            "删除重复的“原因”，改为“因乙方原因”。",
+        )
+
     def test_keyword_triggered_fixed_instruction_is_routed_to_opening_summary(self) -> None:
         results = [{
             "criterion_id": "FIXED",
@@ -560,7 +586,7 @@ class WorkflowPresentationTests(unittest.TestCase):
         self.assertEqual(inline, [])
         self.assertEqual(notices, ["注意：当前检查点固定文字"])
 
-    def test_anchored_missing_fields_override_criterion_summary_placement(self) -> None:
+    def test_summary_placement_remains_authoritative_for_missing_fields(self) -> None:
         result = self.results[0]
         result["placement"] = {"target": "summary"}
         result["review_instruction"] = "注意：请补充合同基本信息"
@@ -568,8 +594,40 @@ class WorkflowPresentationTests(unittest.TestCase):
 
         inline, notices = _prepare_inline_results([result])
 
-        self.assertEqual(len(inline), 1)
-        self.assertEqual(notices, [])
+        self.assertEqual(inline, [])
+        self.assertEqual(notices, ["注意：请补充合同基本信息"])
+
+    def test_user_facing_comments_reject_internal_locations_and_same_as_above(self) -> None:
+        value = json.loads(json.dumps(self.results[0]["issues"][0], ensure_ascii=False))
+        value["issue_comment"] = "请与p311保持一致。"
+        with self.assertRaises(ValueError):
+            SubAgentOutput.model_validate({"status": "issues_found", "issues": [value]})
+
+        value["issue_comment"] = "存在文字错误。"
+        value["anchors"][0]["comment_text"] = "同上，请修正。"
+        with self.assertRaises(ValueError):
+            SubAgentOutput.model_validate({"status": "issues_found", "issues": [value]})
+
+    def test_complete_region_coverage_requires_each_evidence_anchor(self) -> None:
+        orchestrator = OrchestratorAgent()
+        context = (
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p8\n内容：\n合同号：[待填写]\n\n---\n\n"
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p9\n内容：\n签订日期：2025年 月 日"
+        )
+        output = {
+            "issues": [],
+            "coverage_decisions": [{
+                "xml_anchor_type": "paragraph",
+                "xml_anchor_id": "path:body/p8",
+                "decision": "compliant",
+                "reason": "已审查",
+            }],
+        }
+
+        errors = orchestrator._coverage_audit_errors(output, context)
+
+        self.assertEqual(len(errors), 1)
+        self.assertIn("path:body/p9", errors[0])
 
 
 class SummarizerPromptBudgetTests(unittest.TestCase):

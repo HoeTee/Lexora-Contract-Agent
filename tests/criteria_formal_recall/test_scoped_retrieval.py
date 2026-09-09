@@ -146,6 +146,23 @@ class ScopedRegionTests(unittest.TestCase):
         self.assertEqual(len(matches), 1)
         self.assertEqual((matches[0]["start_index"], matches[0]["end_index"]), (10, 30))
 
+    def test_complete_empty_region_expands_nonempty_attachment_children(self) -> None:
+        index = {"nodes": [
+            {"node_id": "attachments", "title": "附件", "text": "", "nodes": ["attachments/att_001"]},
+            {
+                "node_id": "attachments/att_001",
+                "title": "信息化建设保密协议",
+                "text": "附件2 信息化建设保密协议",
+                "start_index": 20,
+                "end_index": 30,
+            },
+        ]}
+
+        matches = _complete_scope_matches(index, ["attachments"])
+
+        self.assertEqual([item["node_id"] for item in matches], ["attachments/att_001"])
+        self.assertEqual(matches[0]["title"], "信息化建设保密协议")
+
     def test_duplicate_title_does_not_replace_wider_section_range(self) -> None:
         title = {
             "node_id": "body/payment",

@@ -2,11 +2,29 @@
 Pydantic schemas for validating structured agent outputs.
 """
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from routing.schemas import RoutePlan
+
+
+_INTERNAL_LOCATION_PATTERN = re.compile(
+    r"(?:path:(?:body|frontmatter|tail|attachments)/\S+|\b(?:node_id|xml_anchor_id)\b|(?<![A-Za-z0-9])p\d+(?!\d)|检索结果\s*\d+)",
+    flags=re.IGNORECASE,
+)
+_CONTEXT_DEPENDENT_PHRASES = ("同上", "如上", "见上", "前述问题")
+
+
+def _validate_user_facing_review_text(value: str) -> str:
+    """Reject comments that expose retrieval locations or depend on another comment."""
+    text = value.strip()
+    if _INTERNAL_LOCATION_PATTERN.search(text):
+        raise ValueError("user-facing review text must not expose internal retrieval locations")
+    if any(phrase in text for phrase in _CONTEXT_DEPENDENT_PHRASES):
+        raise ValueError("user-facing review text must be understandable without references such as 同上")
+    return value
 
 
 class StrictOutputModel(BaseModel):
@@ -74,6 +92,29 @@ class SubAgentAnchor(StrictOutputModel):
             raise ValueError("evidence anchor must have empty comment_text")
         return self
 
+    @field_validator("comment_text")
+    @classmethod
+    def comment_is_user_facing(cls, value: str) -> str:
+        if not value.strip():
+            return value
+        return _validate_user_facing_review_text(value)
+
+
+class EvidenceCoverageDecision(StrictOutputModel):
+    """One semantic decision for an evidence item in a mandatory complete-region audit."""
+
+    xml_anchor_type: Literal["paragraph", "table"]
+    xml_anchor_id: str = Field(min_length=1)
+    decision: Literal["issue", "compliant", "not_applicable"]
+    reason: str = Field(min_length=1)
+
+    @field_validator("xml_anchor_id", "reason")
+    @classmethod
+    def coverage_text_not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("coverage decision fields must not be blank")
+        return value
+
 
 class SubAgentIssue(StrictOutputModel):
     issue_id: str = Field(min_length=1)
@@ -101,11 +142,17 @@ class SubAgentIssue(StrictOutputModel):
             raise ValueError("field must not be blank")
         return value
 
+    @field_validator("issue_comment")
+    @classmethod
+    def issue_comment_is_user_facing(cls, value: str) -> str:
+        return _validate_user_facing_review_text(value)
+
 
 class SubAgentOutput(StrictOutputModel):
     status: Literal["compliant", "issues_found", "not_applicable"]
     applicability_reason: str = ""
     issues: list[SubAgentIssue] = Field(default_factory=list) # 使用 default_factory 来确保 issues 字段默认为一个空列表，而不是 None
+    coverage_decisions: list[EvidenceCoverageDecision] = Field(default_factory=list)
 
     @field_validator("applicability_reason") # 字段验证
     @classmethod # 在实例方法创建前检验某字段
@@ -140,6 +187,12 @@ class SubAgentOutput(StrictOutputModel):
                 if key in edit_keys:
                     raise ValueError("duplicate edit anchor and defect type across issues")
                 edit_keys.add(key)
+        coverage_keys = [
+            (decision.xml_anchor_type, decision.xml_anchor_id)
+            for decision in self.coverage_decisions
+        ]
+        if len(coverage_keys) != len(set(coverage_keys)):
+            raise ValueError("coverage_decisions must contain each evidence anchor at most once")
         return self
 
 
@@ -156,22 +209,49 @@ class FindingDecision(StrictOutputModel):
         return value
 
 
+class CoverageGap(StrictOutputModel):
+    xml_anchor_type: Literal["paragraph", "table"]
+    xml_anchor_id: str = Field(min_length=1)
+    quoted_text: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
 class ReflectorOutput(StrictOutputModel):
     status: Literal["PASS", "REJECT"]
     feedback: str = ""
     finding_decisions: list[FindingDecision] = Field(default_factory=list)
+    coverage_gaps: list[CoverageGap] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_unique_findings(self):
         finding_ids = [item.finding_id for item in self.finding_decisions]
         if len(finding_ids) != len(set(finding_ids)):
             raise ValueError("finding_decisions must contain each finding_id at most once")
+        if self.status == "PASS" and self.coverage_gaps:
+            raise ValueError("PASS must not contain coverage_gaps")
+        return self
+
+
+class SummaryDuplicateGroup(StrictOutputModel):
+    keep_issue_key: str = Field(min_length=1)
+    merge_issue_keys: list[str] = Field(min_length=1)
+    canonical_comment: str = Field(min_length=1, max_length=300)
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_distinct_keys(self):
+        if self.keep_issue_key in self.merge_issue_keys:
+            raise ValueError("keep_issue_key must not also appear in merge_issue_keys")
+        if len(self.merge_issue_keys) != len(set(self.merge_issue_keys)):
+            raise ValueError("merge_issue_keys must be unique")
+        _validate_user_facing_review_text(self.canonical_comment)
         return self
 
 
 class SummaryContentOutput(StrictOutputModel):
     overall_comment: str = "" # 总体审查总结
     priority_comments: list[str] = Field(default_factory=list) # 优先修改建议；使用 default_factory 来确保 priority_comments 字段默认为一个空列表，而不是 None
+    duplicate_groups: list[SummaryDuplicateGroup] = Field(default_factory=list)
 
     @field_validator("priority_comments") # 字段验证
     @classmethod # 在实例方法创建前检验某字段
@@ -179,6 +259,17 @@ class SummaryContentOutput(StrictOutputModel):
         if any(not item.strip() for item in value): # 检查优先修改建议列表中的每个建议是否为非空字符串
             raise ValueError("priority_comments must not contain empty strings")
         return value # 如果验证通过，返回原始值
+
+    @model_validator(mode="after")
+    def validate_duplicate_group_membership(self):
+        merged_keys = [
+            issue_key
+            for group in self.duplicate_groups
+            for issue_key in group.merge_issue_keys
+        ]
+        if len(merged_keys) != len(set(merged_keys)):
+            raise ValueError("an issue may be merged by at most one duplicate group")
+        return self
 
 
 class SummaryOutput(SummaryContentOutput):

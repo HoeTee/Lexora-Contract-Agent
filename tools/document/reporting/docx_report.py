@@ -94,16 +94,17 @@ def deduplicate_review_results_by_range(
     contract_path: str,
     results: list[dict],
 ) -> tuple[list[dict], dict[str, int]]:
-    """Drop cross-source duplicate edit anchors by resolved DOCX character range.
+    """Keep one edit annotation for each resolved DOCX character range.
 
-    Results from the mandatory profile win only when an uploaded criterion resolves
-    to the exact same paragraph path, start index, and end index. Unresolved anchors,
-    summary-only findings, and different character ranges are preserved.
+    Mandatory findings win over uploaded criteria. Within the same source, the
+    configurable dedupe priority wins and stable result order breaks ties.
+    Unresolved anchors, summary-only findings, and different ranges are preserved.
     """
     doc = Document(contract_path)
-    candidates: list[tuple[int, int, int, tuple[str, int, int], bool]] = []
+    candidates: list[tuple[int, int, int, tuple[str, int, int], bool, int]] = []
     for result_index, result in enumerate(results):
         mandatory = result.get("review_source") == "mandatory"
+        priority = int(result.get("dedupe_priority") or 0)
         for issue_index, issue in enumerate(result.get("issues") or []):
             for anchor_index, anchor in enumerate(issue.get("anchors") or []):
                 if anchor.get("role", "edit") != "edit":
@@ -121,16 +122,22 @@ def deduplicate_review_results_by_range(
                     resolved.match.start_index,
                     resolved.match.end_index,
                 )
-                candidates.append((result_index, issue_index, anchor_index, key, mandatory))
+                candidates.append((result_index, issue_index, anchor_index, key, mandatory, priority))
 
-    grouped: dict[tuple[str, int, int], list[tuple[int, int, int, bool]]] = {}
+    grouped: dict[tuple[str, int, int], list[tuple[int, int, int, bool, int]]] = {}
     suppressed: set[tuple[int, int, int]] = set()
-    for result_index, issue_index, anchor_index, key, mandatory in candidates:
-        grouped.setdefault(key, []).append((result_index, issue_index, anchor_index, mandatory))
+    for result_index, issue_index, anchor_index, key, mandatory, priority in candidates:
+        grouped.setdefault(key, []).append(
+            (result_index, issue_index, anchor_index, mandatory, priority)
+        )
     for group in grouped.values():
-        if not any(item[3] for item in group):
+        if len(group) < 2:
             continue
-        suppressed.update(item[:3] for item in group if not item[3])
+        winner = max(
+            group,
+            key=lambda item: (int(item[3]), item[4], -item[0], -item[1], -item[2]),
+        )
+        suppressed.update(item[:3] for item in group if item[:3] != winner[:3])
 
     deduplicated = copy.deepcopy(results)
     removed_issues = 0

@@ -28,7 +28,7 @@ from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_t
 from agents.base_agent import Settings
 from agents.planner import PlannerAgent, assemble_tasks, split_criteria_from_docx
 from agents.orchestrator import OrchestratorAgent
-from agents.summarizer import SummarizerAgent
+from agents.summarizer import SummarizerAgent, apply_summary_duplicate_groups
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
@@ -50,25 +50,13 @@ def _prepare_inline_results(results: list[dict]) -> tuple[list[dict], list[str]]
         placement = result.get("placement") or {}
         placement_target = placement.get("target", "inline")
         review_instruction = str(result.get("review_instruction") or "").strip()
-        has_anchored_missing_value = any(
-            anchor.get("role", "edit") == "edit"
-            and anchor.get("defect_type") == "missing_value"
-            for issue in result.get("issues", [])
-            for anchor in issue.get("anchors") or []
-        )
-        if placement_target == "summary" and not has_anchored_missing_value:
+        if placement_target == "summary":
             if review_instruction and review_instruction not in opening_notices:
                 opening_notices.append(review_instruction)
             continue
 
         rendered_issues: list[dict] = []
         for issue in result.get("issues", []):
-            if placement_target == "summary" and not any(
-                anchor.get("role", "edit") == "edit"
-                and anchor.get("defect_type") == "missing_value"
-                for anchor in issue.get("anchors") or []
-            ):
-                continue
             edit_anchors: list[dict] = []
             for anchor in issue.get("anchors") or []:
                 if anchor.get("role", "edit") != "edit":
@@ -237,7 +225,6 @@ class ContractReviewWorkflow:
                         }
                     )
 
-                review_outputs_path = self._save_review_outputs(results)
                 pending_ids = [r["criterion_id"] for r in results if r.get("quality_status") == "pending_review"]
                 error_ids = [r["criterion_id"] for r in results if r.get("status") == "ERROR"]
                 quality = {"status": "pending_review" if pending_ids or error_ids else "passed",
@@ -248,18 +235,24 @@ class ContractReviewWorkflow:
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
                 async with self.trace.span("phase.summarize", run_type="phase", inputs={"result_count": len(results)}) as span:
+                    raw_issue_count = sum(len(result.get("issues", [])) for result in results)
+                    summary_payload = await self._phase_summarize(results)
+                    results, semantic_deduplication = apply_summary_duplicate_groups(
+                        results,
+                        summary_payload.pop("duplicate_groups", []),
+                    )
+                    final_review = summary_payload
                     presentation_results, opening_notices = _prepare_inline_results(results)
-                    final_review = await self._phase_summarize(results)
                     final_review["opening_notices"] = opening_notices
+                    review_outputs_path = self._save_review_outputs(results)
                     span.set_outputs(
                         {
                             "summary_section_count": len(final_review),
-                            "raw_issue_count": sum(
-                                len(result.get("issues", [])) for result in results
-                            ),
+                            "raw_issue_count": raw_issue_count,
                             "confirmed_issue_count": sum(
                                 len(result.get("issues", [])) for result in results
                             ),
+                            "semantic_deduplication": semantic_deduplication,
                             "presentation_issue_count": sum(
                                 len(result.get("issues", [])) for result in presentation_results
                             ),
