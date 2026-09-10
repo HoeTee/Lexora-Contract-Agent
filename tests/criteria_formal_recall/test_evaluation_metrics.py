@@ -5,10 +5,14 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from tests.criteria_formal_recall.evaluate_results import write_metrics
+from tests.criteria_formal_recall.evaluate_results import criterion_id, write_metrics
 
 
 class EvaluationMetricsTests(unittest.TestCase):
+    def test_current_mandatory_and_uploaded_ids_map_to_numeric_criteria(self) -> None:
+        self.assertEqual(criterion_id({"criterion_id": "H01"}), 1)
+        self.assertEqual(criterion_id({"criterion_id": "C18"}), 18)
+
     def test_metrics_cover_contract_criterion_time_recall_and_accuracy(self) -> None:
         expected = [
             {"contract_id": "D01", "criterion_id": "1"},

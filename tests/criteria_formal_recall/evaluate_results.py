@@ -85,6 +85,11 @@ def normalized(value: str) -> str:
 
 
 def criterion_id(payload: dict[str, Any]) -> int | None:
+    raw_id = str(payload.get("criterion_id") or "").strip()
+    id_match = re.fullmatch(r"[CH](\d{1,2})", raw_id, flags=re.IGNORECASE)
+    if id_match:
+        value = int(id_match.group(1))
+        return value if 1 <= value <= 18 else None
     match = CRITERION_NUMBER.match(str(payload.get("criterion") or ""))
     if not match:
         return None
