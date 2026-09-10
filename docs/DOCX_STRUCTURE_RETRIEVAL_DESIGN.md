@@ -25,7 +25,7 @@ resources/criteria/criteria-routes.yaml
 
 | 路线 | 固定审查要点示例 | 执行方式 |
 |---|---|---|
-| `title` | 2、5、8、13、18 | 返回完整一级标题目录供模型判断；18用它核对实际附件标题 |
+| `title` | 2、5、8、13、18 | 默认返回完整一级标题目录；18 使用 `regions=[attachments]` 返回附件编号与实际标题 |
 | `rule` | 9、16 | 对标准明确给出的词语执行全文精确检索 |
 | `scan` | 3、12、15 | 按 token 分批遍历全部原文 anchor 并让模型筛选候选 |
 | `region` | 1、4、6、10、11、17、18 | 完整或语义读取固定区域、标题章节；18只在正文中检索附件引用 |
@@ -63,11 +63,14 @@ DocumentIndex
 
 ## 3. DocumentIndex 持久化索引
 
-在线 API 为每个任务生成临时内存索引，不把索引写入 `/data`。离线 CLI 需要持久化时写入：
+在线 API 为每个任务生成临时内存索引，并把可复现快照写入所属任务的状态目录：
 
 ```text
-scripts/docxindex/outputs/index/{合同目录名}/document_index.json
+API: data/api/{task_id}/state/docxindex/
+Web: data/web/{tenant_id}/{task_id}/state/docxindex/
 ```
+
+`tools/docxindex` 不选择历史目录；API/Web 任务层提供路径，MCP 适配层仅负责物化快照。离线 CLI 不再设置代码目录下的默认输出或日志目录，必须显式传入 `--out`。
 
 索引主结构：
 
@@ -753,7 +756,7 @@ structure_tree > input_tokens
 
 `region`、`scan`、`hybrid` 不进入全局 fallback。跨区域比较使用多个独立 `region` 步骤，结果按步骤交错合并，避免后一个区域在 `semantic.max_selected_nodes` 截断前完全丢失。
 
-`title(all_titles=true)` 是一级标题目录查询：各顶层区域下深度 1 的业务标题必须以紧凑标题证据返回，
+`title(all_titles=true)` 默认是一级标题目录查询：各顶层区域下深度 1 的业务标题必须以紧凑标题证据返回；设置 `regions=[attachments]` 时改为返回附件编号及其实际标题，不返回附件正文，
 不受普通 `semantic.max_selected_nodes` 候选上限截断。`rule` 的精确关键词全部未命中时，执行器必须同时返回
 “确定性全文精确检索未出现这些词”的结果，供审查模型判断缺失型问题。
 

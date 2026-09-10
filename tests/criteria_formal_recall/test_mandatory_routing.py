@@ -84,7 +84,7 @@ class MandatoryRoutingTests(unittest.TestCase):
                 {
                     "method": "title",
                     "terms": [],
-                    "regions": [],
+                    "regions": ["attachments"],
                     "all_titles": True,
                     "anchor_terms": [],
                     "coverage": "relevant",

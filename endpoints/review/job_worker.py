@@ -26,6 +26,7 @@ from endpoints.review.task_store import (
     task_api_events_path,
     task_annotation_events_path,
     task_conversation_log_dir,
+    docxindex_state_dir,
     task_mcp_log_file,
     task_review_outputs_path,
     task_trace_path,
@@ -117,6 +118,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
             settings=agent_settings,
             mcp_env=mcp_env,
             state_store=ReviewStateStore(client_dir, task_id),
+            index_artifacts_path=str(docxindex_state_dir(client_dir, task_id)),
         )
 
         token = set_conversation_log_dir(task_conversation_log_dir(client_dir, task_id))

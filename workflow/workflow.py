@@ -128,6 +128,7 @@ class ContractReviewWorkflow:
         review_outputs_path: str | None = None,
         annotation_events_path: str | None = None,
         state_store: ReviewStateStore | None = None,
+        index_artifacts_path: str | None = None,
         settings: Settings | None = None,
         mcp_env: dict[str, str] | None = None,
     ):
@@ -140,6 +141,7 @@ class ContractReviewWorkflow:
         self.annotation_events_path = annotation_events_path
         self.annotation_report_summary: dict[str, Any] = {}
         self.state_store = state_store
+        self.index_artifacts_path = index_artifacts_path
         self.settings = settings or Settings()
 
     async def run(
@@ -444,6 +446,7 @@ class ContractReviewWorkflow:
             {
                 "docx_path": contract_path,
                 "api_events_path": self.api_events_path,
+                "artifact_dir": self.index_artifacts_path,
             },
         )
 

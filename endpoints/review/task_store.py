@@ -135,6 +135,10 @@ def criteria_state_dir(client_dir: str, task_id: str) -> Path:
     return state_dir(client_dir, task_id) / "criteria"
 
 
+def docxindex_state_dir(client_dir: str, task_id: str) -> Path:
+    return state_dir(client_dir, task_id) / "docxindex"
+
+
 def plan_state_path(client_dir: str, task_id: str) -> Path:
     return state_dir(client_dir, task_id) / "plan.json"
 
@@ -515,6 +519,7 @@ def create_task(
             "state_dir": str(state_dir(client_dir, task_id)),
             "plan_path": str(plan_state_path(client_dir, task_id)),
             "criteria_dir": str(criteria_state_dir(client_dir, task_id)),
+            "docxindex_dir": str(docxindex_state_dir(client_dir, task_id)),
         },
         "logs": {
             "api_events_path": str(task_api_log) if task_api_log else None,

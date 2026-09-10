@@ -99,6 +99,39 @@ class DocxIndexRetriever:
                 ensure_ascii=False,
             )
 
+    def artifact_snapshot(self) -> dict[str, Any]:
+        """Return serializable diagnostic artifacts for the current in-memory index."""
+        if self._index is None:
+            raise RuntimeError("docxindex_build_index must be called before exporting artifacts")
+        nodes = self._index.get("nodes") or []
+        attachments = [
+            node for node in nodes
+            if str(node.get("node_id") or "").startswith("attachments/")
+        ]
+        titles = [
+            {
+                "node_id": node.get("node_id"),
+                "node_type": node.get("node_type"),
+                "title": node.get("title"),
+                "start_index": node.get("start_index"),
+                "start_anchor": node.get("start_anchor"),
+            }
+            for node in nodes
+            if str(node.get("title") or "").strip()
+        ]
+        snapshot: dict[str, Any] = {
+            "document_index.json": self._index,
+            "structure_tree.json": {"structure_tree": self._index.get("structure_tree") or []},
+            "content_store.json": {"nodes": nodes},
+            "anchor_store.json": {"anchors": self._index.get("anchor_map") or {}},
+            "table_store.json": {"tables": self._index.get("table_map") or {}},
+            "titles.json": {"titles": titles},
+            "attachments.json": {"attachments": attachments},
+        }
+        if self._vector_index is not None:
+            snapshot["vector_index.json"] = self._vector_index.model_dump(mode="json")
+        return snapshot
+
     async def search(
         self,
         query: str,

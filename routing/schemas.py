@@ -21,8 +21,10 @@ class RouteStep(BaseModel):
             bool(self.regions) == bool(self.anchor_terms) or len(self.regions) > 1
         ):
             raise ValueError("region route requires exactly one locator: regions or anchor_terms")
-        if self.method != "region" and self.regions:
+        if self.method not in {"region", "title"} and self.regions:
             raise ValueError(f"{self.method} route must not set regions")
+        if self.method == "title" and len(self.regions) > 1:
+            raise ValueError("title route accepts at most one region scope")
         if self.method == "rule" and not self.terms:
             raise ValueError("rule route requires at least one term")
         if self.method == "title" and not (self.terms or self.all_titles):

@@ -10,6 +10,7 @@ import unittest
 
 from loggers.api_event_logger import _LOGGERS
 from loggers.model_event_context import reset_model_event_path, set_model_event_path
+from endpoints.review.task_store import docxindex_state_dir
 from tools.docxindex.llm.schemas import RouteStep, ScanResponse
 from tools.docxindex.indexing.config import IndexingConfig
 from tools.docxindex.detection.regions import find_tail_start
@@ -31,6 +32,13 @@ from tools.docxindex.retriever import (
 
 
 class ScopedRegionTests(unittest.TestCase):
+    def test_docxindex_artifacts_follow_api_and_web_task_partition(self) -> None:
+        api_path = docxindex_state_dir("api", "20260910-120000-a001")
+        web_path = docxindex_state_dir("web:tenant-001", "20260910-120001-a002")
+
+        self.assertEqual(api_path.parts[-4:], ("api", "20260910-120000-a001", "state", "docxindex"))
+        self.assertEqual(web_path.parts[-5:], ("web", "tenant-001", "20260910-120001-a002", "state", "docxindex"))
+
     def test_tail_starts_at_earliest_signature_evidence(self) -> None:
         def item(index: int, kind: str, text: str) -> BodyItem:
             return BodyItem(
@@ -130,6 +138,30 @@ class ScopedRegionTests(unittest.TestCase):
         matches = title_matches(index, RouteStep(method="title", all_titles=True))
 
         self.assertEqual([item["node_id"] for item in matches], ["body/sec"])
+
+    def test_attachment_title_route_returns_attachment_labels_and_names(self) -> None:
+        index = {
+            "nodes": [
+                {"node_id": "attachments/att_001", "title": "附件1", "node_type": "attachment_section", "start_index": 20},
+                {"node_id": "attachments/att_001/visual_title_001", "title": "设备配置清单", "node_type": "visual_title", "start_index": 21},
+                {"node_id": "attachments/att_001/heading_002", "title": "一、设备明细", "node_type": "heading", "start_index": 22},
+            ],
+            "structure_tree": [{
+                "node_id": "attachments", "title": "附件", "node_type": "attachments", "nodes": [{
+                    "node_id": "attachments/att_001", "title": "附件1", "node_type": "attachment_section", "nodes": [
+                        {"node_id": "attachments/att_001/visual_title_001", "title": "设备配置清单", "node_type": "visual_title", "nodes": []},
+                        {"node_id": "attachments/att_001/heading_002", "title": "一、设备明细", "node_type": "heading", "nodes": []},
+                    ],
+                }],
+            }],
+        }
+
+        matches = title_matches(index, RouteStep(method="title", regions=["attachments"], all_titles=True))
+
+        self.assertEqual(
+            [item["node_id"] for item in matches],
+            ["attachments/att_001", "attachments/att_001/visual_title_001"],
+        )
 
     def test_complete_scope_keeps_the_root_full_text_range(self) -> None:
         index = {"nodes": [{

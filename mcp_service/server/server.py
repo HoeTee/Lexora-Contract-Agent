@@ -4,6 +4,8 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
+import uuid
 
 # Add project root to path
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -37,6 +39,7 @@ from config import (
     RERANK_TOP_N,
     RETRIEVAL_BACKEND,
     SIMILARITY_TOP_K,
+    DATA_DIR,
 )
 
 
@@ -213,12 +216,35 @@ async def llamaindex_search(query: str, api_events_path: str | None = None) -> s
         reset_model_event_path(token)
 
 
-async def docxindex_build_index(docx_path: str, api_events_path: str | None = None) -> str:
+def _write_docxindex_artifacts(artifact_dir: str, artifacts: dict[str, object]) -> None:
+    target = Path(artifact_dir).resolve()
+    data_root = Path(DATA_DIR).resolve()
+    if target != data_root and data_root not in target.parents:
+        raise ValueError("docxindex artifact directory must be inside DATA_DIR")
+    if target.name != "docxindex" or target.parent.name != "state":
+        raise ValueError("docxindex artifacts must be stored under a task state/docxindex directory")
+    target.mkdir(parents=True, exist_ok=True)
+    for filename, payload in artifacts.items():
+        destination = target / filename
+        temporary = destination.with_name(f"{destination.name}.{uuid.uuid4().hex}.tmp")
+        temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        temporary.replace(destination)
+
+
+async def docxindex_build_index(
+    docx_path: str,
+    api_events_path: str | None = None,
+    artifact_dir: str | None = None,
+) -> str:
     """Build the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
     try:
         with redirect_stdout(sys.stderr):
-            return await _get_docxindex_retriever().build_index(docx_path)
+            retriever = _get_docxindex_retriever()
+            result = await retriever.build_index(docx_path)
+            if artifact_dir:
+                _write_docxindex_artifacts(artifact_dir, retriever.artifact_snapshot())
+            return result
     finally:
         reset_model_event_path(token)
 
@@ -244,10 +270,14 @@ async def docxindex_search(
         reset_model_event_path(token)
 
 
-async def contract_build_index(docx_path: str, api_events_path: str | None = None) -> str:
+async def contract_build_index(
+    docx_path: str,
+    api_events_path: str | None = None,
+    artifact_dir: str | None = None,
+) -> str:
     """Build the configured temporary contract retrieval index."""
     if RETRIEVAL_BACKEND == "docxindex":
-        return await docxindex_build_index(docx_path, api_events_path)
+        return await docxindex_build_index(docx_path, api_events_path, artifact_dir)
     return await llamaindex_build_index(docx_path, api_events_path)
 
 

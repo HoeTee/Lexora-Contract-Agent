@@ -10,12 +10,16 @@ def title_matches(index: dict[str, Any], step: RouteStep) -> list[dict[str, Any]
         return []
     nodes = {node.get("node_id"): node for node in index.get("nodes") or []}
     result = []
+    attachment_scope = step.regions == ["attachments"]
     for item, depth in _walk(index.get("structure_tree") or []):
         node_id = item.get("node_id")
         title = str(item.get("title") or "").strip()
         if not node_id or not title or item.get("node_type") in {"body", "attachments"}:
             continue
-        if not _is_catalog_title(item, depth):
+        if attachment_scope:
+            if not _is_attachment_title(item):
+                continue
+        elif not _is_catalog_title(item, depth):
             continue
         if not step.all_titles and not any(term in title for term in step.terms):
             continue
@@ -31,6 +35,14 @@ def title_matches(index: dict[str, Any], step: RouteStep) -> list[dict[str, Any]
             )
         result.append(candidate)
     return result
+
+
+def _is_attachment_title(node: dict[str, Any]) -> bool:
+    node_id = str(node.get("node_id") or "")
+    return node_id.startswith("attachments/att_") and str(node.get("node_type") or "") in {
+        "attachment_section",
+        "visual_title",
+    }
 
 
 def _walk(nodes: list[dict[str, Any]], depth: int = 0):
