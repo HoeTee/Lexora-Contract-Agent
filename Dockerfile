@@ -81,7 +81,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
 
 WORKDIR /app
 
@@ -105,6 +106,11 @@ RUN python -m pip install \
         --find-links=/packages \
         -r /app/requirements.txt \
     && rm -rf /packages
+
+# Bundle the tokenizer data so the runtime never needs the public blob host.
+RUN mkdir -p "${TIKTOKEN_CACHE_DIR}" \
+    && python -c "import tiktoken; assert tiktoken.get_encoding('cl100k_base').name == 'cl100k_base'" \
+    && test -n "$(find "${TIKTOKEN_CACHE_DIR}" -type f -print -quit)"
 
 # Protected backend code and host entrypoint.
 COPY --from=protect-builder /out/host /app/host
