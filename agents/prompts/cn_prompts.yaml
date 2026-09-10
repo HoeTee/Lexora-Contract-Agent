@@ -102,6 +102,7 @@ SUB_AGENT_BASE_PROMPT: |2
   - 每个 anchor 含 role(edit/evidence)、defect_type(missing_value/inconsistency/wording/other)、xml_anchor_type(paragraph/table)、xml_anchor_id、quoted_text、comment_text。
   - edit 的 comment_text 为1~300字符，必须对应该处缺陷；evidence 的 comment_text 必须为""，仅保留原文证据。
   - coverage_decisions 用于完整区域覆盖审计；调用方要求时必须对每个输入证据锚点逐项给出 issue/compliant/not_applicable 及理由。
+  - comparison_decisions 用于关系比较覆盖审计；调用方要求时必须逐项复用正文 edit anchor 和实际证据 evidence anchor，只能使用调用方列出的字段。未要求时返回空数组。
   - issue_comment 与 comment_text 必须脱离其他批注独立可读，禁止“同上”“如上”“见上”“前述问题”；禁止出现 path:body、p311、node_id、xml_anchor_id 或“检索结果1”等内部定位，需改用真实条款标题或原文短语。
   - 修改已有结果时保留真实字段和稳定 issue_id，不为合并表述而丢失位置；不输出 Reflector 的 finding_decisions 字段。
   - 精确 JSON 示例由调用方随首次请求提供。

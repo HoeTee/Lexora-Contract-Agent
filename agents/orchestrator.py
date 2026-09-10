@@ -238,7 +238,16 @@ SUB_AGENT_EXPECTED_JSON = """
     }
   ],
   "coverage_decisions": [],
-  "comparison_decisions": []
+  "comparison_decisions": [
+    {
+      "edit_anchor_type": "paragraph",
+      "edit_anchor_id": "必须复用正文候选的 xml_anchor_id",
+      "evidence_anchor_type": "paragraph",
+      "evidence_anchor_id": "matched/mismatch 时必须复用实际附件标题的 xml_anchor_id；not_found 时为 null",
+      "decision": "matched 或 mismatch 或 not_found 或 not_applicable",
+      "reason": "说明正文引用与实际附件标题的配对及比较结论"
+    }
+  ]
 }
 """
 
@@ -911,7 +920,14 @@ class OrchestratorAgent:
                 "attachments evidence_anchor；找不到实际附件时使用 not_found 且不填写 evidence_anchor。"
                 "mismatch 必须生成锚定正文的 edit issue，并把对应附件标题作为 evidence；"
                 "not_found 必须生成锚定正文的 edit issue；matched/not_applicable 不得生成 issue。"
-                "附件标题是客观基准，禁止把正文引用作为附件已经存在的证明。\n\n"
+                "附件标题是客观基准，禁止把正文引用作为附件已经存在的证明。"
+                "comparison_decisions 每项只能包含 edit_anchor_type、edit_anchor_id、"
+                "evidence_anchor_type、evidence_anchor_id、decision、reason 六个字段；"
+                "禁止输出 matched_evidence_anchor 等自创字段。示例："
+                '{"edit_anchor_type":"paragraph","edit_anchor_id":"path:body/p70",'
+                '"evidence_anchor_type":"paragraph","evidence_anchor_id":"path:body/p219",'
+                '"decision":"mismatch","reason":"正文引用产品清单，实际附件标题为服务清单。"}'
+                "。\n\n"
             )
         if review_instruction:
             task_prompt = (
