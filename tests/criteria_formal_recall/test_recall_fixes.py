@@ -740,6 +740,19 @@ class WorkflowPresentationTests(unittest.TestCase):
             [],
         )
 
+    def test_comparison_policy_drops_single_sided_issue_after_repairs(self) -> None:
+        opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
+
+        removed = OrchestratorAgent._drop_incomplete_policy_issues(
+            opinion,
+            {"evidence_region": "attachments"},
+            "",
+        )
+
+        self.assertEqual(removed, 1)
+        self.assertEqual(opinion["issues"], [])
+        self.assertEqual(opinion["status"], "compliant")
+
     def test_ambiguous_different_advice_is_not_merged_only_by_criterion(self) -> None:
         for result in self.results:
             result["issues"][0]["anchors"][0]["quoted_text"] = "乙方向甲方发贷。"

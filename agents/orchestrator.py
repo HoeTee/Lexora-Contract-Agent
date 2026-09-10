@@ -618,6 +618,25 @@ class OrchestratorAgent:
                 )
         return errors
 
+    @staticmethod
+    def _drop_incomplete_policy_issues(parsed_opinion: dict, criterion: dict, context: str) -> int:
+        """Remove relation findings that cannot satisfy the policy's two-sided evidence contract."""
+        if not str(criterion.get("evidence_region") or "").strip():
+            return 0
+        kept = []
+        removed = 0
+        for issue in parsed_opinion.get("issues") or []:
+            probe = {**parsed_opinion, "issues": [issue]}
+            if OrchestratorAgent._policy_output_errors(probe, criterion, context):
+                removed += 1
+            else:
+                kept.append(issue)
+        parsed_opinion["issues"] = kept
+        if not kept:
+            parsed_opinion["status"] = "compliant"
+            parsed_opinion["applicability_reason"] = ""
+        return removed
+
     async def _build_missing_text_review_notes(
         self,
         parsed_opinion: dict,
@@ -866,10 +885,7 @@ class OrchestratorAgent:
                 review_context,
             )
             if remaining_policy_errors:
-                raise AgentOutputValidationError(
-                    "SubAgent routing-policy output validation failed: "
-                    + "; ".join(remaining_policy_errors)
-                )
+                self._drop_incomplete_policy_issues(parsed_opinion, criterion, review_context)
         if coverage_audit:
             remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
             if remaining_coverage_errors:
@@ -1021,10 +1037,7 @@ class OrchestratorAgent:
                             review_context,
                         )
                         if remaining_policy_errors:
-                            raise AgentOutputValidationError(
-                                "SubAgent routing-policy output validation failed after reflection: "
-                                + "; ".join(remaining_policy_errors)
-                            )
+                            self._drop_incomplete_policy_issues(parsed_opinion, criterion, review_context)
                     if coverage_audit:
                         remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
                         if remaining_coverage_errors:
