@@ -6,12 +6,15 @@ from tempfile import TemporaryDirectory
 import unittest
 
 from tests.criteria_formal_recall.evaluate_results import criterion_id, write_metrics
+from tests.criteria_formal_recall.run_cases import criterion_number
 
 
 class EvaluationMetricsTests(unittest.TestCase):
     def test_current_mandatory_and_uploaded_ids_map_to_numeric_criteria(self) -> None:
         self.assertEqual(criterion_id({"criterion_id": "H01"}), 1)
         self.assertEqual(criterion_id({"criterion_id": "C18"}), 18)
+        self.assertEqual(criterion_number({"criterion_id": "H01"}), 1)
+        self.assertEqual(criterion_number({"criterion_id": "C18"}), 18)
 
     def test_metrics_cover_contract_criterion_time_recall_and_accuracy(self) -> None:
         expected = [
