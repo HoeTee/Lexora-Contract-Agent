@@ -1,5 +1,5 @@
 param(
-    [string]$Tag = "southernbanker/lexora:latest",
+    [string]$Tag = "lexora:latest",
     [string]$KeyFile,
     [string]$VmpToolsDir
 )
@@ -65,7 +65,18 @@ try {
         throw "Docker build failed with exit code $LASTEXITCODE."
     }
 
-    Write-Output "Built protected image: $Tag"
+    docker run `
+        --rm `
+        --network none `
+        --entrypoint python `
+        $Tag `
+        -c "import tiktoken; assert tiktoken.get_encoding('cl100k_base').name == 'cl100k_base'"
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Offline tiktoken self-test failed for image: $Tag"
+    }
+
+    Write-Output "Built protected image with offline tiktoken data: $Tag"
 }
 finally {
     if ($temporaryKey -and (Test-Path -LiteralPath $temporaryKey)) {

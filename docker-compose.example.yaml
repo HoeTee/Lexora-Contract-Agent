@@ -5,7 +5,7 @@ services:
     restart: unless-stopped
 
   deep-research-agent:
-    image: southernbanker/lexora:latest
+    image: lexora:latest
     container_name: lexora
     restart: unless-stopped
 
@@ -40,7 +40,7 @@ services:
       start_period: 30s
 
   review-worker:
-    image: southernbanker/lexora:latest
+    image: lexora:latest
     container_name: lexora-worker
     restart: unless-stopped
 

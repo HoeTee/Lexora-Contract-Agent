@@ -97,10 +97,12 @@ runtime（python:3.12-slim）
 构建命令：
 
 ```powershell
-.\protect\build.ps1 -Tag southernbanker/lexora:latest
+.\protect\build.ps1
 ```
 
 默认工具位置是仓库根目录 `vmp-tools/`。该目录仅存在于构建机本地，并被 `.gitignore` 和 `.dockerignore` 忽略；`protect/build.ps1` 将它作为 BuildKit named context `vmp_tools` 单独传入。需要覆盖时可传 `-VmpToolsDir`，也可设置 `VMP_TOOLS_DIR`。
+
+脚本默认构建 `lexora:latest`，与根目录及 `deploy/` 的 Compose 配置一致；构建成功后还会用 `--network none` 启动临时 Python 容器，确认 `cl100k_base` 能从镜像内缓存加载。
 
 `protect-builder` 仅以只读方式挂载 SDK；`vmp-pack` 使用临时可写挂载规范化 Windows 文件系统传入的执行权限，挂载内修改会在该条 `RUN` 完成后丢弃。VMP 工具不会被 `COPY` 到构建层，也不会进入最终镜像。
 
@@ -156,7 +158,7 @@ Celery worker 容器：
 最终镜像验证：
 
 ```powershell
-$image = "southernbanker/lexora:latest"
+$image = "lexora:latest"
 
 docker run --rm --entrypoint sh $image -c "test -x /app/host && test -s /app/libloader.vmp.so && test -s /app/code.bin"
 docker run --rm --entrypoint find $image /app -type f -name "*.py"
@@ -179,7 +181,7 @@ if ($dependencies -match "VMProtectSDK") { throw "Packed library still depends o
 docker run --rm -p 8000:8000 `
   --env-file .env `
   -v "${PWD}\config.yaml:/app/config.yaml:ro" `
-  southernbanker/lexora:latest
+  lexora:latest
 
 curl.exe -I http://127.0.0.1:8000/docs
 ```

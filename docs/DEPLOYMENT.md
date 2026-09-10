@@ -24,23 +24,25 @@
 在项目根目录执行：
 
 ```powershell
-.\protect\build.ps1 -Tag southernbanker/lexora:latest
+.\protect\build.ps1
 ```
 
 `VmpToolsDir` 的优先级为：命令行 `-VmpToolsDir`、环境变量 `VMP_TOOLS_DIR`、仓库根目录 `vmp-tools/`。需要临时覆盖默认目录时使用：
 
 ```powershell
-.\protect\build.ps1 -Tag southernbanker/lexora:latest -VmpToolsDir C:\path\to\vmp-tools
+.\protect\build.ps1 -VmpToolsDir C:\path\to\vmp-tools
 ```
 
 脚本默认生成并清理一次性 32 字节 AES 密钥；如需固定密钥，使用项目目录之外的 `-KeyFile`。VMP 目录作为独立 BuildKit named context 传入，Dockerfile 只在 `RUN` 期间挂载它，不把工具、SDK、动态库或许可证复制进镜像层。缺少工具不影响运行已有镜像，但构建受保护镜像会在启动 Docker 前明确失败。三阶段构建、工具文件要求和密钥边界见 [源码保护方案](SOURCE_PROTECTION.md)。
+
+构建脚本固定产出与 Compose 一致的 `lexora:latest`，并在构建后使用断网临时容器加载 `cl100k_base`；离线 tokenizer 数据不可用时脚本直接失败，不会输出成功提示。
 
 ## 构建后验证
 
 构建完成后做最小运行产物检查：
 
 ```powershell
-$image = "southernbanker/lexora:latest"
+$image = "lexora:latest"
 
 docker run --rm --entrypoint sh $image -c "test -x /app/host && test -s /app/libloader.vmp.so && test -s /app/code.bin"
 docker run --rm --entrypoint find $image /app -type f -name "*.py"
@@ -61,7 +63,7 @@ docker compose up -d --force-recreate
 如果通过 TAR 交付，在构建机导出：
 
 ```powershell
-docker save -o lexora.tar southernbanker/lexora:latest
+docker save -o lexora.tar lexora:latest
 ```
 
 远端导入后直接启动：
