@@ -458,7 +458,18 @@ class ContractReviewWorkflow:
             duration=round(time.time() - start, 2)
         )
 
-        parsed = json.loads(result)
+        try:
+            parsed = json.loads(result)
+        except (TypeError, json.JSONDecodeError) as exc:
+            response_preview = str(result or "").strip()[:500] or "<empty response>"
+            raise RuntimeError(
+                f"{RETRIEVAL_BACKEND} index build returned an invalid MCP response: "
+                f"{response_preview}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError(
+                f"{RETRIEVAL_BACKEND} index build returned {type(parsed).__name__}; expected an object"
+            )
         if parsed.get("error"):
             error = parsed["error"]
             if isinstance(error, dict):

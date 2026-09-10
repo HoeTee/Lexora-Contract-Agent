@@ -242,6 +242,9 @@ async def docxindex_build_index(
         with redirect_stdout(sys.stderr):
             retriever = _get_docxindex_retriever()
             result = await retriever.build_index(docx_path)
+            payload = json.loads(result)
+            if payload.get("error"):
+                return result
             if artifact_dir:
                 _write_docxindex_artifacts(artifact_dir, retriever.artifact_snapshot())
             return result

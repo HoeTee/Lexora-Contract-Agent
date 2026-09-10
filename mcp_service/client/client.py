@@ -29,6 +29,11 @@ def resolve_stdio_target(server_target: str, executable: str | None = None) -> t
     raise ValueError("Local MCP target must be module:<name>, a .py file, or a .js file")
 
 
+def _stdio_environment(overrides: dict[str, str] | None) -> dict[str, str]:
+    """Preserve the container environment when launching the trusted local MCP server."""
+    return {**os.environ, **(overrides or {})}
+
+
 class MinimalMCPClient:
     """
     Minimal MCP client that:
@@ -87,7 +92,7 @@ class MinimalMCPClient:
                 server_params = StdioServerParameters(
                     command=command,
                     args=args,
-                    env={**os.environ, **self.env} if self.env else None,
+                    env=_stdio_environment(self.env),
                 )
                 stdio_transport = await self.exit_stack.enter_async_context(
                     stdio_client(server_params)
