@@ -146,6 +146,51 @@ xml_anchor_id: path:body/p219
         }).model_dump(mode="json")
         self.assertEqual(OrchestratorAgent._policy_output_errors(valid, task, context), [])
 
+    def test_h18_allows_one_paragraph_to_reference_multiple_attachments(self) -> None:
+        base = {
+            "edit_anchor_type": "paragraph",
+            "edit_anchor_id": "path:body/p1",
+            "evidence_anchor_type": "paragraph",
+            "decision": "mismatch",
+        }
+        output = SubAgentOutput.model_validate({
+            "status": "issues_found",
+            "issues": [{
+                "issue_id": "H18.1",
+                "risk_level": "low",
+                "issue_comment": "同一段正文引用的附件名称与实际标题不一致。",
+                "anchors": [{
+                    "role": "edit",
+                    "defect_type": "inconsistency",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p1",
+                    "quoted_text": "附件2和附件3",
+                    "comment_text": "请统一附件名称。",
+                }],
+                "reasoning": "同一段引用两个附件。",
+                "criterion": "附件名称",
+                "check_point": "逐一比较",
+            }],
+            "comparison_decisions": [
+                {**base, "evidence_anchor_id": "path:body/p2", "reason": "附件2不一致"},
+                {**base, "evidence_anchor_id": "path:body/p3", "reason": "附件3不一致"},
+            ],
+        })
+
+        self.assertEqual(len(output.comparison_decisions), 2)
+
+    def test_h18_degraded_cleanup_preserves_comparison_issues(self) -> None:
+        parsed = {"status": "issues_found", "issues": [{"issue_id": "H18.1"}]}
+
+        removed = OrchestratorAgent._drop_incomplete_policy_issues(
+            parsed,
+            {"comparison_audit": True, "evidence_region": "attachments"},
+            "",
+        )
+
+        self.assertEqual(removed, 0)
+        self.assertEqual([item["issue_id"] for item in parsed["issues"]], ["H18.1"])
+
     def test_mandatory_only_phase_skips_planner_model_call(self) -> None:
         workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)
         workflow.state_store = None

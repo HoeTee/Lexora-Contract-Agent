@@ -710,6 +710,11 @@ class OrchestratorAgent:
     @staticmethod
     def _drop_incomplete_policy_issues(parsed_opinion: dict, criterion: dict, context: str) -> int:
         """Remove relation findings that cannot satisfy the policy's two-sided evidence contract."""
+        if criterion.get("comparison_audit"):
+            # Comparison coverage is a property of the complete output. Probing one
+            # issue at a time makes every valid partial issue appear to omit the
+            # other comparison decisions and would incorrectly delete all issues.
+            return 0
         if not str(criterion.get("evidence_region") or "").strip():
             return 0
         kept = []

@@ -228,11 +228,17 @@ class SubAgentOutput(StrictOutputModel):
         if len(coverage_keys) != len(set(coverage_keys)):
             raise ValueError("coverage_decisions must contain each evidence anchor at most once")
         comparison_keys = [
-            (decision.edit_anchor_type, decision.edit_anchor_id)
+            (
+                decision.edit_anchor_type,
+                decision.edit_anchor_id,
+                decision.evidence_anchor_type,
+                decision.evidence_anchor_id,
+                decision.decision,
+            )
             for decision in self.comparison_decisions
         ]
         if len(comparison_keys) != len(set(comparison_keys)):
-            raise ValueError("comparison_decisions must contain each edit anchor at most once")
+            raise ValueError("comparison_decisions must not repeat the same edit/evidence comparison")
         return self
 
 
