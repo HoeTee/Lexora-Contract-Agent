@@ -122,7 +122,8 @@ docker exec -it lexora bash
 ```text
 .env
 config.yaml
-agents/prompts/cn_prompts.yaml
+cn_prompts.yaml
+criteria-routes.yaml
 profiles/
 data/
 ```
@@ -133,7 +134,8 @@ Compose 将宿主机输入挂载为：
 volumes:
   - ./.env:/app/.env:ro
   - ./config.yaml:/app/config.yaml:ro
-  - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+  - ./cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+  - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
   - ./profiles:/app/profiles
   - ./data:/app/data
 ```

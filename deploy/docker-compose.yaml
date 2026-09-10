@@ -1,0 +1,99 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: lexora-redis
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:6380:6379"
+
+  lexora:
+    extra_hosts: []
+    image: lexora:latest
+    container_name: lexora
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    command: ["/app/host", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    ports:
+      - "0.0.0.0:5000:8000"
+    cpus: "1"
+    mem_limit: 2g
+    mem_reservation: 2g
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
+      - ./profiles:/app/profiles
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  review-worker-1:
+    extra_hosts: []
+    image: lexora:latest
+    container_name: lexora-worker-1
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["/app/host", "-m", "celery", "-A", "task_queue.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=1"]
+    depends_on:
+      - redis
+    cpus: "1"
+    mem_limit: 2g
+    mem_reservation: 2g
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
+      - ./profiles:/app/profiles
+      - ./data:/app/data
+
+  review-worker-2:
+    extra_hosts: []
+    image: lexora:latest
+    container_name: lexora-worker-2
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["/app/host", "-m", "celery", "-A", "task_queue.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=1"]
+    depends_on:
+      - redis
+    cpus: "1"
+    mem_limit: 2g
+    mem_reservation: 2g
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
+      - ./profiles:/app/profiles
+      - ./data:/app/data
+
+  review-worker-3:
+    extra_hosts: []
+    image: lexora:latest
+    container_name: lexora-worker-3
+    restart: unless-stopped
+    env_file:
+      - .env
+    command: ["/app/host", "-m", "celery", "-A", "task_queue.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=1"]
+    depends_on:
+      - redis
+    cpus: "1"
+    mem_limit: 2g
+    mem_reservation: 2g
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
+      - ./profiles:/app/profiles
+      - ./data:/app/data
