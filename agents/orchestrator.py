@@ -237,7 +237,8 @@ SUB_AGENT_EXPECTED_JSON = """
       "check_point": "该 issue 对应的具体检查点"
     }
   ],
-  "coverage_decisions": []
+  "coverage_decisions": [],
+  "comparison_decisions": []
 }
 """
 
@@ -582,21 +583,100 @@ class OrchestratorAgent:
         return errors
 
     @staticmethod
+    def _comparison_audit_errors(
+        parsed_opinion: dict,
+        criterion: dict,
+        context: str,
+    ) -> list[str]:
+        """Require every source-side candidate to be paired with objective evidence."""
+        if not criterion.get("comparison_audit"):
+            return []
+        evidence_region = str(criterion.get("evidence_region") or "").strip()
+        evidence = OrchestratorAgent._retrieval_anchor_evidence(context)
+        expected_edits = {
+            (item["xml_anchor_type"], item["xml_anchor_id"])
+            for item in evidence
+            if item.get("source_region") != evidence_region
+        }
+        allowed_evidence = {
+            (item["xml_anchor_type"], item["xml_anchor_id"])
+            for item in evidence
+            if item.get("source_region") == evidence_region
+        }
+        decisions = parsed_opinion.get("comparison_decisions") or []
+        actual_edits = {
+            (str(item.get("edit_anchor_type") or ""), str(item.get("edit_anchor_id") or ""))
+            for item in decisions
+        }
+        errors: list[str] = []
+        missing = sorted(expected_edits - actual_edits)
+        unknown = sorted(actual_edits - expected_edits)
+        if missing:
+            errors.append(f"comparison_decisions 缺少正文引用锚点：{missing}")
+        if unknown:
+            errors.append(f"comparison_decisions 包含不存在的正文引用锚点：{unknown}")
+
+        issue_edits: set[tuple[str, str]] = set()
+        issue_evidence: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        for issue in parsed_opinion.get("issues") or []:
+            edits = {
+                (str(anchor.get("xml_anchor_type") or ""), str(anchor.get("xml_anchor_id") or ""))
+                for anchor in issue.get("anchors") or []
+                if anchor.get("role", "edit") == "edit"
+            }
+            evidences = {
+                (str(anchor.get("xml_anchor_type") or ""), str(anchor.get("xml_anchor_id") or ""))
+                for anchor in issue.get("anchors") or []
+                if anchor.get("role") == "evidence"
+            }
+            issue_edits.update(edits)
+            for edit in edits:
+                issue_evidence.setdefault(edit, set()).update(evidences)
+
+        for decision in decisions:
+            edit = (
+                str(decision.get("edit_anchor_type") or ""),
+                str(decision.get("edit_anchor_id") or ""),
+            )
+            evidence_id = str(decision.get("evidence_anchor_id") or "").strip()
+            evidence_key = (
+                str(decision.get("evidence_anchor_type") or ""),
+                evidence_id,
+            )
+            outcome = decision.get("decision")
+            if evidence_id and evidence_key not in allowed_evidence:
+                errors.append(f"正文引用 {edit} 配对了不存在的附件标题锚点：{evidence_key}")
+            if outcome in {"mismatch", "not_found"} and edit not in issue_edits:
+                errors.append(f"正文引用 {edit} 判定为 {outcome}，但没有对应 edit 批注")
+            if outcome == "mismatch" and evidence_key not in issue_evidence.get(edit, set()):
+                errors.append(f"正文引用 {edit} 名称不一致，但 issue 未包含配对附件 evidence：{evidence_key}")
+            if outcome in {"matched", "not_applicable"} and edit in issue_edits:
+                errors.append(f"正文引用 {edit} 判定为 {outcome}，却仍生成了 edit 批注")
+        return errors
+
+    @staticmethod
     def _policy_output_errors(
         parsed_opinion: dict,
         criterion: dict,
         context: str = "",
     ) -> list[str]:
         """Validate output invariants explicitly declared by a routing policy."""
+        comparison_errors = OrchestratorAgent._comparison_audit_errors(
+            parsed_opinion,
+            criterion,
+            context,
+        )
+        if criterion.get("comparison_audit"):
+            return comparison_errors
         evidence_region = str(criterion.get("evidence_region") or "").strip()
         if not evidence_region:
-            return []
+            return comparison_errors
         allowed_evidence = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
             for item in OrchestratorAgent._retrieval_anchor_evidence(context)
             if item.get("source_region") == evidence_region
         }
-        errors = []
+        errors = list(comparison_errors)
         for issue in parsed_opinion.get("issues") or []:
             roles = {anchor.get("role", "edit") for anchor in issue.get("anchors") or []}
             if not {"edit", "evidence"}.issubset(roles):
@@ -776,6 +856,7 @@ class OrchestratorAgent:
         placement_target = placement.get("target", "inline")
         review_instruction = (criterion.get("review_instruction") or "").strip()
         coverage_audit = bool(criterion.get("coverage_audit"))
+        comparison_audit = bool(criterion.get("comparison_audit"))
 
         # Step 1: Retrieve relevant contract sections
         context, evidence_tokens = await self._retrieve_context(
@@ -821,6 +902,16 @@ class OrchestratorAgent:
                 "decision=issue 时必须同时生成锚定同一 xml_anchor_id 的 edit issue；"
                 "decision=compliant/not_applicable 时在 reason 中说明与当前标准的关系。"
                 "不得因为已经发现部分问题就跳过合同号、日期、联系方式等其他字段。\n\n"
+            )
+        if comparison_audit:
+            task_prompt += (
+                "关系比较覆盖审计：检索证据中的 body anchor 是必须逐项处理的正文附件引用候选，"
+                "attachments anchor 是完整的实际附件标题清单。必须为每个 body anchor 输出且只输出一条 "
+                "comparison_decisions：edit_anchor 复用该 body anchor；matched/mismatch 必须填写实际配对的 "
+                "attachments evidence_anchor；找不到实际附件时使用 not_found 且不填写 evidence_anchor。"
+                "mismatch 必须生成锚定正文的 edit issue，并把对应附件标题作为 evidence；"
+                "not_found 必须生成锚定正文的 edit issue；matched/not_applicable 不得生成 issue。"
+                "附件标题是客观基准，禁止把正文引用作为附件已经存在的证明。\n\n"
             )
         if review_instruction:
             task_prompt = (
@@ -912,6 +1003,7 @@ class OrchestratorAgent:
                 "criterion": criterion_text,
                 "section": criterion.get("section", "其他"),
                 "issues": parsed_opinion["issues"],
+                "comparison_decisions": parsed_opinion.get("comparison_decisions", []),
                 "status": "COMPLIANT",
                 "quality_status": "not_required",
                 "placement": placement or None,
@@ -1084,6 +1176,7 @@ class OrchestratorAgent:
             "criterion": criterion_text,
             "section": criterion.get("section", "其他"),
             "issues": confirmed_issues,
+            "comparison_decisions": parsed_opinion.get("comparison_decisions", []),
             "quality_status": quality_status,
             "quality_history": ledger.history,
             "finding_decisions": ledger.decisions,

@@ -7,6 +7,8 @@ from unittest.mock import AsyncMock, patch
 
 from docx import Document
 
+from agents.orchestrator import OrchestratorAgent
+from agents.schemas import SubAgentOutput
 from routing import load_mandatory_tasks
 from tools.document.reporting.docx_report import deduplicate_review_results_by_range
 from workflow.workflow import ContractReviewWorkflow
@@ -44,6 +46,7 @@ class MandatoryRoutingTests(unittest.TestCase):
                     "all_titles": False,
                     "anchor_terms": [],
                     "coverage": "complete",
+                    "candidate_instruction": "",
                 },
                 {
                     "method": "region",
@@ -52,6 +55,7 @@ class MandatoryRoutingTests(unittest.TestCase):
                     "all_titles": False,
                     "anchor_terms": [],
                     "coverage": "relevant",
+                    "candidate_instruction": "",
                 },
             ],
         )
@@ -74,12 +78,13 @@ class MandatoryRoutingTests(unittest.TestCase):
             task["route"]["steps"],
             [
                 {
-                    "method": "region",
+                    "method": "scan",
                     "terms": [],
                     "regions": ["body"],
                     "all_titles": False,
                     "anchor_terms": [],
                     "coverage": "relevant",
+                    "candidate_instruction": "提取本区域中每一处明确引用附件编号、附件名称或附件简称的原文；只要构成附件引用就返回，不要求本批次内已经出现实际附件标题。",
                 },
                 {
                     "method": "title",
@@ -88,9 +93,58 @@ class MandatoryRoutingTests(unittest.TestCase):
                     "all_titles": True,
                     "anchor_terms": [],
                     "coverage": "relevant",
+                    "candidate_instruction": "",
                 },
             ],
         )
+        self.assertTrue(task["comparison_audit"])
+        self.assertEqual(task["evidence_region"], "attachments")
+
+    def test_h18_comparison_audit_requires_complete_paired_decisions(self) -> None:
+        task = load_mandatory_tasks()[17]
+        context = """source_region: body
+xml_anchor_type: paragraph
+xml_anchor_id: path:body/p70
+内容：
+详见附件一《产品清单》
+
+---
+
+source_region: attachments
+xml_anchor_type: paragraph
+xml_anchor_id: path:body/p219
+内容：
+附件一：服务清单"""
+        missing = OrchestratorAgent._policy_output_errors(
+            {"issues": [], "comparison_decisions": []}, task, context
+        )
+        self.assertTrue(any("缺少正文引用锚点" in error for error in missing))
+
+        valid = SubAgentOutput.model_validate({
+            "status": "issues_found",
+            "issues": [{
+                "issue_id": "H18.1",
+                "risk_level": "low",
+                "issue_comment": "正文引用的附件名称与实际附件标题不一致。",
+                "anchors": [
+                    {"role": "edit", "defect_type": "inconsistency", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p70", "quoted_text": "附件一《产品清单》", "comment_text": "请将正文附件名称修改为“服务清单”。"},
+                    {"role": "evidence", "defect_type": "inconsistency", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p219", "quoted_text": "附件一：服务清单", "comment_text": ""},
+                ],
+                "reasoning": "正文名称与实际附件标题不同。",
+                "criterion": task["criterion"],
+                "check_point": task["check_points"][0],
+            }],
+            "coverage_decisions": [],
+            "comparison_decisions": [{
+                "edit_anchor_type": "paragraph",
+                "edit_anchor_id": "path:body/p70",
+                "evidence_anchor_type": "paragraph",
+                "evidence_anchor_id": "path:body/p219",
+                "decision": "mismatch",
+                "reason": "正文为产品清单，实际附件为服务清单。",
+            }],
+        }).model_dump(mode="json")
+        self.assertEqual(OrchestratorAgent._policy_output_errors(valid, task, context), [])
 
     def test_mandatory_only_phase_skips_planner_model_call(self) -> None:
         workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)

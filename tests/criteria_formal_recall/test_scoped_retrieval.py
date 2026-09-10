@@ -320,16 +320,50 @@ class FullScanTests(unittest.TestCase):
         self.assertEqual({item["start_anchor"] for item in matches}, {"p_0001", "p_0002"})
         self.assertTrue(all(item["text_override"] for item in matches))
 
+    def test_scan_can_be_limited_to_body_nodes_with_candidate_instruction(self) -> None:
+        body_owner = {"node_id": "body/sec", "title": "正文"}
+        attachment_owner = {"node_id": "attachments/att_001", "title": "附件一"}
+        index = {
+            "nodes": [body_owner, attachment_owner],
+            "anchor_map": {
+                "p_0001": {
+                    "node_id": "body/sec",
+                    "body_child_index": 1,
+                    "raw_text": "详见附件一《产品清单》",
+                },
+                "p_0002": {
+                    "node_id": "attachments/att_001",
+                    "body_child_index": 2,
+                    "raw_text": "附件一：服务清单",
+                },
+            },
+        }
+        client = _ScanClient()
+
+        matches = scan_matches(
+            index,
+            "检查附件名称",
+            client,
+            allowed_node_ids={"body/sec"},
+            candidate_instruction="提取正文附件引用",
+        )
+
+        self.assertEqual([item["start_anchor"] for item in matches], ["p_0001"])
+        self.assertIn("候选提取任务", client.prompts[0])
+        self.assertIn("提取正文附件引用", client.prompts[0])
+
 
 class _ScanClient:
     def __init__(self) -> None:
         self.call_count = 0
         self._lock = Lock()
+        self.prompts: list[str] = []
 
     def complete_model(self, prompt: str, schema: type[ScanResponse]) -> ScanResponse:
         anchor_id = re.search(r'"anchor_id": "([^"]+)"', prompt).group(1)  # type: ignore[union-attr]
         with self._lock:
             self.call_count += 1
+            self.prompts.append(prompt)
         return schema.model_validate({
             "findings": [{"anchor_id": anchor_id, "reason": "测试发现"}],
         })

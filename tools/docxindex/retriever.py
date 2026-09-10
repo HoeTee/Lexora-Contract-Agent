@@ -275,12 +275,18 @@ class DocxIndexRetriever:
                         scope=scope,
                     )
             elif step.method == "scan":
+                allowed_node_ids = None
+                if step.regions:
+                    root_ids = _region_root_ids(index, step)
+                    allowed_node_ids = _scope_node_ids(index, root_ids)
                 current = scan_matches(
                     index,
                     query,
                     self.llm_client,
                     config.scan_batch_tokens,
                     config.concurrency.llm,
+                    allowed_node_ids=allowed_node_ids,
+                    candidate_instruction=step.candidate_instruction,
                 )
             elif step.method == "hybrid":
                 current = self._semantic_matches(

@@ -19,16 +19,21 @@ def scan_matches(
     client: LLMClient,
     batch_tokens: int = 6000,
     concurrency: int = 10,
+    allowed_node_ids: set[str] | None = None,
+    candidate_instruction: str = "",
 ) -> list[dict[str, Any]]:
     """Inspect every non-empty anchor and return only LLM-confirmed findings."""
-    records = _anchor_records(index)
+    records = _anchor_records(index, allowed_node_ids=allowed_node_ids)
     batches = _build_batches(records, batch_tokens)
     if not batches:
         return []
 
     def inspect(batch: list[tuple[str, dict[str, Any], dict[str, Any], str]]) -> list[dict[str, Any]]:
         items = [{"anchor_id": anchor_id, "text": text} for anchor_id, _, _, text in batch]
-        response = client.complete_model(scan_prompt(query, items), ScanResponse)
+        response = client.complete_model(
+            scan_prompt(query, items, candidate_instruction=candidate_instruction),
+            ScanResponse,
+        )
         by_anchor = {anchor_id: (record, owner, text) for anchor_id, record, owner, text in batch}
         findings: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -62,6 +67,7 @@ def scan_matches(
 
 def _anchor_records(
     index: dict[str, Any],
+    allowed_node_ids: set[str] | None = None,
 ) -> list[tuple[str, dict[str, Any], dict[str, Any], str]]:
     by_id = {node.get("node_id"): node for node in index.get("nodes") or []}
     records: list[tuple[str, dict[str, Any], dict[str, Any], str]] = []
@@ -72,7 +78,9 @@ def _anchor_records(
     for anchor_id, record in anchors:
         owner = by_id.get(record.get("node_id"))
         text = str(record.get("raw_text") or record.get("text") or "").strip()
-        if owner and text:
+        if owner and text and (
+            allowed_node_ids is None or owner.get("node_id") in allowed_node_ids
+        ):
             records.append((anchor_id, record, owner, text))
     return records
 

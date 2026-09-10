@@ -116,6 +116,29 @@ class EvidenceCoverageDecision(StrictOutputModel):
         return value
 
 
+class EvidenceComparisonDecision(StrictOutputModel):
+    """One completed comparison between a source reference and objective evidence."""
+
+    edit_anchor_type: Literal["paragraph", "table"]
+    edit_anchor_id: str = Field(min_length=1)
+    evidence_anchor_type: Literal["paragraph", "table"] | None = None
+    evidence_anchor_id: str | None = None
+    decision: Literal["mismatch", "matched", "not_found", "not_applicable"]
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_evidence_pair(self):
+        has_type = self.evidence_anchor_type is not None
+        has_id = bool((self.evidence_anchor_id or "").strip())
+        if has_type != has_id:
+            raise ValueError("evidence anchor type and id must either both be present or both be absent")
+        if self.decision in {"mismatch", "matched"} and not has_id:
+            raise ValueError(f"{self.decision} comparison requires an evidence anchor")
+        if self.decision == "not_found" and has_id:
+            raise ValueError("not_found comparison must not provide an evidence anchor")
+        return self
+
+
 class SubAgentIssue(StrictOutputModel):
     issue_id: str = Field(min_length=1)
     risk_level: Literal["high", "medium", "low"] # 风险等级，必须是 "high"、"medium" 或 "low" 中的一个
@@ -153,6 +176,7 @@ class SubAgentOutput(StrictOutputModel):
     applicability_reason: str = ""
     issues: list[SubAgentIssue] = Field(default_factory=list) # 使用 default_factory 来确保 issues 字段默认为一个空列表，而不是 None
     coverage_decisions: list[EvidenceCoverageDecision] = Field(default_factory=list)
+    comparison_decisions: list[EvidenceComparisonDecision] = Field(default_factory=list)
 
     @field_validator("applicability_reason") # 字段验证
     @classmethod # 在实例方法创建前检验某字段
@@ -203,6 +227,12 @@ class SubAgentOutput(StrictOutputModel):
         ]
         if len(coverage_keys) != len(set(coverage_keys)):
             raise ValueError("coverage_decisions must contain each evidence anchor at most once")
+        comparison_keys = [
+            (decision.edit_anchor_type, decision.edit_anchor_id)
+            for decision in self.comparison_decisions
+        ]
+        if len(comparison_keys) != len(set(comparison_keys)):
+            raise ValueError("comparison_decisions must contain each edit anchor at most once")
         return self
 
 

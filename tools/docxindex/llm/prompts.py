@@ -22,15 +22,28 @@ SCAN_EXPECTED_JSON = """{
 }"""
 
 
-def scan_prompt(query: str, items: list[dict[str, str]]) -> str:
+def scan_prompt(
+    query: str,
+    items: list[dict[str, str]],
+    candidate_instruction: str = "",
+) -> str:
+    candidate_rule = (
+        "\n候选提取任务：\n"
+        f"- {candidate_instruction}\n"
+        "- 当前步骤只负责完整提取候选原文，不要求单个 anchor 独立证明最终问题。"
+        "只要 anchor 符合候选提取任务就必须返回，最终比较和审查结论由下游审查 Agent 完成。\n"
+        if candidate_instruction.strip()
+        else ""
+    )
     return f"""你正在逐项检查 DOCX 合同原文，必须检查本批次中的每一个 anchor。
 审查问题：{query}
+{candidate_rule}
 
 本批次原文：
 {json.dumps(items, ensure_ascii=False)}
 
 规则：
-- 只报告与审查问题直接相关、原文中真实存在的问题。
+- 只报告与审查问题直接相关、原文中真实存在的问题或候选提取任务明确要求返回的原文。
 - 错别字检查应报告明显的错字、漏字、重复字和不合理用词；语病检查应报告明确的成分残缺、搭配不当、语序或逻辑问题。
 - 字段完整性检查必须结合字段名称、相邻文字、表格关系和合同语境判断，不能按固定字符形态机械判断。可能的未填写示例包括“[合同中心-合同编码]”“#乙方合同号#【     】”“乙方支持联络电话：XX，XX”、字段冒号后为空、待填写的空白单元格或仍保留的模板说明。
 - 审查问题若使用“信息是否齐全”“包括……等”或“包括但不限于”，列举项不是封闭清单；与合同身份、联系、签订或履行有关且有明确字段语义的未填写项都属于候选，例如合同编号、主体名称、地址、电话、联系人、银行信息和服务联络信息。

@@ -291,12 +291,13 @@ policies:
   check_points:
   - 从正文附件目录或正文引用中提取附件名称，并与正文后实际附件标题逐项比较。正文使用的简称能唯一指向某个已附文件，且实际标题明确包含该简称时，视为名称一致；例如“保密协议”可唯一指向“浙江省农商银行系统信息化建设保密协议”时不报错。
   - 不得评论书名号样式；附件存在时不得仅因标题样式不同断言附件缺失。
+  - 必须逐一比较检索到的每个正文附件引用；名称不一致或实际附件不存在时，正文引用作为 edit，实际附件标题作为 evidence。不得在仍有正文引用尚未比较时返回 compliant。
   route:
     steps:
-    - method: region
+    - method: scan
       regions:
       - body
-      coverage: relevant
+      candidate_instruction: 提取本区域中每一处明确引用附件编号、附件名称或附件简称的原文；只要构成附件引用就返回，不要求本批次内已经出现实际附件标题。
     - method: title
       regions:
       - attachments
@@ -305,3 +306,5 @@ policies:
   placement:
     target: inline
     note: 名称不一致时锚定正文引用，实际附件标题作为客观证据。
+  comparison_audit: true
+  evidence_region: attachments

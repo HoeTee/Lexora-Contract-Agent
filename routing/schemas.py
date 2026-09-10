@@ -14,6 +14,7 @@ class RouteStep(BaseModel):
     all_titles: bool = False
     anchor_terms: list[str] = Field(default_factory=list)
     coverage: Literal["relevant", "complete"] = "relevant"
+    candidate_instruction: str = ""
 
     @model_validator(mode="after")
     def validate_method_fields(self) -> "RouteStep":
@@ -21,10 +22,12 @@ class RouteStep(BaseModel):
             bool(self.regions) == bool(self.anchor_terms) or len(self.regions) > 1
         ):
             raise ValueError("region route requires exactly one locator: regions or anchor_terms")
-        if self.method not in {"region", "title"} and self.regions:
+        if self.method not in {"region", "title", "scan"} and self.regions:
             raise ValueError(f"{self.method} route must not set regions")
         if self.method == "title" and len(self.regions) > 1:
             raise ValueError("title route accepts at most one region scope")
+        if self.method == "scan" and len(self.regions) > 1:
+            raise ValueError("scan route accepts at most one region scope")
         if self.method == "rule" and not self.terms:
             raise ValueError("rule route requires at least one term")
         if self.method == "title" and not (self.terms or self.all_titles):
@@ -35,6 +38,8 @@ class RouteStep(BaseModel):
             raise ValueError(f"{self.method} route must not set anchor_terms")
         if self.method != "region" and self.coverage != "relevant":
             raise ValueError(f"{self.method} route must use coverage=relevant")
+        if self.method != "scan" and self.candidate_instruction:
+            raise ValueError(f"{self.method} route must not set candidate_instruction")
         return self
 
 
