@@ -34,6 +34,8 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertIn("相邻位置存在另一个同名字段或实际值不能推翻", task["check_points"][0])
         joined_check_points = "\n".join(task["check_points"])
         self.assertIn("连续星号", joined_check_points)
+        self.assertIn("封面或合同名称原文单独批注", joined_check_points)
+        self.assertIn("普通合同名称", joined_check_points)
         self.assertIn("仅填写至省、市或区县", joined_check_points)
 
     def test_h10_uses_frontmatter_as_evidence_and_tail_as_edit(self) -> None:
@@ -43,8 +45,11 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertEqual(task["edit_region"], "tail")
         self.assertEqual(task["evidence_region"], "frontmatter")
         joined_check_points = "\n".join(task["check_points"])
-        self.assertIn("合同首部主体信息是比较基准", joined_check_points)
+        self.assertIn("才分别从合同首部信息栏和完整签署栏", joined_check_points)
+        self.assertIn("合同首部信息栏是比较基准", joined_check_points)
         self.assertIn("不得输出 missing_value 或 inconsistency", joined_check_points)
+        self.assertIn("必须停止本标准的一致性判断", joined_check_points)
+        self.assertIn("即使签署栏与合同首部信息栏中的名称不同", joined_check_points)
 
     def test_h07_scopes_date_and_term_checks_without_attachments(self) -> None:
         task = load_mandatory_tasks()[6]
