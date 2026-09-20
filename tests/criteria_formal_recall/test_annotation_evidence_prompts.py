@@ -18,6 +18,10 @@ class AnnotationEvidencePromptTests(unittest.TestCase):
                 for text in ("【5‰】", "【5%】", "【45】", "（照抄）", "主体", "anchors=[]"):
                     self.assertIn(text, prompt)
 
+    def test_reflector_rejects_masked_names_and_coarse_addresses(self):
+        for text in ("连续星号", "仅填写省、市或区县", "签署栏为 edit"):
+            self.assertIn(text, REFLECTOR_SYSTEM_PROMPT)
+
     def test_authorization_uncertainty_survives_all_model_stages(self):
         for prompt in (SUB_AGENT_BASE_PROMPT, REFLECTOR_SYSTEM_PROMPT, SUMMARIZER_SYSTEM_PROMPT):
             with self.subTest(prompt=prompt[:30]):

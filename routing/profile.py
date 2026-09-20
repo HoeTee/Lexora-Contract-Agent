@@ -34,6 +34,7 @@ class MandatoryPolicy(BaseModel):
     placement: Placement
     coverage_audit: bool = False
     comparison_audit: bool = False
+    edit_region: str = ""
     evidence_region: str = ""
     dedupe_priority: int = Field(default=0, ge=0)
     dedupe_domain: str = ""
@@ -85,6 +86,7 @@ def load_mandatory_tasks() -> list[dict[str, Any]]:
             "policy_id": policy.id,
             "coverage_audit": policy.coverage_audit,
             "comparison_audit": policy.comparison_audit,
+            "edit_region": policy.edit_region,
             "evidence_region": policy.evidence_region,
             "dedupe_priority": policy.dedupe_priority,
             "dedupe_domain": policy.dedupe_domain,

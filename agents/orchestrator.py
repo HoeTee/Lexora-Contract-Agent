@@ -677,12 +677,19 @@ class OrchestratorAgent:
         )
         if criterion.get("comparison_audit"):
             return comparison_errors
+        edit_region = str(criterion.get("edit_region") or "").strip()
         evidence_region = str(criterion.get("evidence_region") or "").strip()
-        if not evidence_region:
+        if not edit_region and not evidence_region:
             return comparison_errors
+        retrieved_evidence = OrchestratorAgent._retrieval_anchor_evidence(context)
+        allowed_edits = {
+            (item["xml_anchor_type"], item["xml_anchor_id"])
+            for item in retrieved_evidence
+            if item.get("source_region") == edit_region
+        }
         allowed_evidence = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
-            for item in OrchestratorAgent._retrieval_anchor_evidence(context)
+            for item in retrieved_evidence
             if item.get("source_region") == evidence_region
         }
         errors = list(comparison_errors)
@@ -690,14 +697,27 @@ class OrchestratorAgent:
             roles = {anchor.get("role", "edit") for anchor in issue.get("anchors") or []}
             if not {"edit", "evidence"}.issubset(roles):
                 errors.append(
-                    f"issue {issue.get('issue_id')} 必须同时包含正文 edit 和附件 evidence；"
+                    f"issue {issue.get('issue_id')} 必须同时包含 edit 和 evidence；"
                     "只有单侧证据时删除该问题"
                 )
                 continue
+            invalid_edits = [
+                anchor.get("xml_anchor_id")
+                for anchor in issue.get("anchors") or []
+                if anchor.get("role", "edit") == "edit"
+                and edit_region
+                and (anchor.get("xml_anchor_type"), anchor.get("xml_anchor_id")) not in allowed_edits
+            ]
+            if invalid_edits:
+                errors.append(
+                    f"issue {issue.get('issue_id')} 的 edit 不来自 {edit_region} region："
+                    f"{invalid_edits}"
+                )
             invalid_evidence = [
                 anchor.get("xml_anchor_id")
                 for anchor in issue.get("anchors") or []
                 if anchor.get("role") == "evidence"
+                and evidence_region
                 and (anchor.get("xml_anchor_type"), anchor.get("xml_anchor_id")) not in allowed_evidence
             ]
             if invalid_evidence:

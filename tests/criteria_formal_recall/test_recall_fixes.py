@@ -740,6 +740,80 @@ class WorkflowPresentationTests(unittest.TestCase):
             [],
         )
 
+    def test_policy_rejects_reversed_edit_and_evidence_regions(self) -> None:
+        context = (
+            "source_region: frontmatter\n"
+            "xml_anchor_type: paragraph\n"
+            "xml_anchor_id: path:body/p25\n"
+            "内容：\n乙方：首部公司\n\n---\n\n"
+            "source_region: tail\n"
+            "xml_anchor_type: paragraph\n"
+            "xml_anchor_id: path:body/p111\n"
+            "内容：\n乙方：签署公司"
+        )
+        issue = {
+            "issue_id": "H10.1",
+            "anchors": [
+                {
+                    "role": "edit",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p25",
+                },
+                {
+                    "role": "evidence",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p111",
+                },
+            ],
+        }
+        policy = {"edit_region": "tail", "evidence_region": "frontmatter"}
+
+        errors = OrchestratorAgent._policy_output_errors(
+            {"status": "issues_found", "issues": [issue]},
+            policy,
+            context,
+        )
+
+        self.assertEqual(len(errors), 2)
+        self.assertTrue(any("edit 不来自 tail region" in error for error in errors))
+        self.assertTrue(any("evidence 不来自 frontmatter region" in error for error in errors))
+
+    def test_policy_accepts_tail_edit_and_frontmatter_evidence(self) -> None:
+        context = (
+            "source_region: frontmatter\n"
+            "xml_anchor_type: paragraph\n"
+            "xml_anchor_id: path:body/p25\n"
+            "内容：\n乙方：首部公司\n\n---\n\n"
+            "source_region: tail\n"
+            "xml_anchor_type: paragraph\n"
+            "xml_anchor_id: path:body/p111\n"
+            "内容：\n乙方：签署公司"
+        )
+        issue = {
+            "issue_id": "H10.1",
+            "anchors": [
+                {
+                    "role": "edit",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p111",
+                },
+                {
+                    "role": "evidence",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p25",
+                },
+            ],
+        }
+
+        self.assertEqual(
+            OrchestratorAgent._policy_output_errors(
+                {"status": "issues_found", "issues": [issue]},
+                {"edit_region": "tail", "evidence_region": "frontmatter"},
+                context,
+            ),
+            [],
+        )
+
     def test_comparison_policy_drops_single_sided_issue_after_repairs(self) -> None:
         opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
 
