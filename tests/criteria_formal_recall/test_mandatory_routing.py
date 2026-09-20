@@ -28,30 +28,29 @@ class MandatoryRoutingTests(unittest.TestCase):
         methods = {step["method"] for task in tasks for step in task["route"]["steps"]}
         self.assertEqual(methods, {"title", "region", "rule", "scan", "hybrid"})
 
-    def test_h01_treats_each_explicit_empty_field_as_a_local_defect(self) -> None:
+    def test_h01_handles_basic_fields_without_subject_name_ownership(self) -> None:
         task = load_mandatory_tasks()[0]
 
         self.assertIn("相邻位置存在另一个同名字段或实际值不能推翻", task["check_points"][0])
         joined_check_points = "\n".join(task["check_points"])
-        self.assertIn("连续星号", joined_check_points)
-        self.assertIn("脱敏内容不应作为正式合同内容", joined_check_points)
-        self.assertIn("每个位置都必须分别批注", joined_check_points)
-        self.assertIn("不得以其他位置已经批注、内容相同或后文已经覆盖", joined_check_points)
-        self.assertIn("普通合同名称", joined_check_points)
+        self.assertIn("统一由 H10 审查", joined_check_points)
+        self.assertNotIn("连续星号", joined_check_points)
         self.assertIn("仅填写至省、市或区县", joined_check_points)
+        self.assertIn("合同签订地点仅填写省份", joined_check_points)
 
-    def test_h10_uses_frontmatter_as_evidence_and_tail_as_edit(self) -> None:
+    def test_h10_owns_subject_validity_and_consistency(self) -> None:
         task = load_mandatory_tasks()[9]
 
-        self.assertEqual(task["placement"]["target"], "tail")
-        self.assertEqual(task["edit_region"], "tail")
-        self.assertEqual(task["evidence_region"], "frontmatter")
+        self.assertEqual(task["placement"]["target"], "inline")
+        self.assertEqual(task["edit_region"], "")
+        self.assertEqual(task["evidence_region"], "")
+        self.assertTrue(task["coverage_audit"])
         joined_check_points = "\n".join(task["check_points"])
-        self.assertIn("才分别从合同首部信息栏和完整签署栏", joined_check_points)
-        self.assertIn("合同首部信息栏是比较基准", joined_check_points)
-        self.assertIn("不得输出 missing_value 或 inconsistency", joined_check_points)
-        self.assertIn("必须停止本标准的一致性判断", joined_check_points)
-        self.assertIn("即使签署栏与合同首部信息栏中的名称不同", joined_check_points)
+        self.assertIn("每一处甲方、乙方等主体名称", joined_check_points)
+        self.assertIn("脱敏内容不应作为正式合同内容", joined_check_points)
+        self.assertIn("每个位置都必须分别批注", joined_check_points)
+        self.assertIn("不得把有效性问题交给 H01", joined_check_points)
+        self.assertIn("两侧均为真实、完整的有效名称且不一致", joined_check_points)
 
     def test_h07_scopes_date_and_term_checks_without_attachments(self) -> None:
         task = load_mandatory_tasks()[6]
