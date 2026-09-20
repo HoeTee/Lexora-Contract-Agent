@@ -592,6 +592,51 @@ class OrchestratorAgent:
         return errors
 
     @staticmethod
+    def _redacted_subject_audit_errors(
+        parsed_opinion: dict,
+        criterion: dict,
+        context: str,
+    ) -> list[str]:
+        """Require an edit for every explicit star-redacted subject in retrieved evidence."""
+        if not criterion.get("redacted_subject_audit"):
+            return []
+
+        decisions = {
+            (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or "")): item
+            for item in parsed_opinion.get("coverage_decisions") or []
+        }
+        edits: dict[tuple[str, str], set[str]] = {}
+        for issue in parsed_opinion.get("issues") or []:
+            for anchor in issue.get("anchors") or []:
+                if anchor.get("role", "edit") != "edit":
+                    continue
+                key = (
+                    str(anchor.get("xml_anchor_type") or ""),
+                    str(anchor.get("xml_anchor_id") or ""),
+                )
+                quote = str(anchor.get("quoted_text") or "")
+                if re.search(r"\*{2,}", quote):
+                    edits.setdefault(key, set()).add(quote)
+
+        errors: list[str] = []
+        for item in OrchestratorAgent._retrieval_anchor_evidence(context):
+            content = item["content"]
+            marker_count = len(re.findall(r"\*{2,}", content))
+            if marker_count == 0 or not re.search(r"甲方|乙方|公司|银行|集团|企业|合作社|机构|中心", content):
+                continue
+            key = (item["xml_anchor_type"], item["xml_anchor_id"])
+            if decisions.get(key, {}).get("decision") != "issue":
+                errors.append(f"脱敏主体名称证据 {key} 必须标记为 issue，不得判定为合规或不适用")
+            edit_count = len(edits.get(key, set()))
+            if edit_count < marker_count:
+                errors.append(
+                    f"脱敏主体名称证据 {key} 包含 {marker_count} 处独立脱敏名称，"
+                    f"但只有 {edit_count} 个直接包含脱敏字样的 edit 批注；"
+                    "同一段落有多个主体时，应分别引用各自的连续原文短语"
+                )
+        return errors
+
+    @staticmethod
     def _comparison_audit_errors(
         parsed_opinion: dict,
         criterion: dict,
@@ -675,12 +720,17 @@ class OrchestratorAgent:
             criterion,
             context,
         )
+        redacted_subject_errors = OrchestratorAgent._redacted_subject_audit_errors(
+            parsed_opinion,
+            criterion,
+            context,
+        )
         if criterion.get("comparison_audit"):
-            return comparison_errors
+            return comparison_errors + redacted_subject_errors
         edit_region = str(criterion.get("edit_region") or "").strip()
         evidence_region = str(criterion.get("evidence_region") or "").strip()
         if not edit_region and not evidence_region:
-            return comparison_errors
+            return comparison_errors + redacted_subject_errors
         retrieved_evidence = OrchestratorAgent._retrieval_anchor_evidence(context)
         allowed_edits = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
@@ -692,7 +742,7 @@ class OrchestratorAgent:
             for item in retrieved_evidence
             if item.get("source_region") == evidence_region
         }
-        errors = list(comparison_errors)
+        errors = [*comparison_errors, *redacted_subject_errors]
         for issue in parsed_opinion.get("issues") or []:
             roles = {anchor.get("role", "edit") for anchor in issue.get("anchors") or []}
             if not {"edit", "evidence"}.issubset(roles):

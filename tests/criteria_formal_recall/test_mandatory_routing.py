@@ -45,12 +45,72 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertEqual(task["edit_region"], "")
         self.assertEqual(task["evidence_region"], "")
         self.assertTrue(task["coverage_audit"])
+        self.assertTrue(task["redacted_subject_audit"])
         joined_check_points = "\n".join(task["check_points"])
         self.assertIn("每一处甲方、乙方等主体名称", joined_check_points)
+        self.assertIn("即使没有甲方、乙方标签也必须检查", joined_check_points)
         self.assertIn("脱敏内容不应作为正式合同内容", joined_check_points)
         self.assertIn("每个位置都必须分别批注", joined_check_points)
+        self.assertIn("分别引用直接包含各自主体名称的连续原文短语", joined_check_points)
         self.assertIn("不得把有效性问题交给 H01", joined_check_points)
         self.assertIn("两侧均为真实、完整的有效名称且不一致", joined_check_points)
+
+    def test_h10_rejects_unreported_star_redacted_subjects(self) -> None:
+        task = load_mandatory_tasks()[9]
+        context = """source_region: frontmatter
+xml_anchor_type: paragraph
+xml_anchor_id: path:body/p5
+内容：
+*****商业银行股份有限公司
+
+---
+
+source_region: tail
+xml_anchor_type: paragraph
+xml_anchor_id: path:body/p111
+内容：
+甲方：*****商业银行股份有限公司       乙方：*****科技有限公司"""
+        incomplete = {
+            "issues": [],
+            "coverage_decisions": [
+                {"xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p5", "decision": "not_applicable", "reason": "没有角色标签"},
+                {"xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p111", "decision": "issue", "reason": "签署栏脱敏"},
+            ],
+        }
+
+        errors = OrchestratorAgent._policy_output_errors(incomplete, task, context)
+
+        self.assertTrue(any("必须标记为 issue" in error for error in errors))
+        self.assertTrue(any("包含 2 处独立脱敏名称" in error for error in errors))
+
+    def test_h10_accepts_separate_edits_for_each_redacted_subject(self) -> None:
+        task = load_mandatory_tasks()[9]
+        context = """source_region: frontmatter
+xml_anchor_type: paragraph
+xml_anchor_id: path:body/p5
+内容：
+*****商业银行股份有限公司
+
+---
+
+source_region: tail
+xml_anchor_type: paragraph
+xml_anchor_id: path:body/p111
+内容：
+甲方：*****商业银行股份有限公司       乙方：*****科技有限公司"""
+        complete = {
+            "issues": [
+                {"anchors": [{"role": "edit", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p5", "quoted_text": "*****商业银行股份有限公司"}]},
+                {"anchors": [{"role": "edit", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p111", "quoted_text": "甲方：*****商业银行股份有限公司"}]},
+                {"anchors": [{"role": "edit", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p111", "quoted_text": "乙方：*****科技有限公司"}]},
+            ],
+            "coverage_decisions": [
+                {"xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p5", "decision": "issue", "reason": "封面主体脱敏"},
+                {"xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p111", "decision": "issue", "reason": "签署栏主体脱敏"},
+            ],
+        }
+
+        self.assertEqual(OrchestratorAgent._policy_output_errors(complete, task, context), [])
 
     def test_h07_scopes_date_and_term_checks_without_attachments(self) -> None:
         task = load_mandatory_tasks()[6]
