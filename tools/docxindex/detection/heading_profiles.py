@@ -20,6 +20,11 @@ DEFAULT_PROFILE_EXAMPLES = {
         "level_2_examples": ["（一）通信业务合作", "（3）新技术与新业务合作"],
         "level_3_examples": ["1. 基础服务", "2、增值服务"],
     },
+    "chapter_decimal": {
+        "level_1_examples": ["第一章、合同内容"],
+        "level_2_examples": ["1.1 供货范围"],
+        "level_3_examples": ["（1）付款条件", "1）其他要求"],
+    },
 }
 
 

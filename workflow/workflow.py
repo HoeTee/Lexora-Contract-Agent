@@ -40,6 +40,19 @@ def _normalize_annotation_text(value: str) -> str:
     return "".join(str(value or "").split()).strip("，。：；、“”\"'")
 
 
+def _confirmed_review_instruction(result: dict) -> str | None:
+    """Return a fixed summary instruction only when a confirmed issue authorizes it."""
+    placement = result.get("placement") or {}
+    if placement.get("target", "inline") != "summary":
+        return None
+    if str(result.get("status") or "").upper() != "ISSUES_FOUND":
+        return None
+    if not result.get("issues"):
+        return None
+    instruction = str(result.get("review_instruction") or "").strip()
+    return instruction or None
+
+
 def _prepare_inline_results(results: list[dict]) -> tuple[list[dict], list[str]]:
     """Select confirmed edit anchors and explicit opening instructions for reporting."""
     inline_results: list[dict] = []
@@ -49,8 +62,8 @@ def _prepare_inline_results(results: list[dict]) -> tuple[list[dict], list[str]]
     for result in results:
         placement = result.get("placement") or {}
         placement_target = placement.get("target", "inline")
-        review_instruction = str(result.get("review_instruction") or "").strip()
         if placement_target == "summary":
+            review_instruction = _confirmed_review_instruction(result)
             if review_instruction and review_instruction not in opening_notices:
                 opening_notices.append(review_instruction)
             continue

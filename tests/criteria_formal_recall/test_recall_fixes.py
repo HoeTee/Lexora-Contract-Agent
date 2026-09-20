@@ -868,6 +868,28 @@ class WorkflowPresentationTests(unittest.TestCase):
         self.assertEqual(inline, [])
         self.assertEqual(notices, ["注意：当前检查点固定文字"])
 
+    def test_fixed_instruction_requires_confirmed_issue_status(self) -> None:
+        base = {
+            "criterion_id": "FIXED",
+            "criterion": "触发后输出固定提示。",
+            "placement": {"target": "summary"},
+            "review_instruction": "注意：固定提示。",
+        }
+        confirmed_issue = json.loads(json.dumps(self.results[0]["issues"][0], ensure_ascii=False))
+
+        cases = [
+            ({**base, "status": "NOT_APPLICABLE", "issues": []}, []),
+            ({**base, "status": "COMPLIANT", "issues": []}, []),
+            ({**base, "status": "ISSUES_FOUND", "issues": []}, []),
+            ({**base, "status": "ISSUES_FOUND", "issues": [confirmed_issue]}, ["注意：固定提示。"]),
+        ]
+
+        for result, expected_notices in cases:
+            with self.subTest(status=result["status"], issue_count=len(result["issues"])):
+                inline, notices = _prepare_inline_results([result])
+                self.assertEqual(inline, [])
+                self.assertEqual(notices, expected_notices)
+
     def test_summary_placement_remains_authoritative_for_missing_fields(self) -> None:
         result = self.results[0]
         result["placement"] = {"target": "summary"}
