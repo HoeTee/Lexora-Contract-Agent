@@ -34,7 +34,9 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertIn("相邻位置存在另一个同名字段或实际值不能推翻", task["check_points"][0])
         joined_check_points = "\n".join(task["check_points"])
         self.assertIn("连续星号", joined_check_points)
-        self.assertIn("封面或合同名称原文单独批注", joined_check_points)
+        self.assertIn("脱敏内容不应作为正式合同内容", joined_check_points)
+        self.assertIn("每个位置都必须分别批注", joined_check_points)
+        self.assertIn("不得以其他位置已经批注、内容相同或后文已经覆盖", joined_check_points)
         self.assertIn("普通合同名称", joined_check_points)
         self.assertIn("仅填写至省、市或区县", joined_check_points)
 
