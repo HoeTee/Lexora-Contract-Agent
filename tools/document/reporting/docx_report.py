@@ -94,19 +94,17 @@ def deduplicate_review_results_by_range(
     contract_path: str,
     results: list[dict],
 ) -> tuple[list[dict], dict[str, int]]:
-    """Keep one edit annotation for each resolved DOCX character range.
+    """Remove only identical comments on the same resolved DOCX character range.
 
     Mandatory findings win over uploaded criteria. Within the same source, the
     configurable dedupe priority wins and stable result order breaks ties.
-    Unresolved anchors, summary-only findings, and different ranges are preserved.
+    Different comments on the same or overlapping ranges are preserved.
     """
     doc = Document(contract_path)
-    candidates: list[tuple[int, int, int, tuple[str, int, int], bool, int, str, str]] = []
+    candidates: list[tuple[int, int, int, tuple[str, int, int, str], bool, int]] = []
     for result_index, result in enumerate(results):
         mandatory = result.get("review_source") == "mandatory"
         priority = int(result.get("dedupe_priority") or 0)
-        domain = str(result.get("dedupe_domain") or "").strip()
-        criterion_id = str(result.get("criterion_id") or "")
         for issue_index, issue in enumerate(result.get("issues") or []):
             for anchor_index, anchor in enumerate(issue.get("anchors") or []):
                 if anchor.get("role", "edit") != "edit":
@@ -123,6 +121,10 @@ def deduplicate_review_results_by_range(
                     resolved.path,
                     resolved.match.start_index,
                     resolved.match.end_index,
+                    " ".join(
+                        str(anchor.get("comment_text") or issue.get("issue_comment") or "")
+                        .split()
+                    ),
                 )
                 candidates.append(
                     (
@@ -132,14 +134,12 @@ def deduplicate_review_results_by_range(
                         key,
                         mandatory,
                         priority,
-                        domain,
-                        criterion_id,
                     )
                 )
 
-    grouped: dict[tuple[str, int, int], list[tuple[int, int, int, bool, int]]] = {}
+    grouped: dict[tuple[str, int, int, str], list[tuple[int, int, int, bool, int]]] = {}
     suppressed: set[tuple[int, int, int]] = set()
-    for result_index, issue_index, anchor_index, key, mandatory, priority, _domain, _criterion_id in candidates:
+    for result_index, issue_index, anchor_index, key, mandatory, priority in candidates:
         grouped.setdefault(key, []).append(
             (result_index, issue_index, anchor_index, mandatory, priority)
         )
@@ -151,40 +151,6 @@ def deduplicate_review_results_by_range(
             key=lambda item: (int(item[3]), item[4], -item[0], -item[1], -item[2]),
         )
         suppressed.update(item[:3] for item in group if item[:3] != winner[:3])
-
-    overlap_removed = 0
-    overlap_groups: dict[str, list[tuple[int, int, int, tuple[str, int, int], bool, int, str]]] = {}
-    for result_index, issue_index, anchor_index, key, mandatory, priority, domain, criterion_id in candidates:
-        identity = (result_index, issue_index, anchor_index)
-        if domain and identity not in suppressed:
-            overlap_groups.setdefault(f"{key[0]}\0{domain}", []).append(
-                (result_index, issue_index, anchor_index, key, mandatory, priority, criterion_id)
-            )
-    for group in overlap_groups.values():
-        for left_index, left in enumerate(group):
-            for right in group[left_index + 1:]:
-                if left[:3] in suppressed or right[:3] in suppressed:
-                    continue
-                if left[6] == right[6]:
-                    continue
-                left_range = left[3][1:]
-                right_range = right[3][1:]
-                contains = (
-                    left_range[0] <= right_range[0] and left_range[1] >= right_range[1]
-                ) or (
-                    right_range[0] <= left_range[0] and right_range[1] >= left_range[1]
-                )
-                if not contains:
-                    continue
-                winner = max(
-                    (left, right),
-                    key=lambda item: (int(item[4]), item[5], -item[0], -item[1], -item[2]),
-                )
-                loser = right if winner is left else left
-                loser_identity = loser[:3]
-                if loser_identity not in suppressed:
-                    suppressed.add(loser_identity)
-                    overlap_removed += 1
 
     deduplicated = copy.deepcopy(results)
     removed_issues = 0
@@ -211,7 +177,7 @@ def deduplicate_review_results_by_range(
         "resolved_edit_anchors": len(candidates),
         "removed_duplicate_anchors": removed_anchors,
         "removed_duplicate_issues": removed_issues,
-        "removed_overlap_anchors": overlap_removed,
+        "removed_overlap_anchors": 0,
     }
 
 

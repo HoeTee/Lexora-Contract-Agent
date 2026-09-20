@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 from pathlib import Path
@@ -48,7 +49,6 @@ def _subagent_output(issue_id: str, comment: str, anchor_id: str) -> dict:
             "issue_comment": comment,
             "anchors": [{
                 "role": "edit",
-                "defect_type": "missing_value",
                 "xml_anchor_type": "paragraph",
                 "xml_anchor_id": anchor_id,
                 "quoted_text": "地址：【未填写】",
@@ -63,10 +63,9 @@ def _subagent_output(issue_id: str, comment: str, anchor_id: str) -> dict:
 
 
 class AnchorEvidenceValidationTests(unittest.TestCase):
-    def test_duplicate_edit_error_names_both_issues_and_repair_rule(self) -> None:
+    def test_duplicate_edit_locations_are_left_for_semantic_deduplication(self) -> None:
         anchor = {
             "role": "edit",
-            "defect_type": "missing_value",
             "xml_anchor_type": "paragraph",
             "xml_anchor_id": "path:body/p31",
             "quoted_text": "乙方：某公司 地址：【未填写】",
@@ -84,8 +83,16 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
                 "check_point": "逐字段检查。",
             })
 
-        with self.assertRaisesRegex(ValueError, r"H01\.1 and H01\.2.*anchors=\[\]"):
-            SubAgentOutput.model_validate({"status": "issues_found", "issues": issues})
+        output = SubAgentOutput.model_validate({"status": "issues_found", "issues": issues})
+
+        self.assertEqual([issue.issue_id for issue in output.issues], ["H01.1", "H01.2"])
+
+    def test_defect_type_is_not_part_of_anchor_schema(self) -> None:
+        output = _subagent_output("H01.1", "请填写地址。", "path:body/p31")
+        output["issues"][0]["anchors"][0]["defect_type"] = "missing_value"
+
+        with self.assertRaisesRegex(ValueError, "defect_type"):
+            SubAgentOutput.model_validate(output)
 
     def test_blank_field_examples_are_semantic_scan_instructions(self) -> None:
         prompt = scan_prompt(
@@ -124,7 +131,6 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
             "anchors": [
                 {
                     "role": "edit",
-                    "defect_type": "missing_value",
                     "xml_anchor_type": "paragraph",
                     "xml_anchor_id": "path:body/p1",
                     "quoted_text": "合同编号：待填写",
@@ -132,7 +138,6 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
                 },
                 {
                     "role": "edit",
-                    "defect_type": "missing_value",
                     "xml_anchor_type": "paragraph",
                     "xml_anchor_id": "path:body/p2",
                     "quoted_text": "联系电话：待填写",
@@ -144,7 +149,7 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
             "check_point": "信息应填写完整。",
         }
 
-        with self.assertRaisesRegex(ValueError, "one separate issue per missing field"):
+        with self.assertRaisesRegex(ValueError, "one separate issue per annotation location"):
             SubAgentOutput.model_validate({"status": "issues_found", "issues": [issue]})
 
     def test_subagent_issue_ids_must_be_unique(self) -> None:
@@ -181,7 +186,7 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
 
         stats = OrchestratorAgent()._validate_and_repair_anchors(output, context)
 
-        self.assertEqual(stats, {"valid": 0, "repaired": 1, "dropped": 0})
+        self.assertEqual(stats, {"valid": 0, "repaired": 1, "invalid": 0})
         self.assertEqual(output["issues"][0]["anchors"][0]["xml_anchor_id"], "path:body/p15")
 
     def test_exact_quote_match_wins_over_short_containment_candidate(self) -> None:
@@ -207,10 +212,10 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
 
         stats = OrchestratorAgent()._validate_and_repair_anchors(output, context)
 
-        self.assertEqual(stats, {"valid": 0, "repaired": 1, "dropped": 0})
+        self.assertEqual(stats, {"valid": 0, "repaired": 1, "invalid": 0})
         self.assertEqual(output["issues"][0]["anchors"][0]["xml_anchor_id"], "path:body/p31")
 
-    def test_unprovable_model_anchor_is_removed_before_docx_write(self) -> None:
+    def test_unprovable_model_anchor_is_preserved_for_regeneration_feedback(self) -> None:
         context = "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p1\n内容：\n合同正文"
         output = {
             "issues": [{
@@ -225,8 +230,113 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
 
         stats = OrchestratorAgent()._validate_and_repair_anchors(output, context)
 
-        self.assertEqual(stats, {"valid": 0, "repaired": 0, "dropped": 1})
-        self.assertEqual(output["issues"][0]["anchors"], [])
+        self.assertEqual(stats, {"valid": 0, "repaired": 0, "invalid": 1})
+        self.assertEqual(len(output["issues"][0]["anchors"]), 1)
+        errors = OrchestratorAgent()._anchor_validation_errors(output, context)
+        self.assertTrue(any("quoted_text 不属于锚点" in error for error in errors))
+
+    def test_overlapping_nonidentical_edit_ranges_require_regeneration(self) -> None:
+        context = (
+            "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p1\n内容：\n"
+            "甲方：某银行 乙方：某科技公司"
+        )
+        output = {
+            "issues": [
+                {
+                    "issue_id": "H10.1",
+                    "anchors": [{
+                        "role": "edit",
+                        "xml_anchor_type": "paragraph",
+                        "xml_anchor_id": "path:body/p1",
+                        "quoted_text": "甲方：某银行 乙方：某科技公司",
+                    }],
+                },
+                {
+                    "issue_id": "H10.2",
+                    "anchors": [{
+                        "role": "edit",
+                        "xml_anchor_type": "paragraph",
+                        "xml_anchor_id": "path:body/p1",
+                        "quoted_text": "乙方：某科技公司",
+                    }],
+                },
+            ],
+        }
+
+        errors = OrchestratorAgent()._anchor_validation_errors(output, context)
+
+        self.assertTrue(any("edit 范围" in error and "重叠" in error for error in errors))
+
+    def test_identical_edit_ranges_are_left_for_semantic_review(self) -> None:
+        context = "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p1\n内容：\n乙方：某科技公司"
+        anchor = {
+            "role": "edit",
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "path:body/p1",
+            "quoted_text": "乙方：某科技公司",
+        }
+        output = {
+            "issues": [
+                {"issue_id": "H10.1", "anchors": [dict(anchor)]},
+                {"issue_id": "H10.2", "anchors": [dict(anchor)]},
+            ],
+        }
+
+        self.assertEqual(OrchestratorAgent()._anchor_validation_errors(output, context), [])
+
+    def test_invalid_anchor_requests_complete_model_revision(self) -> None:
+        context = "xml_anchor_type: paragraph\nxml_anchor_id: path:body/p1\n内容：\n乙方：某科技公司"
+        invalid = {
+            "status": "issues_found",
+            "issues": [{
+                "issue_id": "H10.1",
+                "anchors": [{
+                    "role": "edit",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p1",
+                    "quoted_text": "模型编造的原文",
+                }],
+            }],
+        }
+        corrected = {
+            "status": "issues_found",
+            "issues": [{
+                "issue_id": "H10.1",
+                "anchors": [{
+                    "role": "edit",
+                    "xml_anchor_type": "paragraph",
+                    "xml_anchor_id": "path:body/p1",
+                    "quoted_text": "乙方：某科技公司",
+                }],
+            }],
+        }
+
+        class RevisingOrchestrator(OrchestratorAgent):
+            def __init__(self):
+                super().__init__()
+                self.revision_prompts: list[str] = []
+
+            async def _revise_subagent_output(self, _sub_agent, prompt, _previous):
+                self.revision_prompts.append(prompt)
+                return corrected, "corrected"
+
+        orchestrator = RevisingOrchestrator()
+        sub_agent = type("SubAgentStub", (), {"messages": []})()
+        result, raw, _, _ = asyncio.run(
+            orchestrator._validate_and_revise_output(
+                sub_agent,
+                invalid,
+                "invalid",
+                {},
+                context,
+                coverage_audit=False,
+            )
+        )
+
+        self.assertEqual(result, corrected)
+        self.assertEqual(raw, "corrected")
+        self.assertEqual(len(orchestrator.revision_prompts), 1)
+        self.assertIn("quoted_text 不属于锚点", orchestrator.revision_prompts[0])
 
     def test_retrieval_context_omits_display_ordinals(self) -> None:
         index = {
@@ -525,7 +635,10 @@ class PromptAuthorityTests(unittest.TestCase):
         self.assertIn("不得按固定字符形态机械判断", prompts["SUB_AGENT_BASE_PROMPT"])
         self.assertIn("列举项不是封闭清单", prompts["SUB_AGENT_BASE_PROMPT"])
         self.assertIn("不得按固定正则形态判断", prompts["REFLECTOR_SYSTEM_PROMPT"])
-        self.assertIn("一个 missing_value issue 只能对应一个字段", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("每个 issue 最多只能对应一个 edit", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("不得让不同 issue 重复引用整段", prompts["SUB_AGENT_BASE_PROMPT"])
+        self.assertIn("没有角色标签", prompts["REFLECTOR_SYSTEM_PROMPT"])
+        self.assertIn("必须列入 coverage_gaps", prompts["REFLECTOR_SYSTEM_PROMPT"])
 
     def test_runtime_prompt_makes_deterministic_absence_authoritative(self) -> None:
         source = inspect.getsource(OrchestratorAgent.execute_single_criterion)
@@ -611,16 +724,14 @@ class WorkflowPresentationTests(unittest.TestCase):
                 "issue_decisions": [],
             })
 
-    def test_same_missing_field_is_written_once_across_criteria(self) -> None:
+    def test_workflow_does_not_preempt_summarizer_semantic_deduplication(self) -> None:
         duplicate = json.loads(json.dumps(self.results[0], ensure_ascii=False))
         duplicate["criterion_id"] = "C18"
-        duplicate["issues"][0]["anchors"][0]["defect_type"] = "missing_value"
-        self.results[0]["issues"][0]["anchors"][0]["defect_type"] = "missing_value"
         duplicate["issues"][0]["anchors"][0]["comment_text"] = "请填写该字段。"
 
         inline, _ = _prepare_inline_results([self.results[0], duplicate])
 
-        self.assertEqual(len(inline), 1)
+        self.assertEqual(len(inline), 2)
 
     def test_pending_criterion_keeps_confirmed_findings_only(self) -> None:
         opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
@@ -724,7 +835,6 @@ class WorkflowPresentationTests(unittest.TestCase):
         )
         opinion["issues"][0]["anchors"].append({
             "role": "evidence",
-            "defect_type": "inconsistency",
             "xml_anchor_type": "paragraph",
             "xml_anchor_id": "path:body/p200",
             "quoted_text": "附件对照原文。",
@@ -813,19 +923,6 @@ class WorkflowPresentationTests(unittest.TestCase):
             ),
             [],
         )
-
-    def test_comparison_policy_drops_single_sided_issue_after_repairs(self) -> None:
-        opinion = {"status": "issues_found", "issues": self.results[0]["issues"]}
-
-        removed = OrchestratorAgent._drop_incomplete_policy_issues(
-            opinion,
-            {"evidence_region": "attachments"},
-            "",
-        )
-
-        self.assertEqual(removed, 1)
-        self.assertEqual(opinion["issues"], [])
-        self.assertEqual(opinion["status"], "compliant")
 
     def test_ambiguous_different_advice_is_not_merged_only_by_criterion(self) -> None:
         for result in self.results:
@@ -968,7 +1065,6 @@ class WorkflowPresentationTests(unittest.TestCase):
         result = self.results[0]
         result["placement"] = {"target": "summary"}
         result["review_instruction"] = "注意：请补充合同基本信息"
-        result["issues"][0]["anchors"][0]["defect_type"] = "missing_value"
 
         inline, notices = _prepare_inline_results([result])
 

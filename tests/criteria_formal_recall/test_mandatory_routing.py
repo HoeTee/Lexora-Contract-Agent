@@ -45,7 +45,7 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertEqual(task["edit_region"], "")
         self.assertEqual(task["evidence_region"], "")
         self.assertTrue(task["coverage_audit"])
-        self.assertTrue(task["redacted_subject_audit"])
+        self.assertNotIn("redacted_subject_audit", task)
         joined_check_points = "\n".join(task["check_points"])
         self.assertIn("每一处甲方、乙方等主体名称", joined_check_points)
         self.assertIn("即使没有甲方、乙方标签也必须检查", joined_check_points)
@@ -55,7 +55,7 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertIn("不得把有效性问题交给 H01", joined_check_points)
         self.assertIn("两侧均为真实、完整的有效名称且不一致", joined_check_points)
 
-    def test_h10_rejects_unreported_star_redacted_subjects(self) -> None:
+    def test_h10_has_no_star_specific_policy_validator(self) -> None:
         task = load_mandatory_tasks()[9]
         context = """source_region: frontmatter
 xml_anchor_type: paragraph
@@ -80,8 +80,7 @@ xml_anchor_id: path:body/p111
 
         errors = OrchestratorAgent._policy_output_errors(incomplete, task, context)
 
-        self.assertTrue(any("必须标记为 issue" in error for error in errors))
-        self.assertTrue(any("包含 2 处独立脱敏名称" in error for error in errors))
+        self.assertEqual(errors, [])
 
     def test_h10_accepts_separate_edits_for_each_redacted_subject(self) -> None:
         task = load_mandatory_tasks()[9]
@@ -206,8 +205,8 @@ xml_anchor_id: path:body/p219
                 "risk_level": "low",
                 "issue_comment": "正文引用的附件名称与实际附件标题不一致。",
                 "anchors": [
-                    {"role": "edit", "defect_type": "inconsistency", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p70", "quoted_text": "附件一《产品清单》", "comment_text": "请将正文附件名称修改为“服务清单”。"},
-                    {"role": "evidence", "defect_type": "inconsistency", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p219", "quoted_text": "附件一：服务清单", "comment_text": ""},
+                    {"role": "edit", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p70", "quoted_text": "附件一《产品清单》", "comment_text": "请将正文附件名称修改为“服务清单”。"},
+                    {"role": "evidence", "xml_anchor_type": "paragraph", "xml_anchor_id": "path:body/p219", "quoted_text": "附件一：服务清单", "comment_text": ""},
                 ],
                 "reasoning": "正文名称与实际附件标题不同。",
                 "criterion": task["criterion"],
@@ -240,7 +239,6 @@ xml_anchor_id: path:body/p219
                 "issue_comment": "同一段正文引用的附件名称与实际标题不一致。",
                 "anchors": [{
                     "role": "edit",
-                    "defect_type": "inconsistency",
                     "xml_anchor_type": "paragraph",
                     "xml_anchor_id": "path:body/p1",
                     "quoted_text": "附件2和附件3",
@@ -257,18 +255,6 @@ xml_anchor_id: path:body/p219
         })
 
         self.assertEqual(len(output.comparison_decisions), 2)
-
-    def test_h18_degraded_cleanup_preserves_comparison_issues(self) -> None:
-        parsed = {"status": "issues_found", "issues": [{"issue_id": "H18.1"}]}
-
-        removed = OrchestratorAgent._drop_incomplete_policy_issues(
-            parsed,
-            {"comparison_audit": True, "evidence_region": "attachments"},
-            "",
-        )
-
-        self.assertEqual(removed, 0)
-        self.assertEqual([item["issue_id"] for item in parsed["issues"]], ["H18.1"])
 
     def test_mandatory_only_phase_skips_planner_model_call(self) -> None:
         workflow = ContractReviewWorkflow.__new__(ContractReviewWorkflow)
@@ -310,7 +296,7 @@ xml_anchor_id: path:body/p219
         planner.extract_strategies.assert_awaited_once()
         self.assertEqual(workflow._planner_tokens, 12)
 
-    def test_same_resolved_range_prefers_mandatory_over_uploaded(self) -> None:
+    def test_same_resolved_range_preserves_different_comments(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "contract.docx"
             document = Document()
@@ -324,11 +310,11 @@ xml_anchor_id: path:body/p219
                 [uploaded, mandatory],
             )
 
-        self.assertEqual(results[0]["issues"], [])
+        self.assertEqual(len(results[0]["issues"]), 1)
         self.assertEqual(len(results[1]["issues"]), 1)
-        self.assertEqual(stats["removed_duplicate_issues"], 1)
+        self.assertEqual(stats["removed_duplicate_issues"], 0)
 
-    def test_same_source_exact_range_keeps_higher_priority_finding(self) -> None:
+    def test_same_source_exact_range_preserves_different_findings(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "contract.docx"
             document = Document()
@@ -341,10 +327,10 @@ xml_anchor_id: path:body/p219
 
             results, stats = deduplicate_review_results_by_range(str(path), [first, second])
 
-        self.assertEqual([len(result["issues"]) for result in results], [0, 1])
-        self.assertEqual(stats["removed_duplicate_issues"], 1)
+        self.assertEqual([len(result["issues"]) for result in results], [1, 1])
+        self.assertEqual(stats["removed_duplicate_issues"], 0)
 
-    def test_uploaded_exact_range_never_overrides_mandatory(self) -> None:
+    def test_uploaded_different_comment_is_preserved_with_mandatory(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "contract.docx"
             document = Document()
@@ -359,10 +345,10 @@ xml_anchor_id: path:body/p219
                 [uploaded, mandatory],
             )
 
-        self.assertEqual(results[0]["issues"], [])
+        self.assertEqual(len(results[0]["issues"]), 1)
         self.assertEqual(len(results[1]["issues"]), 1)
 
-    def test_contained_ranges_in_same_domain_keep_higher_priority(self) -> None:
+    def test_contained_ranges_in_same_domain_are_preserved_for_distinct_findings(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "contract.docx"
             document = Document()
@@ -377,8 +363,22 @@ xml_anchor_id: path:body/p219
 
             results, stats = deduplicate_review_results_by_range(str(path), [typo, grammar])
 
+        self.assertEqual([len(result["issues"]) for result in results], [1, 1])
+        self.assertEqual(stats["removed_overlap_anchors"], 0)
+
+    def test_identical_comment_on_same_range_is_deduplicated(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "contract.docx"
+            document = Document()
+            document.add_paragraph("乙方：#乙方名称#")
+            document.save(path)
+            first = _result("H01", "mandatory", "请填写乙方名称。")
+            second = _result("U01", "uploaded", "请填写乙方名称。")
+
+            results, stats = deduplicate_review_results_by_range(str(path), [second, first])
+
         self.assertEqual([len(result["issues"]) for result in results], [0, 1])
-        self.assertEqual(stats["removed_overlap_anchors"], 1)
+        self.assertEqual(stats["removed_duplicate_issues"], 1)
 
     def test_contained_ranges_in_different_domains_are_preserved(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -409,7 +409,6 @@ def _result(criterion_id: str, source: str, comment: str) -> dict:
             "issue_comment": comment,
             "anchors": [{
                 "role": "edit",
-                "defect_type": "missing_value",
                 "xml_anchor_type": "paragraph",
                 "xml_anchor_id": "path:body/p1",
                 "quoted_text": "乙方：#乙方名称#",

@@ -33,7 +33,6 @@ class MandatoryPolicy(BaseModel):
     route: RoutePlan
     placement: Placement
     coverage_audit: bool = False
-    redacted_subject_audit: bool = False
     comparison_audit: bool = False
     edit_region: str = ""
     evidence_region: str = ""
@@ -86,7 +85,6 @@ def load_mandatory_tasks() -> list[dict[str, Any]]:
             "review_source": "mandatory",
             "policy_id": policy.id,
             "coverage_audit": policy.coverage_audit,
-            "redacted_subject_audit": policy.redacted_subject_audit,
             "comparison_audit": policy.comparison_audit,
             "edit_region": policy.edit_region,
             "evidence_region": policy.evidence_region,

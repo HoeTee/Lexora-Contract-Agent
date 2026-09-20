@@ -47,7 +47,7 @@ class ReflectorAgent(Agent):
             "若已提供证据中的未填写字段、冲突或当前标准明确问题没有对应 issue，"
             "使用 coverage_gaps 精确列出原文锚点并返回 REJECT；不得只审核已有 findings。"
             "没有漏检时 coverage_gaps=[]。\n"
-            "一致性标准只比较两侧均已填写的有效值；任一侧为空白、模板变量或未填写时，必须移除该一致性标准下的 missing_value，不能把它确认为一致性问题。\n"
+            "一致性标准只比较两侧均已填写的有效值；任一侧为空白、模板变量或未填写时，必须移除该一致性标准下的字段缺失问题，不能把它确认为一致性问题。\n"
             "compliant + issues=[] 是合法结构，不得要求其提供 schema 未定义的顶层 reasoning 或为了引用证据而新增 issue。\n"
             "请审核以下审查结果的质量：\n\n"
             f"SubAgent 输出：\n{agent_output}\n\n"

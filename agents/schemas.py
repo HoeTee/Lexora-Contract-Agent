@@ -71,7 +71,6 @@ class StrategyExtractionOutput(StrictOutputModel):
 
 class SubAgentAnchor(StrictOutputModel):
     role: Literal["edit", "evidence"] = "edit"
-    defect_type: Literal["missing_value", "inconsistency", "wording", "other"] = "other"
     xml_anchor_type: Literal["paragraph", "table"]
     xml_anchor_id: str = Field(min_length=1)
     quoted_text: str = Field(min_length=1)
@@ -153,9 +152,8 @@ class SubAgentIssue(StrictOutputModel):
         edits = [anchor for anchor in self.anchors if anchor.role == "edit"]
         if self.anchors and not edits:
             raise ValueError("anchored issue requires an edit location with a specific comment; evidence alone is not an annotation. Use anchors=[] only for a genuine summary-only issue")
-        missing_edits = [anchor for anchor in edits if anchor.defect_type == "missing_value"]
-        if missing_edits and len(edits) != 1:
-            raise ValueError("a missing-value issue must contain exactly one edit anchor; return one separate issue per missing field")
+        if len(edits) > 1:
+            raise ValueError("an issue may contain at most one edit anchor; return one separate issue per annotation location")
         return self
 
     @field_validator("issue_id", "issue_comment", "reasoning", "criterion", "check_point") # 字段验证
@@ -197,30 +195,6 @@ class SubAgentOutput(StrictOutputModel):
         issue_ids = [issue.issue_id for issue in self.issues]
         if len(issue_ids) != len(set(issue_ids)):
             raise ValueError("each issue must have a unique issue_id")
-        edit_keys: dict[tuple[str, str, str, str], str] = {}
-        for issue in self.issues:
-            for anchor in issue.anchors:
-                if anchor.role != "edit":
-                    continue
-                key = (
-                    anchor.xml_anchor_type,
-                    anchor.xml_anchor_id,
-                    "".join(anchor.quoted_text.split()),
-                    anchor.defect_type,
-                )
-                if key in edit_keys:
-                    first_issue_id = edit_keys[key]
-                    raise ValueError(
-                        "duplicate edit location across issues "
-                        f"{first_issue_id} and {issue.issue_id}: "
-                        f"{anchor.xml_anchor_type}/{anchor.xml_anchor_id}, "
-                        f"defect_type={anchor.defect_type}, quoted_text={anchor.quoted_text!r}. "
-                        "If both describe one defect, merge them into one issue. If they describe "
-                        "different defects, each quoted_text must be the narrow continuous source "
-                        "text that directly contains its own defect. When a field is wholly absent "
-                        "and has no source location, use anchors=[] instead of borrowing adjacent text."
-                    )
-                edit_keys[key] = issue.issue_id
         coverage_keys = [
             (decision.xml_anchor_type, decision.xml_anchor_id)
             for decision in self.coverage_decisions

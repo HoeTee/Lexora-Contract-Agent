@@ -60,7 +60,6 @@ def _issue_edit_identity(issue: dict) -> tuple | None:
             anchor.get("xml_anchor_type", ""),
             anchor.get("xml_anchor_id", ""),
             "".join(str(anchor.get("quoted_text", "")).split()),
-            anchor.get("defect_type", ""),
         )
         for anchor in issue.get("anchors", [])
         if anchor.get("role", "edit") == "edit"
@@ -225,7 +224,6 @@ SUB_AGENT_EXPECTED_JSON = """
       "anchors": [
         {
           "role": "edit",
-          "defect_type": "missing_value",
           "xml_anchor_type": "paragraph",
           "xml_anchor_id": "必须复用检索结果中的 xml_anchor_id",
           "quoted_text": "逐字摘录的单一连续合同原文",
@@ -482,13 +480,13 @@ class OrchestratorAgent:
         parsed_opinion: dict,
         context: str,
     ) -> dict[str, int]:
-        """Repair provable model anchor mistakes and drop unprovable anchors."""
+        """Repair provable model anchor mistakes while preserving invalid anchors for feedback."""
         evidence = self._retrieval_anchor_evidence(context)
         evidence_by_key = {
             (item["xml_anchor_type"], item["xml_anchor_id"]): item
             for item in evidence
         }
-        stats = {"valid": 0, "repaired": 0, "dropped": 0}
+        stats = {"valid": 0, "repaired": 0, "invalid": 0}
 
         for issue in parsed_opinion.get("issues", []):
             repaired_anchors: list[dict] = []
@@ -540,9 +538,72 @@ class OrchestratorAgent:
                     stats["repaired"] += 1
                     continue
 
-                stats["dropped"] += 1
+                repaired_anchors.append(anchor)
+                stats["invalid"] += 1
             issue["anchors"] = repaired_anchors
         return stats
+
+    def _anchor_validation_errors(self, parsed_opinion: dict, context: str) -> list[str]:
+        """Return objective anchor location and edit-range conflicts after repair."""
+        evidence = self._retrieval_anchor_evidence(context)
+        evidence_by_key = {
+            (item["xml_anchor_type"], item["xml_anchor_id"]): item
+            for item in evidence
+        }
+        errors: list[str] = []
+        edit_ranges: list[tuple[str, str, str, int, int]] = []
+
+        for issue in parsed_opinion.get("issues") or []:
+            issue_id = str(issue.get("issue_id") or "")
+            for anchor in issue.get("anchors") or []:
+                anchor_type = str(anchor.get("xml_anchor_type") or "")
+                anchor_id = str(anchor.get("xml_anchor_id") or "")
+                quote = str(anchor.get("quoted_text") or "").strip()
+                item = evidence_by_key.get((anchor_type, anchor_id))
+                if item is None:
+                    errors.append(
+                        f"issue {issue_id} 的锚点 {anchor_type}/{anchor_id} 不存在于检索证据中"
+                    )
+                    continue
+                normalized_content = self._normalize_anchor_text(item["content"])
+                normalized_quote = self._normalize_anchor_text(quote)
+                starts = [
+                    index
+                    for index in range(len(normalized_content))
+                    if normalized_content.startswith(normalized_quote, index)
+                ] if normalized_quote else []
+                if not starts:
+                    errors.append(
+                        f"issue {issue_id} 的 quoted_text 不属于锚点 {anchor_type}/{anchor_id}：{quote!r}"
+                    )
+                    continue
+                if len(starts) > 1:
+                    errors.append(
+                        f"issue {issue_id} 的 quoted_text 在锚点 {anchor_type}/{anchor_id} 中匹配多次，无法唯一定位：{quote!r}"
+                    )
+                    continue
+                if anchor.get("role", "edit") == "edit":
+                    start = starts[0]
+                    edit_ranges.append(
+                        (issue_id, anchor_type, anchor_id, start, start + len(normalized_quote))
+                    )
+
+        for index, left in enumerate(edit_ranges):
+            for right in edit_ranges[index + 1:]:
+                if left[1:3] != right[1:3]:
+                    continue
+                left_range = left[3:]
+                right_range = right[3:]
+                if left_range == right_range:
+                    # Exact duplicates need semantic comparison and are handled downstream.
+                    continue
+                overlaps = left_range[0] < right_range[1] and right_range[0] < left_range[1]
+                if overlaps:
+                    errors.append(
+                        f"issue {left[0]} 与 issue {right[0]} 的 edit 范围在 "
+                        f"{left[1]}/{left[2]} 中重叠；请分别引用直接包含各自缺陷的最小连续原文"
+                    )
+        return errors
 
     def _coverage_audit_errors(self, parsed_opinion: dict, context: str) -> list[str]:
         """Validate one semantic decision for every evidence anchor in an audited region."""
@@ -589,51 +650,6 @@ class OrchestratorAgent:
                 "edit 批注对应的 coverage_decisions 未标记为 issue："
                 f"{conflicting_issue_anchors}"
             )
-        return errors
-
-    @staticmethod
-    def _redacted_subject_audit_errors(
-        parsed_opinion: dict,
-        criterion: dict,
-        context: str,
-    ) -> list[str]:
-        """Require an edit for every explicit star-redacted subject in retrieved evidence."""
-        if not criterion.get("redacted_subject_audit"):
-            return []
-
-        decisions = {
-            (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or "")): item
-            for item in parsed_opinion.get("coverage_decisions") or []
-        }
-        edits: dict[tuple[str, str], set[str]] = {}
-        for issue in parsed_opinion.get("issues") or []:
-            for anchor in issue.get("anchors") or []:
-                if anchor.get("role", "edit") != "edit":
-                    continue
-                key = (
-                    str(anchor.get("xml_anchor_type") or ""),
-                    str(anchor.get("xml_anchor_id") or ""),
-                )
-                quote = str(anchor.get("quoted_text") or "")
-                if re.search(r"\*{2,}", quote):
-                    edits.setdefault(key, set()).add(quote)
-
-        errors: list[str] = []
-        for item in OrchestratorAgent._retrieval_anchor_evidence(context):
-            content = item["content"]
-            marker_count = len(re.findall(r"\*{2,}", content))
-            if marker_count == 0 or not re.search(r"甲方|乙方|公司|银行|集团|企业|合作社|机构|中心", content):
-                continue
-            key = (item["xml_anchor_type"], item["xml_anchor_id"])
-            if decisions.get(key, {}).get("decision") != "issue":
-                errors.append(f"脱敏主体名称证据 {key} 必须标记为 issue，不得判定为合规或不适用")
-            edit_count = len(edits.get(key, set()))
-            if edit_count < marker_count:
-                errors.append(
-                    f"脱敏主体名称证据 {key} 包含 {marker_count} 处独立脱敏名称，"
-                    f"但只有 {edit_count} 个直接包含脱敏字样的 edit 批注；"
-                    "同一段落有多个主体时，应分别引用各自的连续原文短语"
-                )
         return errors
 
     @staticmethod
@@ -720,17 +736,12 @@ class OrchestratorAgent:
             criterion,
             context,
         )
-        redacted_subject_errors = OrchestratorAgent._redacted_subject_audit_errors(
-            parsed_opinion,
-            criterion,
-            context,
-        )
         if criterion.get("comparison_audit"):
-            return comparison_errors + redacted_subject_errors
+            return comparison_errors
         edit_region = str(criterion.get("edit_region") or "").strip()
         evidence_region = str(criterion.get("evidence_region") or "").strip()
         if not edit_region and not evidence_region:
-            return comparison_errors + redacted_subject_errors
+            return comparison_errors
         retrieved_evidence = OrchestratorAgent._retrieval_anchor_evidence(context)
         allowed_edits = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
@@ -742,7 +753,7 @@ class OrchestratorAgent:
             for item in retrieved_evidence
             if item.get("source_region") == evidence_region
         }
-        errors = [*comparison_errors, *redacted_subject_errors]
+        errors = [*comparison_errors]
         for issue in parsed_opinion.get("issues") or []:
             roles = {anchor.get("role", "edit") for anchor in issue.get("anchors") or []}
             if not {"edit", "evidence"}.issubset(roles):
@@ -777,29 +788,55 @@ class OrchestratorAgent:
                 )
         return errors
 
-    @staticmethod
-    def _drop_incomplete_policy_issues(parsed_opinion: dict, criterion: dict, context: str) -> int:
-        """Remove relation findings that cannot satisfy the policy's two-sided evidence contract."""
-        if criterion.get("comparison_audit"):
-            # Comparison coverage is a property of the complete output. Probing one
-            # issue at a time makes every valid partial issue appear to omit the
-            # other comparison decisions and would incorrectly delete all issues.
-            return 0
-        if not str(criterion.get("evidence_region") or "").strip():
-            return 0
-        kept = []
-        removed = 0
-        for issue in parsed_opinion.get("issues") or []:
-            probe = {**parsed_opinion, "issues": [issue]}
-            if OrchestratorAgent._policy_output_errors(probe, criterion, context):
-                removed += 1
-            else:
-                kept.append(issue)
-        parsed_opinion["issues"] = kept
-        if not kept:
-            parsed_opinion["status"] = "compliant"
-            parsed_opinion["applicability_reason"] = ""
-        return removed
+    async def _validate_and_revise_output(
+        self,
+        sub_agent: Agent,
+        parsed_opinion: dict,
+        raw_output: str,
+        criterion: dict,
+        base_context: str,
+        *,
+        coverage_audit: bool,
+        anchor_validation: dict[str, int] | None = None,
+        max_revisions: int = 2,
+    ) -> tuple[dict, str, str, dict[str, int]]:
+        """Run all deterministic output checks and request complete revisions on failure."""
+        totals = anchor_validation if anchor_validation is not None else {}
+        for revision in range(max_revisions + 1):
+            review_context = self._review_evidence_context(base_context, sub_agent)
+            repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
+            for key, value in repair_stats.items():
+                totals[key] = totals.get(key, 0) + value
+
+            grouped_errors: list[str] = []
+            anchor_errors = self._anchor_validation_errors(parsed_opinion, review_context)
+            grouped_errors.extend(f"锚点校验：{error}" for error in anchor_errors)
+            if coverage_audit:
+                coverage_errors = self._coverage_audit_errors(parsed_opinion, base_context)
+                grouped_errors.extend(f"覆盖校验：{error}" for error in coverage_errors)
+            policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
+            grouped_errors.extend(f"路由约束：{error}" for error in policy_errors)
+
+            if not grouped_errors:
+                return parsed_opinion, raw_output, review_context, totals
+            if revision == max_revisions:
+                raise AgentOutputValidationError(
+                    "SubAgent output validation failed after deterministic repair: "
+                    + "; ".join(grouped_errors)
+                )
+
+            previous_opinion = parsed_opinion
+            parsed_opinion, raw_output = await self._revise_subagent_output(
+                sub_agent,
+                "输出未通过结构与锚点校验：\n- "
+                + "\n- ".join(grouped_errors)
+                + "\n请返回完整修正后的 JSON。保留原有正确问题；"
+                "无法唯一定位的锚点应重新选择直接包含缺陷的最小连续原文；"
+                "一个 issue 最多只能有一个 edit，多个批注位置必须拆成多个 issue。",
+                previous_opinion,
+            )
+
+        raise AssertionError("unreachable output validation state")
 
     async def _build_missing_text_review_notes(
         self,
@@ -972,7 +1009,7 @@ class OrchestratorAgent:
             "必须输出 issues_found，不得输出 compliant。\n"
             "- 若审查标准要求在触发后‘直接写明’或‘如无则写入’指定提示，且检索结果证明触发条件成立，"
             "必须按该标准输出 issue，不得再以风险较低、已有相关实体条款或一般完善建议为由跳过。\n\n"
-            "- 若当前标准只要求比较两处内容是否一致，任一侧为空白、模板变量或未填写时，不得在该一致性标准下输出 missing_value；"
+            "- 若当前标准只要求比较两处内容是否一致，任一侧为空白、模板变量或未填写时，不得在该一致性标准下输出字段缺失问题；"
             "只有两侧均为实际有效值且内容不一致时才能报告 inconsistency。\n\n"
             "- 输出前必须逐条检查字段长度：issue_comment 不得超过600个字符，anchor.comment_text 不得超过300个字符；"
             "需要说明多个事实时应保留核心缺陷和修改要求，不得用超长背景复述合同。\n\n"
@@ -1019,62 +1056,16 @@ class OrchestratorAgent:
             SubAgentOutput,
             SUB_AGENT_EXPECTED_JSON,
         )
-        review_context = self._review_evidence_context(context, sub_agent)
-        anchor_validation = self._validate_and_repair_anchors(parsed_opinion, review_context)
-        if coverage_audit:
-            for _ in range(2):
-                coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
-                if not coverage_errors:
-                    break
-                previous_opinion = parsed_opinion
-                parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
-                    sub_agent,
-                    "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
-                    + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
-                    previous_opinion,
-                )
-                review_context = self._review_evidence_context(context, sub_agent)
-                repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
-                for key, value in repair_stats.items():
-                    anchor_validation[key] = anchor_validation.get(key, 0) + value
-            else:
-                remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
-                if remaining_coverage_errors:
-                    raise AgentOutputValidationError(
-                        "SubAgent complete-region coverage audit failed: "
-                        + "; ".join(remaining_coverage_errors)
-                    )
-        review_context = self._review_evidence_context(context, sub_agent)
-        for _ in range(2):
-            policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
-            if not policy_errors:
-                break
-            previous_opinion = parsed_opinion
-            parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
+        parsed_opinion, sub_agent_opinion, review_context, anchor_validation = (
+            await self._validate_and_revise_output(
                 sub_agent,
-                "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
-                + "\n请返回完整修正后的 JSON，不得保留无双侧证据的对照问题。",
-                previous_opinion,
-            )
-            review_context = self._review_evidence_context(context, sub_agent)
-            repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
-            for key, value in repair_stats.items():
-                anchor_validation[key] = anchor_validation.get(key, 0) + value
-        else:
-            remaining_policy_errors = self._policy_output_errors(
                 parsed_opinion,
+                sub_agent_opinion,
                 criterion,
-                review_context,
+                context,
+                coverage_audit=coverage_audit,
             )
-            if remaining_policy_errors:
-                self._drop_incomplete_policy_issues(parsed_opinion, criterion, review_context)
-        if coverage_audit:
-            remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
-            if remaining_coverage_errors:
-                raise AgentOutputValidationError(
-                    "SubAgent complete-region coverage audit failed after output repair: "
-                    + "; ".join(remaining_coverage_errors)
-                )
+        )
 
         if self.logger:
             self.logger.log(
@@ -1177,57 +1168,17 @@ class OrchestratorAgent:
                         f"请根据以下质量审查反馈，补充和完善你的审查结果：\n\n{review.get('feedback', '')}",
                         previous_opinion,
                     )
-                    review_context = self._review_evidence_context(context, sub_agent)
-                    repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
-                    for key, value in repair_stats.items():
-                        anchor_validation[key] = anchor_validation.get(key, 0) + value
-                    if coverage_audit:
-                        coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
-                        if coverage_errors:
-                            previous_opinion = parsed_opinion
-                            parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
-                                sub_agent,
-                                "完整覆盖审计未通过：\n- " + "\n- ".join(coverage_errors)
-                                + "\n请返回完整修正后的JSON，不得遗漏原有正确问题。",
-                                previous_opinion,
-                            )
-                            review_context = self._review_evidence_context(context, sub_agent)
-                            repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
-                            for key, value in repair_stats.items():
-                                anchor_validation[key] = anchor_validation.get(key, 0) + value
-                            remaining_errors = self._coverage_audit_errors(parsed_opinion, context)
-                            if remaining_errors:
-                                raise AgentOutputValidationError(
-                                    "SubAgent complete-region coverage audit failed after reflection: "
-                                    + "; ".join(remaining_errors)
-                                )
-                    policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
-                    if policy_errors:
-                        previous_opinion = parsed_opinion
-                        parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
+                    parsed_opinion, sub_agent_opinion, review_context, anchor_validation = (
+                        await self._validate_and_revise_output(
                             sub_agent,
-                            "强制路由输出约束未通过：\n- " + "\n- ".join(policy_errors)
-                            + "\n请删除无法提供正文 edit 与附件 evidence 双侧证据的对照问题。",
-                            previous_opinion,
-                        )
-                        review_context = self._review_evidence_context(context, sub_agent)
-                        repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
-                        for key, value in repair_stats.items():
-                            anchor_validation[key] = anchor_validation.get(key, 0) + value
-                        remaining_policy_errors = self._policy_output_errors(
                             parsed_opinion,
+                            sub_agent_opinion,
                             criterion,
-                            review_context,
+                            context,
+                            coverage_audit=coverage_audit,
+                            anchor_validation=anchor_validation,
                         )
-                        if remaining_policy_errors:
-                            self._drop_incomplete_policy_issues(parsed_opinion, criterion, review_context)
-                    if coverage_audit:
-                        remaining_coverage_errors = self._coverage_audit_errors(parsed_opinion, context)
-                        if remaining_coverage_errors:
-                            raise AgentOutputValidationError(
-                                "SubAgent complete-region coverage audit failed after reflection repair: "
-                                + "; ".join(remaining_coverage_errors)
-                            )
+                    )
                     ledger.observe(parsed_opinion)
                 except (AgentOutputValidationError, ModelCallError) as exc:
                     parsed_opinion = previous_opinion
