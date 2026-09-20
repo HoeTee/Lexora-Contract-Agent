@@ -1,0 +1,1443 @@
+Package: bind9-dnsutils
+Source: bind9
+Version: 1:9.20.29-1~deb13u1
+Architecture: amd64
+Maintainer: Debian DNS Team <team+dns@tracker.debian.org>
+Installed-Size: 525
+Depends: bind9-host | host, bind9-libs (= 1:9.20.29-1~deb13u1), libc6 (>= 2.38), libedit2 (>= 2.11-20080614-0), libidn2-0 (>= 2.0.0), libjemalloc2 (>= 3.5.0), libkrb5-3 (>= 1.6.dfsg.2), libprotobuf-c1 (>= 1.0.0)
+Provides: dnsutils
+Filename: ./bind9-dnsutils_1%3a9.20.29-1~deb13u1_amd64.deb
+Size: 166948
+MD5sum: d01b57596c4d8a6a5eb5550c873c5d04
+SHA1: cfa5896fa09ec2e8abdb0665348b29fad0f7fef6
+SHA256: 8b65cffec2f183ccbd6d73ee7cac852ae70172493d23dc14defad2c54e3faab8
+Section: net
+Priority: standard
+Multi-Arch: foreign
+Homepage: https://www.isc.org/downloads/bind/
+Description: Clients provided with BIND 9
+ The Berkeley Internet Name Domain (BIND 9) implements an Internet domain
+ name server.  BIND 9 is the most widely-used name server software on the
+ Internet, and is supported by the Internet Software Consortium, www.isc.org.
+ .
+ This package delivers various client programs related to DNS that are
+ derived from the BIND 9 source tree.
+ .
+  - dig - query the DNS in various ways
+  - nslookup - the older way to do it
+  - nsupdate - perform dynamic updates (See RFC2136)
+
+Package: bind9-host
+Source: bind9
+Version: 1:9.20.29-1~deb13u1
+Architecture: amd64
+Maintainer: Debian DNS Team <team+dns@tracker.debian.org>
+Installed-Size: 141
+Depends: bind9-libs (= 1:9.20.29-1~deb13u1), libc6 (>= 2.38), libidn2-0 (>= 2.0.0)
+Breaks: bind-host (<< 1:9.13.6~)
+Replaces: bind-host (<< 1:9.13.6~)
+Provides: host
+Filename: ./bind9-host_1%3a9.20.29-1~deb13u1_amd64.deb
+Size: 56472
+MD5sum: e9e94219172f64666926b45d3f53c4d1
+SHA1: 15ce1087264f797c5d78a6a23beffe5d601ae27f
+SHA256: 80f7933cb9e699f5f67e569be28a80fc804fd89f599fce06da217ca4cc0fe7c8
+Section: net
+Priority: standard
+Multi-Arch: foreign
+Homepage: https://www.isc.org/downloads/bind/
+Description: DNS Lookup Utility
+ This package provides the 'host' DNS lookup utility in the form that
+ is bundled with the BIND 9 sources.
+
+Package: bind9-libs
+Source: bind9
+Version: 1:9.20.29-1~deb13u1
+Architecture: amd64
+Maintainer: Debian DNS Team <team+dns@tracker.debian.org>
+Installed-Size: 3657
+Depends: libc6 (>= 2.38), libfstrm0 (>= 0.2.0), libgssapi-krb5-2 (>= 1.17), libjemalloc2 (>= 4.0.0), libjson-c5 (>= 0.15), libkrb5-3 (>= 1.6.dfsg.2), liblmdb0 (>= 0.9.7), libmaxminddb0 (>= 1.3.0), libnghttp2-14 (>= 1.12.0), libprotobuf-c1 (>= 1.0.1), libssl3t64 (>= 3.4.0), liburcu8t64 (>= 0.13.0), libuv1t64 (>= 1.38.0), libxml2 (>= 2.7.4), zlib1g (>= 1:1.1.4)
+Breaks: bind-libs (<< 1:9.13.6~)
+Replaces: bind-libs (<< 1:9.13.6~)
+Filename: ./bind9-libs_1%3a9.20.29-1~deb13u1_amd64.deb
+Size: 1248392
+MD5sum: b7b902e4ad662ade7bda1536429f3df1
+SHA1: 346d2aa5b34432e369bac9dbdde7d1174f82c7e8
+SHA256: 9c28709dd3d9ca54cec00855b79fbd6e8181e8d062c024fe52aa4c03d2ed5cf4
+Section: libs
+Priority: standard
+Multi-Arch: same
+Homepage: https://www.isc.org/downloads/bind/
+Description: Shared Libraries used by BIND 9
+ The Berkeley Internet Name Domain (BIND 9) implements an Internet domain
+ name server.  BIND 9 is the most widely-used name server software on the
+ Internet, and is supported by the Internet Software Consortium, www.isc.org.
+ .
+ This package contains a bundle of shared libraries used by BIND 9.
+
+Package: curl
+Version: 8.14.1-2+deb13u5
+Architecture: amd64
+Maintainer: Debian Curl Maintainers <team+curl@tracker.debian.org>
+Installed-Size: 495
+Depends: libc6 (>= 2.34), libcurl4t64 (= 8.14.1-2+deb13u5), zlib1g (>= 1:1.1.4)
+Recommends: bash-completion
+Filename: ./curl_8.14.1-2+deb13u5_amd64.deb
+Size: 270064
+MD5sum: eccc40a5650e9ece7c0fcbb3fcf9f076
+SHA1: af74ff1df8e802af47a2db6465464b11b8cdb1f2
+SHA256: ebb7e0cbe30ad23bce0d28a848ccfeb9b73b82817eb4fe12fa20d2845f62dc73
+Section: web
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://curl.se/
+Description: command line tool for transferring data with URL syntax
+ curl is a command line tool for transferring data with URL syntax, supporting
+ DICT, FILE, FTP, FTPS, GOPHER, HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, POP3,
+ POP3S, RTMP, RTSP, SCP, SFTP, SMTP, SMTPS, TELNET and TFTP.
+ .
+ curl supports SSL certificates, HTTP POST, HTTP PUT, FTP uploading, HTTP form
+ based upload, proxies, cookies, user+password authentication (Basic, Digest,
+ NTLM, Negotiate, kerberos...), file transfer resume, proxy tunneling and a
+ busload of other useful tricks.
+
+Package: iproute2
+Version: 6.15.0-1
+Architecture: amd64
+Maintainer: Debian Kernel Team <debian-kernel@lists.debian.org>
+Installed-Size: 3774
+Depends: debconf (>= 0.5) | debconf-2.0, libbpf1 (>= 1:0.6.0), libc6 (>= 2.38), libcap2 (>= 1:2.10), libdb5.3t64, libelf1t64 (>= 0.131), libmnl0 (>= 1.0.3-4~), libselinux1 (>= 3.1~), libtirpc3t64 (>= 1.0.2), libxtables12 (>= 1.6.0+snapshot20161117), libcap2-bin
+Suggests: python3:any
+Conflicts: arpd
+Breaks: iproute2-doc
+Replaces: iproute2-doc
+Provides: arpd
+Filename: ./iproute2_6.15.0-1_amd64.deb
+Size: 1089184
+MD5sum: 76785a4d79f3b56d81988aef77ee6035
+SHA1: a1cd30144cc86fe22948a5d1798cf83df1482822
+SHA256: 7b2dcade4a83ded723fcab21c5a53c47f29352c9c5e1661a089a1e481b3fb48a
+Section: net
+Priority: important
+Multi-Arch: foreign
+Homepage: https://wiki.linuxfoundation.org/networking/iproute2
+Description: networking and traffic control tools
+ The iproute2 suite is a collection of utilities for networking and
+ traffic control.
+ .
+ These tools communicate with the Linux kernel via the (rt)netlink
+ interface, providing advanced features not available through the
+ legacy net-tools commands 'ifconfig' and 'route'.
+
+Package: iputils-ping
+Source: iputils
+Version: 3:20240905-3
+Architecture: amd64
+Maintainer: Noah Meyerhans <noahm@debian.org>
+Installed-Size: 187
+Depends: libc6 (>= 2.38), libcap2 (>= 1:2.10), libidn2-0 (>= 0.6)
+Recommends: linux-sysctl-defaults
+Provides: ping
+Filename: ./iputils-ping_3%3a20240905-3_amd64.deb
+Size: 51248
+MD5sum: 01696d672a1a8cfb1f833fad31f2ef26
+SHA1: 0d3c6b7145cafb895824363a0a21451786cb9311
+SHA256: a78f6118527796bde8c34d410dda1e5457f4e4e2de080a0b852cd59d7058ef6f
+Section: net
+Priority: important
+Multi-Arch: foreign
+Homepage: https://github.com/iputils/iputils/
+Description: Tools to test the reachability of network hosts
+ The ping command sends ICMP ECHO_REQUEST packets to a host in order to
+ test if the host is reachable via the network.
+ .
+ This package includes a ping6 utility which supports IPv6 network
+ connections.
+
+Package: less
+Version: 668-1
+Architecture: amd64
+Maintainer: Milan Kupcevic <milan@debian.org>
+Installed-Size: 376
+Depends: libc6 (>= 2.34), libtinfo6 (>= 6)
+Filename: ./less_668-1_amd64.deb
+Size: 161148
+MD5sum: 9dfb56e8f4802bc86c12394d6b916af2
+SHA1: cb7205e40eeac6264003de5dc4c466baff0ac0cb
+SHA256: ba3c216e68298a2d375d4e386baa935e245f0f23ddb74502b12582f8de061d4f
+Section: text
+Priority: important
+Multi-Arch: foreign
+Homepage: http://www.greenwoodsoftware.com/less/
+Description: pager program similar to more
+ This package provides "less", a file pager (that is, a memory-efficient
+ utility for displaying text one screenful at a time). Less has many
+ more features than the basic pager "more". As part of the GNU project,
+ it is widely regarded as the standard pager on UNIX-derived systems.
+ .
+ Also provided are "lessecho", a simple utility for ensuring arguments
+ with spaces are correctly quoted; "lesskey", a tool for modifying the
+ standard (vi-like) keybindings; and "lesspipe", a filter for specific
+ types of input, such as .doc or .txt.gz files.
+
+Package: libbpf1
+Source: libbpf (1.5.0-3)
+Version: 1:1.5.0-3
+Architecture: amd64
+Maintainer: Sudip Mukherjee <sudipm.mukherjee@gmail.com>
+Installed-Size: 452
+Depends: libc6 (>= 2.38), libelf1t64 (>= 0.144), zlib1g (>= 1:1.2.3.3)
+Filename: ./libbpf1_1%3a1.5.0-3_amd64.deb
+Size: 168832
+MD5sum: 3478aa891f2f2b051b2df5aee4d54693
+SHA1: 1892fdadd7b362260b6c6aa238dbd6b9ca528c4f
+SHA256: 04c96ead3024888d80d08c8d08cc8cf4589f4614627acc69519f87ffb5adc1c2
+Section: libs
+Priority: optional
+Multi-Arch: same
+Description: eBPF helper library (shared library)
+ libbpf is a library for loading eBPF programs and reading and
+ manipulating eBPF objects from user-space.
+ .
+ This package contains the shared library.
+
+Package: libbrotli1
+Source: brotli (1.1.0-2)
+Version: 1.1.0-2+b7
+Architecture: amd64
+Maintainer: Tomasz Buchert <tomasz@debian.org>
+Installed-Size: 870
+Depends: libc6 (>= 2.29)
+Filename: ./libbrotli1_1.1.0-2+b7_amd64.deb
+Size: 306624
+MD5sum: e268acc326140ae9f1731f335335fc8d
+SHA1: e5e9327d88edff7e03a5d9f9ab0c46c1d8c06536
+SHA256: 0fb79f88db210afbd69282ab9649e525f393ec6950ca34da1a6b359250b8d7db
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/google/brotli
+Description: library implementing brotli encoder and decoder (shared libraries)
+ Brotli is a generic-purpose lossless compression algorithm
+ that compresses data using a combination of a modern variant
+ of the LZ77 algorithm, Huffman coding and 2nd order context modeling,
+ with a compression ratio comparable to the best currently available
+ general-purpose compression methods. It is similar in speed with
+ deflate but offers more dense compression.
+ .
+ This package installs shared libraries.
+
+Package: libcap2
+Source: libcap2 (1:2.75-10+deb13u1)
+Version: 1:2.75-10+deb13u1+b3
+Architecture: amd64
+Maintainer: Christian Kastner <ckk@debian.org>
+Installed-Size: 92
+Depends: libc6 (>= 2.38)
+Filename: ./libcap2_1%3a2.75-10+deb13u1+b3_amd64.deb
+Size: 28988
+MD5sum: 8764a93629039e2357a3163c36de58e2
+SHA1: cab450ee6b2feeda0ae7073a03abbc719fc7d615
+SHA256: 89fc4d34fc7a28ad6f0fcd0c561ab253b9dedf6f77f5a000b47c276c8295bf67
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://sites.google.com/site/fullycapable/
+Description: POSIX 1003.1e capabilities (library)
+ Libcap implements the user-space interfaces to the POSIX 1003.1e capabilities
+ available in Linux kernels. These capabilities are a partitioning of the all
+ powerful root privilege into a set of distinct privileges.
+ .
+ This package contains the shared library.
+
+Package: libcap2-bin
+Source: libcap2 (1:2.75-10+deb13u1)
+Version: 1:2.75-10+deb13u1+b3
+Architecture: amd64
+Maintainer: Christian Kastner <ckk@debian.org>
+Installed-Size: 132
+Depends: libc6 (>= 2.38), libcap2 (>= 1:2.63)
+Recommends: libpam-cap
+Breaks: libcap-bin
+Replaces: libcap-bin
+Filename: ./libcap2-bin_1%3a2.75-10+deb13u1+b3_amd64.deb
+Size: 36456
+MD5sum: b9a02f269f64c920ff253a6313d3888e
+SHA1: 10111033e283a350b2f2340563612f68faed1b30
+SHA256: 6404b8ee315ce3eb8e273981650e419ff0e91aed5213d4975a6895f98944ea80
+Section: utils
+Priority: important
+Multi-Arch: foreign
+Homepage: https://sites.google.com/site/fullycapable/
+Description: POSIX 1003.1e capabilities (utilities)
+ Libcap implements the user-space interfaces to the POSIX 1003.1e capabilities
+ available in Linux kernels. These capabilities are a partitioning of the all
+ powerful root privilege into a set of distinct privileges.
+ .
+ This package contains additional utilities.
+
+Package: libcom-err2
+Source: e2fsprogs (1.47.2-3)
+Version: 1.47.2-3+b12
+Architecture: amd64
+Maintainer: Theodore Y. Ts'o <tytso@mit.edu>
+Installed-Size: 64
+Depends: libc6 (>= 2.38)
+Breaks: libcom-err2t64 (<< 1.47.0-2.4~exp1~), libcomerr2 (<< 1.43.9-1~)
+Replaces: libcom-err2t64, libcomerr2 (<< 1.43.9-1~)
+Provides: libcom-err2t64 (= 1.47.2-3+b12), libcomerr2 (= 1.47.2-3+b12)
+Filename: ./libcom-err2_1.47.2-3+b12_amd64.deb
+Size: 25036
+MD5sum: 273bb4a18c17c3ebc1eeda75cf1211fe
+SHA1: 0a08c25cbaba3fbe4faa800fdec8cdd0f05b4155
+SHA256: bd43e020b8fed399db3eebf098111f10fba4c436fff99ccad72cc7e27c9764ec
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://e2fsprogs.sourceforge.net
+Description: common error description library
+ libcomerr is an attempt to present a common error-handling mechanism to
+ manipulate the most common form of error code in a fashion that does not
+ have the problems identified with mechanisms commonly in use.
+
+Package: libcurl4t64
+Source: curl
+Version: 8.14.1-2+deb13u5
+Architecture: amd64
+Maintainer: Debian Curl Maintainers <team+curl@tracker.debian.org>
+Installed-Size: 1013
+Depends: libbrotli1 (>= 0.6.0), libc6 (>= 2.38), libgssapi-krb5-2 (>= 1.17), libidn2-0 (>= 2.0.0), libldap2 (>= 2.6.2), libnghttp2-14 (>= 1.50.0), libnghttp3-9 (>= 0.15.0), libpsl5t64 (>= 0.16.0), librtmp1 (>= 2.3), libssh2-1t64 (>= 1.11.1), libssl3t64 (>= 3.3.0), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.2.3.4)
+Recommends: ca-certificates
+Conflicts: libcurl3
+Breaks: libcurl4 (<< 8.14.1-2+deb13u5)
+Replaces: libcurl3, libcurl4
+Provides: libcurl4 (= 8.14.1-2+deb13u5)
+Filename: ./libcurl4t64_8.14.1-2+deb13u5_amd64.deb
+Size: 391492
+MD5sum: f4eafe0d0739cc44a3a387a7ab09eba1
+SHA1: df4648d677695dc4fab8714dc297bce2b8bb53d0
+SHA256: 0dedddfe614fc4a4335c9167b73c64a50136edd76b7991aa851408d0795163eb
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://curl.se/
+Description: easy-to-use client-side URL transfer library (OpenSSL flavour)
+ libcurl is an easy-to-use client-side URL transfer library, supporting DICT,
+ FILE, FTP, FTPS, GOPHER, HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, POP3, POP3S,
+ RTMP, RTSP, SCP, SFTP, SMTP, SMTPS, TELNET and TFTP.
+ .
+ libcurl supports SSL certificates, HTTP POST, HTTP PUT, FTP uploading, HTTP
+ form based upload, proxies, cookies, user+password authentication (Basic,
+ Digest, NTLM, Negotiate, Kerberos), file transfer resume, http proxy tunneling
+ and more!
+ .
+ libcurl is free, thread-safe, IPv6 compatible, feature rich, well supported,
+ fast, thoroughly documented and is already used by many known, big and
+ successful companies and numerous applications.
+ .
+ SSL support is provided by OpenSSL.
+
+Package: libedit2
+Source: libedit
+Version: 3.1-20250104-1
+Architecture: amd64
+Maintainer: LLVM Packaging Team <pkg-llvm-team@lists.alioth.debian.org>
+Installed-Size: 262
+Depends: libbsd0 (>= 0.1.3), libc6 (>= 2.38), libtinfo6 (>= 6)
+Replaces: libedit-dev (<< 3.1-20180525-2~)
+Filename: ./libedit2_3.1-20250104-1_amd64.deb
+Size: 93832
+MD5sum: fd7269ccbfb9da8080f776e1d96823c0
+SHA1: 03ef2da39167fb6105479d165caab156b3535297
+SHA256: b002ea172b9c1e34a67bc497c523c67bb74c3f0a4e98113cb083990a1f1d3bfe
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.thrysoee.dk/editline/
+Description: BSD editline and history libraries
+ Command line editor library provides generic line editing,
+ history, and tokenization functions.
+ .
+ It slightly resembles GNU readline.
+
+Package: libelf1t64
+Source: elfutils
+Version: 0.192-4
+Architecture: amd64
+Maintainer: Debian Elfutils Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 1228
+Depends: libc6 (>= 2.38), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4)
+Breaks: libelf1 (<< 0.192-4)
+Replaces: libelf1
+Provides: libelf1 (= 0.192-4)
+Filename: ./libelf1t64_0.192-4_amd64.deb
+Size: 189408
+MD5sum: 906aacb5a1d743e4945a8690fb5fd59b
+SHA1: cefbbeb41869ffacff621e1a31bf66617df50832
+SHA256: 94497b7e17b6f574a0605b380d454e20d3f01a9c63b70c2a2263f679d30053e1
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://sourceware.org/elfutils/
+Description: library to read and write ELF files
+ The libelf1t64 package provides a shared library which allows reading and
+ writing ELF files on a high level.  Third party programs depend on
+ this package to read internals of ELF files.  The programs of the
+ elfutils package use it also to generate new ELF files.
+ .
+ This library is part of elfutils.
+
+Package: libfstrm0
+Source: fstrm (0.6.1-1)
+Version: 0.6.1-1+b3
+Architecture: amd64
+Maintainer: Robert Edmonds <edmonds@debian.org>
+Installed-Size: 71
+Depends: libc6 (>= 2.38)
+Filename: ./libfstrm0_0.6.1-1+b3_amd64.deb
+Size: 21924
+MD5sum: b8ed388a6110681cb86e3e9de578af89
+SHA1: d1002bc76afa362ba57a90b885e0d3acf870794c
+SHA256: e3e4ceaaa408ce08214f3f9747a0cf6ede419cb789ca3966d8e7dcc9d1daf98e
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/farsightsec/fstrm
+Description: Frame Streams (fstrm) library
+ Frame Streams is a light weight, binary clean protocol that allows for the
+ transport of arbitrarily encoded data payload sequences with minimal framing
+ overhead -- just four bytes per data frame. Frame Streams does not specify an
+ encoding format for data frames and can be used with any data serialization
+ format that produces byte sequences, such as Protocol Buffers, XML, JSON,
+ MessagePack, YAML, etc. Frame Streams can be used as both a streaming
+ transport over a reliable byte stream socket (TCP sockets, TLS connections,
+ AF_UNIX sockets, etc.) for data in motion as well as a file format for data
+ at rest. A "Content Type" header identifies the type of payload being carried
+ over an individual Frame Stream and allows cooperating programs to determine
+ how to interpret a given sequence of data payloads.
+ .
+ This is the "fstrm" implementation of Frame Streams in C.
+ .
+ This package contains the shared library.
+
+Package: libgnutls30t64
+Source: gnutls28
+Version: 3.8.9-3+deb13u4
+Architecture: amd64
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Installed-Size: 3504
+Depends: libc6 (>= 2.38), libgmp10 (>= 2:6.3.0+dfsg), libhogweed6t64 (>= 3.10), libidn2-0 (>= 2.0.0), libnettle8t64 (>= 3.10), libp11-kit0 (>= 0.25.1), libtasn1-6 (>= 4.14), libunistring5 (>= 1.1)
+Suggests: gnutls-bin
+Breaks: libgnutls30 (<< 3.8.9-3+deb13u4)
+Replaces: libgnutls30
+Provides: libgnutls30 (= 3.8.9-3+deb13u4)
+Filename: ./libgnutls30t64_3.8.9-3+deb13u4_amd64.deb
+Size: 1469024
+MD5sum: ce391a9ff4974eba985481ee3eaf34a5
+SHA1: 72f4c6cf757e4af0acf000271eec501c06f7a97d
+SHA256: 18a8bdfd91c7e3bcb01719d55a2b56849c7160b34f1f52b1c4fdfdd41bf1352b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnutls.org/
+Description: GNU TLS library - main runtime library
+ GnuTLS is a portable library which implements the Transport Layer
+ Security (TLS 1.0, 1.1, 1.2, 1.3) and Datagram
+ Transport Layer Security (DTLS 1.0, 1.2) protocols.
+ .
+ GnuTLS features support for:
+  - certificate path validation, as well as DANE and trust on first use.
+  - the Online Certificate Status Protocol (OCSP).
+  - public key methods, including RSA and Elliptic curves, as well as password
+    and key authentication methods such as SRP and PSK protocols.
+  - all the strong encryption algorithms, including AES and Camellia.
+  - CPU-assisted cryptography with VIA padlock and AES-NI instruction sets.
+  - HSMs and cryptographic tokens, via PKCS #11.
+ .
+ This package contains the main runtime library.
+
+Package: libgpm2
+Source: gpm (1.20.7-11)
+Version: 1.20.7-11+b2
+Architecture: amd64
+Maintainer: Axel Beckert <abe@debian.org>
+Installed-Size: 45
+Depends: libc6 (>= 2.38)
+Suggests: gpm
+Filename: ./libgpm2_1.20.7-11+b2_amd64.deb
+Size: 14376
+MD5sum: 981c96706e9fbf68f38d70e19f4f2013
+SHA1: 2de18c4c0c1800dfb0de915f9d94c7f2e11b4f6f
+SHA256: c8779444e5bb8df39c8bce3ef7dd3d662686a9ab770dcc96bb0f4aeb2077a67c
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://nico.schottelius.org/software/gpm/
+Description: General Purpose Mouse - shared library
+ This package provides a library that handles mouse requests
+ and delivers them to applications. See the description for the 'gpm'
+ package for more information.
+
+Package: libgssapi-krb5-2
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 434
+Depends: libkrb5-3 (= 1.21.3-5+deb13u1), libc6 (>= 2.38), libcom-err2 (>= 1.43.9), libk5crypto3 (>= 1.20), libkrb5support0 (= 1.21.3-5+deb13u1)
+Suggests: krb5-doc, krb5-user
+Filename: ./libgssapi-krb5-2_1.21.3-5+deb13u1_amd64.deb
+Size: 138356
+MD5sum: 9d93b5d1adb11eec662012c1b7dcd33b
+SHA1: ddecd0f8bcc988780e6e7811c9c25e68e776b386
+SHA256: 30847c1fde4240567d7ed3aeab4f655dd591203758b857e85e824045aae70299
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries - krb5 GSS-API Mechanism
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains the runtime library for the MIT Kerberos
+ implementation of GSS-API used by applications and Kerberos clients.
+
+Package: libidn2-0
+Source: libidn2
+Version: 2.3.8-2
+Architecture: amd64
+Maintainer: Debian Libidn team <help-libidn@gnu.org>
+Installed-Size: 446
+Depends: libc6 (>= 2.14), libunistring5 (>= 1.1)
+Filename: ./libidn2-0_2.3.8-2_amd64.deb
+Size: 109096
+MD5sum: c12f652b328832486b6992d355e52c29
+SHA1: 3c7a11b95bf17674f57763834134ebd4214f87ff
+SHA256: 90b039bcdc4578f8e1c4935adf8dbb525e36a164deefdbbb8c45bac347d48278
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libidn/#libidn2
+Description: Internationalized domain names (IDNA2008/TR46) library
+ Libidn2 implements the revised algorithm for internationalized domain
+ names called IDNA2008/TR46.
+ .
+ This package contains runtime libraries.
+
+Package: libjemalloc2
+Source: jemalloc
+Version: 5.3.0-3
+Architecture: amd64
+Maintainer: Faidon Liambotis <paravoid@debian.org>
+Installed-Size: 876
+Depends: libc6 (>= 2.34), libgcc-s1 (>= 3.3), libstdc++6 (>= 4.4)
+Filename: ./libjemalloc2_5.3.0-3_amd64.deb
+Size: 274324
+MD5sum: ad0341c496ae6206c0504cec3e0db7d9
+SHA1: 6bea3e5f2ebd627cda5810b77ff408c9a2e0c08b
+SHA256: e7d64919e620e8ea46960104efe1e9c977d751e5b610a5d89b0b51aeae9530d7
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://jemalloc.net/
+Description: general-purpose scalable concurrent malloc(3) implementation
+ A library providing a malloc(3) implementation for multi-threaded processes on
+ multi-processor systems.
+ .
+ Notable features are reduced lock contention, predictable low fragmentation,
+ and introspection with heap profiling.
+
+Package: libjson-c5
+Source: json-c
+Version: 0.18+ds-1
+Architecture: amd64
+Maintainer: Nicolas Mora <babelouest@debian.org>
+Installed-Size: 112
+Depends: libc6 (>= 2.38)
+Filename: ./libjson-c5_0.18+ds-1_amd64.deb
+Size: 45956
+MD5sum: 2afaa0abf1f11e7f2d5aa1e789148632
+SHA1: 748b3f2033851aab07d1501f91a7ce3d1e87bc75
+SHA256: 4fbd5fb4d54c626f05d68abf38a31533fbf1bf4a87068696abe041ee9c974fe0
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/json-c/json-c/wiki
+Description: JSON manipulation library - shared library
+ This library allows you to easily construct JSON objects in C,
+ output them as JSON formatted strings and parse JSON formatted
+ strings back into the C representation of JSON objects.
+
+Package: libk5crypto3
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 266
+Depends: libc6 (>= 2.38), libkrb5support0 (= 1.21.3-5+deb13u1)
+Suggests: krb5-doc, krb5-user
+Breaks: libgssapi-krb5-2 (<= 1.18~), libkrb5-3 (<= 1.18~)
+Filename: ./libk5crypto3_1.21.3-5+deb13u1_amd64.deb
+Size: 81152
+MD5sum: 96cdff8aed6de85e2ac31dc1513207ba
+SHA1: 59b80ae0af88c085973d19dd8e321815455e70e6
+SHA256: 7da07ee674b47f1f0be7cc89317c25310086a1f1761217d0f72e6ae2c5a69b84
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries - Crypto Library
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains the runtime cryptography libraries used by
+ applications and Kerberos clients.
+
+Package: libkeyutils1
+Source: keyutils
+Version: 1.6.3-6
+Architecture: amd64
+Maintainer: Christian Kastner <ckk@debian.org>
+Installed-Size: 41
+Depends: libc6 (>= 2.14)
+Filename: ./libkeyutils1_1.6.3-6_amd64.deb
+Size: 9456
+MD5sum: d94a241f2f7ab7edf5b6fb049fde8380
+SHA1: 510fbc305d8dc86f0279c13f77fa06c4c1a6c75f
+SHA256: 0b11ad17be0300b63ad4eeb4c6450fed24d34b7b740f23e5363dcb29ee6d5eba
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://git.kernel.org/pub/scm/linux/kernel/git/dhowells/keyutils.git
+Description: Linux Key Management Utilities (library)
+ Keyutils is a set of utilities for managing the key retention facility in the
+ kernel, which can be used by filesystems, block devices and more to gain and
+ retain the authorization and encryption keys required to perform secure
+ operations.
+ .
+ This package provides a wrapper library for the key management facility system
+ calls.
+
+Package: libkrb5-3
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 1074
+Depends: libkrb5support0 (= 1.21.3-5+deb13u1), libc6 (>= 2.38), libcom-err2 (>= 1.43.9), libk5crypto3 (>= 1.20), libkeyutils1 (>= 1.5.9), libssl3t64 (>= 3.0.0)
+Recommends: krb5-locales
+Suggests: krb5-doc, krb5-user
+Breaks: libapache2-mod-auth-kerb (<= 5.4-2.4)
+Filename: ./libkrb5-3_1.21.3-5+deb13u1_amd64.deb
+Size: 326056
+MD5sum: c79f19d86512fadcbff5efa5317c23fb
+SHA1: 53d94056269d541890f7e1bc61b4face03061af6
+SHA256: 47d71d6a7f2e59b9bae5f89602397594805113b95889ad18fa703cd53abafc97
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains the runtime library for the main Kerberos v5 API
+ used by applications and Kerberos clients.
+
+Package: libkrb5support0
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 137
+Depends: libc6 (>= 2.38)
+Breaks: krb5-admin-server (<< 1.20.1-4~), krb5-kdc (<< 1.20.1-4~), krb5-pkinit (<< 1.20.1-4~), krb5-user (<< 1.20.1-4~), libgssapi-krb5-2 (<< 1.20), libk5crypto3 (<< 1.20.1-4~), libkadm5clnt-mit9 (<< 1.13~alpha1-1), libkadm5srv-mit12 (<< 1.20.1-4~), libkadm5srv-mit9 (<< 1.13~alpha1-1), libkdb5-10t64 (<< 1.20.1-4~), libkdb5-8 (<< 1.16), libkrb5-3 (<< 1.20.1-4~)
+Filename: ./libkrb5support0_1.21.3-5+deb13u1_amd64.deb
+Size: 33124
+MD5sum: 20061bfd85a525d45bdce33e5300c43c
+SHA1: fdcbf424c12036172b67ed2d13d14fa441fb3736
+SHA256: 3a0acd8b37955c0e102c756b52c97df2a31f67b96453c35dab70df218d309117
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries - Support library
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains an internal runtime support library used by other
+ Kerberos libraries.
+
+Package: libldap2
+Source: openldap
+Version: 2.6.10+dfsg-1
+Architecture: amd64
+Maintainer: Debian OpenLDAP Maintainers <pkg-openldap-devel@lists.alioth.debian.org>
+Installed-Size: 576
+Depends: libc6 (>= 2.38), libsasl2-2 (>= 2.1.28+dfsg1), libssl3t64 (>= 3.0.0)
+Recommends: libldap-common
+Filename: ./libldap2_2.6.10+dfsg-1_amd64.deb
+Size: 193576
+MD5sum: fdbf173c3f3056406044b3dedc2c1617
+SHA1: 156554a5a8064d450c2103819c5e1901f2482ef9
+SHA256: 60069e4a550ca890113fa89d3001417781b18e146ec5d637d31e368dec9909bd
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.openldap.org/
+Description: OpenLDAP libraries
+ These are the run-time libraries for the OpenLDAP (Lightweight Directory
+ Access Protocol) servers and clients.
+
+Package: liblmdb0
+Source: lmdb (0.9.31-1)
+Version: 0.9.31-1+b2
+Architecture: amd64
+Maintainer: LMDB <lmdb@packages.debian.org>
+Installed-Size: 104
+Depends: libc6 (>= 2.38)
+Filename: ./liblmdb0_0.9.31-1+b2_amd64.deb
+Size: 45240
+MD5sum: c4af445b63602ed6954e903360fc0b46
+SHA1: c8ddc374df56365e03e51c9eadf4972d4c03d2d1
+SHA256: 97636442b412a6dff51d23ba74f0cdc12ac1edece661a16c43cba294a98cf543
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://symas.com/mdb/
+Description: Lightning Memory-Mapped Database shared library
+ This package contains the LMDB shared library.
+ .
+ Lighting Memory-Mapped Database (LMDB) is an ultra-fast, ultra-compact
+ key-value embedded data store developed for the OpenLDAP Project.  It uses
+ memory-mapped files, so it has the read performance of a pure in-memory
+ database while still offering the persistence of standard disk-based
+ databases, and is only limited to the size of the virtual address space, (it
+ is not limited to the size of physical RAM).
+
+Package: libmaxminddb0
+Source: libmaxminddb
+Version: 1.12.2-1
+Architecture: amd64
+Maintainer: Faidon Liambotis <paravoid@debian.org>
+Installed-Size: 57
+Depends: libc6 (>= 2.33)
+Suggests: mmdb-bin
+Filename: ./libmaxminddb0_1.12.2-1_amd64.deb
+Size: 25800
+MD5sum: 47176d695451042d289a95302b0ffc78
+SHA1: a93d64e5c0dfd8a16cf9ca8bf6f32642ddf26c06
+SHA256: 025e1acec95ff56c44c0cb21c4c5fc42eeae323c263900729931ea5a1b95bc21
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://maxmind.github.io/libmaxminddb/
+Description: IP geolocation database library
+ The libmaxminddb library provides a C library for reading MaxMind DB files,
+ including the GeoIP2 databases from MaxMind. This is a custom binary format
+ designed to facilitate fast lookups of IP addresses while allowing for great
+ flexibility in the type of data associated with an address.
+ .
+ The MaxMind DB format is an open format. The spec is available at
+ https://maxmind.github.io/MaxMind-DB/. This spec is licensed under the Creative
+ Commons Attribution-ShareAlike 3.0 Unported License.
+
+Package: libmnl0
+Source: libmnl
+Version: 1.0.5-3
+Architecture: amd64
+Maintainer: Debian Netfilter Packaging Team <pkg-netfilter-team@lists.alioth.debian.org>
+Installed-Size: 45
+Depends: libc6 (>= 2.14)
+Filename: ./libmnl0_1.0.5-3_amd64.deb
+Size: 11928
+MD5sum: 7e77017e08e0d3ca64e080b125620089
+SHA1: 6ba7c9fde78a65f23c3c430e2d6c946bb757d73f
+SHA256: 4ec9c1096e0b954e3bdb03a62314ee7f49999045d3d55be3e4ded520ffc9baf5
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://netfilter.org/projects/libmnl/
+Description: minimalistic Netlink communication library
+ libmnl is a minimalistic user-space library oriented to Netlink developers.
+ There are a lot of common tasks in parsing, validating, constructing of
+ both the Netlink header and TLVs that are repetitive and easy to get wrong.
+ This library aims to provide simple helpers that allows you to re-use code
+ and to avoid re-inventing the wheel.
+ .
+ The main features of this library are:
+ .
+ Small: the shared library requires around 30KB for an x86-based computer.
+ .
+ Simple: this library avoids complexity and elaborated abstractions that
+ tend to hide Netlink details.
+ .
+ Easy to use: the library simplifies the work for Netlink-wise developers.
+ It provides functions to make socket handling, message building,
+ validating, parsing and sequence tracking, easier.
+ .
+ Easy to re-use: you can use the library to build your own abstraction
+ layer on top of this library.
+ .
+ Decoupling: the interdependency of the main bricks that compose the
+ library is reduced, i.e. the library provides many helpers, but the
+ programmer is not forced to use them.
+ .
+ This package contains the shared libraries needed to run programs that use
+ the minimalistic Netlink communication library.
+
+Package: libnghttp2-14
+Source: nghttp2
+Version: 1.64.0-1.1+deb13u1
+Architecture: amd64
+Maintainer: Tomasz Buchert <tomasz@debian.org>
+Installed-Size: 229
+Depends: libc6 (>= 2.17)
+Filename: ./libnghttp2-14_1.64.0-1.1+deb13u1_amd64.deb
+Size: 76188
+MD5sum: 3650643a734bbd58529afd0493d181b2
+SHA1: 5e221d7a3f04f19acb50ae187d26aa7bbcf0d924
+SHA256: 896cb217537c09251fb909b8541349010ac279d802d871e98c06a62a2c67ce2c
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://nghttp2.org/
+Description: library implementing HTTP/2 protocol (shared library)
+ This is an implementation of the Hypertext Transfer Protocol version
+ 2 in C. The framing layer of HTTP/2 is implemented as a reusable C
+ library.
+ .
+ This package installs a shared library.
+
+Package: libnghttp3-9
+Source: nghttp3
+Version: 1.8.0-1
+Architecture: amd64
+Maintainer: Debian Curl Maintainers <team+curl@tracker.debian.org>
+Installed-Size: 201
+Depends: libc6 (>= 2.14)
+Filename: ./libnghttp3-9_1.8.0-1_amd64.deb
+Size: 67656
+MD5sum: 6b1f90e4153530a76878e9fde0244c66
+SHA1: ec2a18da55b53e48472fc88c9893b0c574d4fc3b
+SHA256: 388e4c33b72829cbf0d098afdc8539fa5ba7458eddb077f5538fdb4d5538716b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/ngtcp2/nghttp3
+Description: HTTP/3 library with QUIC and QPACK (library)
+ nghttp3 implements HTTP/3 functions in C. For now it supports several
+ HTTP actions like request, response and server push.
+ .
+ This package contains the shared library.
+
+Package: libp11-kit0
+Source: p11-kit
+Version: 0.25.5-3
+Architecture: amd64
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Installed-Size: 1882
+Depends: libc6 (>= 2.38), libffi8 (>= 3.4)
+Filename: ./libp11-kit0_0.25.5-3_amd64.deb
+Size: 425240
+MD5sum: d27fc7a8b7a7baac77b087b96d69d143
+SHA1: b04bc908531c41504c4197e2e1dc4fca6e820b4e
+SHA256: 784bf2063e166c8bc851a32623b74ebd85c499043a9d57c5bbd64fa63447f45a
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://p11-glue.github.io/p11-glue/p11-kit.html
+Description: library for loading and coordinating access to PKCS#11 modules - runtime
+ The p11-kit library provides a way to load and enumerate Public-Key
+ Cryptography Standard #11 modules, along with a standard configuration
+ setup for installing PKCS#11 modules so that they're discoverable. It
+ also solves problems with coordinating the use of PKCS#11 by different
+ components or libraries living in the same process.
+ .
+ This package contains the shared library required for applications loading
+ and accessing PKCS#11 modules.
+
+Package: libproc2-0
+Source: procps
+Version: 2:4.0.4-9
+Architecture: amd64
+Maintainer: Craig Small <csmall@debian.org>
+Installed-Size: 237
+Depends: libc6 (>= 2.38), libsystemd0
+Replaces: procps (<< 1:3.3.2-1)
+Filename: ./libproc2-0_2%3a4.0.4-9_amd64.deb
+Size: 65596
+MD5sum: c446e0ae1fbcab149c5b386d3a680e79
+SHA1: 023abaa2f21ffba84247a595f46ccfd057547582
+SHA256: c9d61caab1b2ddfc3f17edb95be31b9809fcb2daf27d853dff615bc4ebd08b4b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://gitlab.com/procps-ng/procps
+Description: library for accessing process information from /proc
+ The libproc2 library is a way of accessing information out of the /proc
+ filesystem.
+ .
+ This package contains the shared libraries necessary to run programs
+ compiled with libproc2.
+
+Package: libprotobuf-c1
+Source: protobuf-c
+Version: 1.5.1-1
+Architecture: amd64
+Maintainer: Robert Edmonds <edmonds@debian.org>
+Installed-Size: 62
+Depends: libc6 (>= 2.14)
+Filename: ./libprotobuf-c1_1.5.1-1_amd64.deb
+Size: 20536
+MD5sum: ed43e30035030e79da9b324cb68d9f8d
+SHA1: ae501f403a1ea199ebefa554a126b63bfab4dee5
+SHA256: 9fa7e6932f620c7155aab365ed277f04cae3e04ac80ee048fb09d1e838738d14
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/protobuf-c/protobuf-c
+Description: Protocol Buffers C shared library (protobuf-c)
+ Protocol Buffers are a flexible, efficient, automated mechanism for
+ serializing structured data - similar to XML, but smaller, faster, and
+ simpler. You define how you want your data to be structured once, then you can
+ use special generated source code to easily write and read your structured
+ data to and from a variety of data streams and using a variety of languages.
+ You can even update your data structure without breaking deployed programs
+ that are compiled against the "old" format.
+ .
+ This is the "protobuf-c" implementation of Protocol Buffers in C.
+ .
+ This package contains the shared library.
+
+Package: libpsl5t64
+Source: libpsl (0.21.2-1.1)
+Version: 0.21.2-1.1+b1
+Architecture: amd64
+Maintainer: Tim Rühsen <tim.ruehsen@gmx.de>
+Installed-Size: 100
+Depends: libidn2-0 (>= 0.16), libc6 (>= 2.33), libunistring5 (>= 1.1)
+Recommends: publicsuffix (>= 20150507)
+Breaks: libpsl5 (<< 0.21.2-1.1)
+Replaces: libpsl5
+Provides: libpsl5 (= 0.21.2-1.1+b1)
+Filename: ./libpsl5t64_0.21.2-1.1+b1_amd64.deb
+Size: 57188
+MD5sum: 09aa06d971ce5ff6d02b452c0e1f15f9
+SHA1: 721d9692ffd65ded56bf4de880f199ec188aa04f
+SHA256: 59d42bb1f9ebc0d1776fe616efb08a7a8568b05982e00f70b03c63863db768ab
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/rockdaboot/libpsl
+Description: Library for Public Suffix List (shared libraries)
+ Libpsl allows checking domains against the Public Suffix List.
+ It can be used to avoid privacy-leaking 'super-cookies',
+ 'super domain' certificates, for domain highlighting purposes
+ sorting domain lists by site and more.
+ .
+ Please see https://publicsuffix.org for more detailed information.
+ .
+ This package contains runtime libraries.
+
+Package: librtmp1
+Source: rtmpdump (2.4+20151223.gitfa8646d.1-2)
+Version: 2.4+20151223.gitfa8646d.1-2+b5
+Architecture: amd64
+Maintainer: Debian Multimedia Maintainers <debian-multimedia@lists.debian.org>
+Installed-Size: 144
+Depends: libc6 (>= 2.34), libgmp10 (>= 2:6.3.0+dfsg), libgnutls30t64 (>= 3.8.1), libhogweed6t64, libnettle8t64, zlib1g (>= 1:1.1.4)
+Filename: ./librtmp1_2.4+20151223.gitfa8646d.1-2+b5_amd64.deb
+Size: 58840
+MD5sum: 355aeaaf937d70dcc873a458f6244c6e
+SHA1: 890c75ffd3bd595233728f775acfa20693e53810
+SHA256: 93baa2004cbe6c8721b9e81beed078612540aef120970b4751305c51c6697368
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://rtmpdump.mplayerhq.hu/
+Description: toolkit for RTMP streams (shared library)
+ A small dumper for media content streamed over the RTMP protocol (like BBC's
+ iPlayer high quality streams). Supplying an RTMP URL will result in a dumped
+ flv file, which can be played/transcoded with standard tools.
+ .
+ This package contains the shared libraries, header files needed by
+ programs that want to use librtmp.
+
+Package: libsasl2-2
+Source: cyrus-sasl2
+Version: 2.1.28+dfsg1-9
+Architecture: amd64
+Maintainer: Debian Cyrus Team <team+cyrus@tracker.debian.org>
+Installed-Size: 156
+Depends: libsasl2-modules-db (>= 2.1.28+dfsg1-9), libc6 (>= 2.38), libssl3t64 (>= 3.0.0)
+Recommends: libsasl2-modules (>= 2.1.28+dfsg1-9)
+Replaces: libsasl2
+Filename: ./libsasl2-2_2.1.28+dfsg1-9_amd64.deb
+Size: 57512
+MD5sum: 35ad5deb812b880a16b7ae25bbfcc6b9
+SHA1: d33dd3ff8f88f8ae9a84bad1df925ea1b2ea0904
+SHA256: 66e49d7ae026811b49a0050f18b0325960a2625ffd1ff60d91b7844a815fa9d2
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.cyrusimap.org/sasl/
+Description: Cyrus SASL - authentication abstraction library
+ This is the Cyrus SASL API implementation, version 2.1.
+ .
+ SASL is the Simple Authentication and Security Layer, a method for
+ adding authentication support to connection-based protocols. To use
+ SASL, a protocol includes a command for identifying and
+ authenticating a user to a server and for optionally negotiating
+ protection of subsequent protocol interactions. If its use is
+ negotiated, a security layer is inserted between the protocol and the
+ connection. See RFC 2222 for more information.
+ .
+ Any of: ANONYMOUS, SCRAM, CRAM-MD5, DIGEST-MD5, GSSAPI (MIT or Heimdal
+ Kerberos 5), NTLM, OTP, PLAIN, or LOGIN can be used.
+
+Package: libsasl2-modules-db
+Source: cyrus-sasl2
+Version: 2.1.28+dfsg1-9
+Architecture: amd64
+Maintainer: Debian Cyrus Team <team+cyrus@tracker.debian.org>
+Installed-Size: 70
+Depends: libc6 (>= 2.14), libdb5.3t64
+Filename: ./libsasl2-modules-db_2.1.28+dfsg1-9_amd64.deb
+Size: 19768
+MD5sum: 697b55318a5683646f3f4c637576f3f3
+SHA1: 8c66ab6412351683261d50959984811c0480087b
+SHA256: a5c38659fbd62c33c6d9bfa2be43e75a572d1818531aad32dd74d0a58cc4bd19
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.cyrusimap.org/sasl/
+Description: Cyrus SASL - pluggable authentication modules (DB)
+ This is the Cyrus SASL API implementation, version 2.1. See package
+ libsasl2-2 and RFC 2222 for more information.
+ .
+ This package provides the DB plugin, which supports Berkeley DB lookups.
+
+Package: libsodium23
+Source: libsodium
+Version: 1.0.18-1+deb13u1
+Architecture: amd64
+Maintainer: Laszlo Boszormenyi (GCS) <gcs@debian.org>
+Installed-Size: 431
+Depends: libc6 (>= 2.34)
+Filename: ./libsodium23_1.0.18-1+deb13u1_amd64.deb
+Size: 165028
+MD5sum: ffe701bd7c1b211e688db5d340f91304
+SHA1: 55d9aee0bcd4a96e802ce3bd33f87f981b1b34d4
+SHA256: 9ff9d97bb7ce3aee7f6e6ec3a785cdbe237454a7b9fd84728121bc4ef2bebebe
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.libsodium.org/
+Description: Network communication, cryptography and signaturing library
+ NaCl (pronounced "salt") is a new easy-to-use high-speed software library for
+ network communication, encryption, decryption, signatures, etc.
+ .
+ NaCl's goal is to provide all of the core operations needed to build
+ higher-level cryptographic tools.
+ .
+ Sodium is a portable, cross-compilable, installable, packageable fork of NaCl,
+ with a compatible API.
+
+Package: libssh2-1t64
+Source: libssh2
+Version: 1.11.1-1+deb13u2
+Architecture: amd64
+Maintainer: Nicolas Mora <babelouest@debian.org>
+Installed-Size: 441
+Depends: libc6 (>= 2.25), libssl3t64 (>= 3.0.0), zlib1g (>= 1:1.1.4)
+Breaks: libssh2-1 (<< 1.11.1-1+deb13u2)
+Replaces: libssh2-1
+Provides: libssh2-1 (= 1.11.1-1+deb13u2)
+Filename: ./libssh2-1t64_1.11.1-1+deb13u2_amd64.deb
+Size: 245240
+MD5sum: be952cf8c3cec0f7f280602d4ed8650a
+SHA1: 4bad10a74dc7fc97d2b5a01d0528ea60a22b39de
+SHA256: dbb1024c192d4d292b7cfa902b96076cfe81b56a5eed4fb28da36e8bf543e49a
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://libssh2.org/
+Description: SSH2 client-side library
+ libssh2 is a client-side C library implementing the SSH2 protocol.
+ It supports regular terminal, SCP and SFTP (v1-v5) sessions;
+ port forwarding, X11 forwarding; password, key-based and
+ keyboard-interactive authentication.
+ .
+ This package contains the runtime library.
+
+Package: libtasn1-6
+Version: 4.20.0-2+deb13u1
+Architecture: amd64
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Installed-Size: 122
+Depends: libc6 (>= 2.38)
+Filename: ./libtasn1-6_4.20.0-2+deb13u1_amd64.deb
+Size: 50112
+MD5sum: 0dee8d137e0d8bbc8a57e721c13a5f66
+SHA1: 16154349d857a93b3e689959b9cb2e72886edeb4
+SHA256: 23fec6e06583ce2bad9b2c04c9b485e90440e259b1abf8677cd80d3ce60831ad
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libtasn1/
+Description: Manage ASN.1 structures (runtime)
+ Manage ASN1 (Abstract Syntax Notation One) structures.
+ The main features of this library are:
+   * on-line ASN1 structure management that doesn't require any C code
+     file generation.
+   * off-line ASN1 structure management with C code file generation
+     containing an array.
+   * DER (Distinguish Encoding Rules) encoding
+   * no limits for INTEGER and ENUMERATED values
+ .
+ This package contains runtime libraries.
+
+Package: libtirpc-common
+Source: libtirpc
+Version: 1.3.6+ds-1
+Architecture: all
+Maintainer: Josue Ortega <josue@debian.org>
+Installed-Size: 32
+Breaks: libtirpc1, libtirpc3t64 (<< 1.1.4-0.1~)
+Replaces: libtirpc1, libtirpc3t64 (<< 1.1.4-0.1~)
+Filename: ./libtirpc-common_1.3.6+ds-1_all.deb
+Size: 11004
+MD5sum: d536fb98a02d3d13a7b1a29e3a038131
+SHA1: 703a8577b17b52095c1af5c01842e1b18e7aedb5
+SHA256: 300f582e2c9151a8d329568c705cadc76252c417147312fe331c4560d2c7a6c3
+Section: libs
+Priority: optional
+Multi-Arch: foreign
+Homepage: http://sourceforge.net/projects/libtirpc
+Description: transport-independent RPC library - common files
+ This package contains a port of Sun's transport-independent RPC library to
+ Linux. The library is intended as a replacement for the RPC code in the GNU C
+ library, providing among others support for RPC (and in turn, NFS) over IPv6.
+ .
+ This package contains the netconfig configuration file as well as the
+ associated manpage.
+
+Package: libtirpc3t64
+Source: libtirpc
+Version: 1.3.6+ds-1
+Architecture: amd64
+Maintainer: Josue Ortega <josue@debian.org>
+Installed-Size: 236
+Depends: libc6 (>= 2.38), libgssapi-krb5-2 (>= 1.17), libtirpc-common (>= 1.3.6+ds-1)
+Breaks: libtirpc3 (<< 1.3.6+ds-1), nfs-common (<< 1:1.2.8-7), nfs-kernel-server (<< 1:1.2.8-7)
+Replaces: libtirpc3
+Provides: libtirpc3 (= 1.3.6+ds-1)
+Filename: ./libtirpc3t64_1.3.6+ds-1_amd64.deb
+Size: 83300
+MD5sum: a53fcff1f56e64fb19db15eb07756ddd
+SHA1: 3382fc0968af380b8966d46342738234478b4c95
+SHA256: ef4536c09bf5063554310e22d586ae90990100ba66d2fe7c35660e9e658913b6
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://sourceforge.net/projects/libtirpc
+Description: transport-independent RPC library
+ This package contains a port of Sun's transport-independent RPC library to
+ Linux. The library is intended as a replacement for the RPC code in the GNU C
+ library, providing among others support for RPC (and in turn, NFS) over IPv6.
+
+Package: libunistring5
+Source: libunistring
+Version: 1.3-2
+Architecture: amd64
+Maintainer: Jörg Frings-Fürst <debian@jff.email>
+Installed-Size: 2092
+Depends: libc6 (>= 2.34)
+Filename: ./libunistring5_1.3-2_amd64.deb
+Size: 476768
+MD5sum: 954d362e7a674be8969e0c223782de72
+SHA1: 49e3032a7bb85c144d013d237eb8022e499a640c
+SHA256: 6dd3490bef06ea1096f32d10766b7e016cf579bfae8451d1b7df15ce05b8aa46
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libunistring/
+Description: Unicode string library for C
+ The 'libunistring' library implements Unicode strings (in the UTF-8,
+ UTF-16, and UTF-32 encodings), together with functions for Unicode
+ characters (character names, classifications, properties) and
+ functions for string processing (formatted output, width, word
+ breaks, line breaks, normalization, case folding, regular
+ expressions).
+ .
+ This package contains the shared library.
+
+Package: liburcu8t64
+Source: liburcu
+Version: 0.15.2-2
+Architecture: amd64
+Maintainer: Jon Bernard <jbernard@debian.org>
+Installed-Size: 363
+Depends: libc6 (>= 2.38)
+Breaks: liburcu8 (<< 0.15.2-2)
+Replaces: liburcu8
+Provides: liburcu8 (= 0.15.2-2)
+Filename: ./liburcu8t64_0.15.2-2_amd64.deb
+Size: 76304
+MD5sum: 305a3a072f3bdd00f75d8d0b2a3b3be2
+SHA1: 7c6448e7080f6696cd2613dcc23e18cf04c9ee67
+SHA256: bf6d8fe515004a491947c72af8ce2c015c5f9b4e8d024b81952ee8f372d507e9
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://liburcu.org/
+Description: userspace RCU (read-copy-update) library
+ This data synchronization library provides read-side access which scales
+ linearly with the number of cores. It does so by allowing multiples copies of
+ a given data structure to live at the same time, and by monitoring the data
+ structure accesses to detect grace periods after which memory reclamation is
+ possible.
+
+Package: libuv1t64
+Source: libuv1
+Version: 1.50.0-2
+Architecture: amd64
+Maintainer: Dominique Dumont <dod@debian.org>
+Installed-Size: 321
+Depends: libc6 (>= 2.38)
+Breaks: libuv1 (<< 1.48.0-1.1)
+Replaces: libuv1
+Provides: libuv1 (= 1.50.0-2)
+Filename: ./libuv1t64_1.50.0-2_amd64.deb
+Size: 153752
+MD5sum: d98e814a0b3e998b7536ae92a2c551cd
+SHA1: dc02e2fb87ccc4bd0715a2e026026e269382afdf
+SHA256: 5fec8035002e0c745b64d1c5b3e1dc42790d1a77574315b976cf3e4aab9ddc0a
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/libuv/libuv
+Description: asynchronous event notification library - runtime library
+ Libuv is the asynchronous library behind Node.js. Very similar to libevent or
+ libev, it provides the main elements for event driven systems: watching and
+ waiting for availability in a set of sockets, and some other events like timers
+ or asynchronous messages. However, libuv also comes with some other extras
+ like:
+  * files watchers and asynchronous operations
+  * a portable TCP and UDP API, as well as asynchronous DNS resolution
+  * processes and threads management, and a portable inter-process
+    communications mechanism, with pipes and work queues
+  * a plugins mechanism for loading libraries dynamically
+  * interface with external libraries that also need to access the I/O.
+ .
+ This package includes the dynamic library against which you can link
+ your program.
+
+Package: libxml2
+Version: 2.12.7+dfsg+really2.9.14-2.1+deb13u3
+Architecture: amd64
+Maintainer: Debian XML/SGML Group <debian-xml-sgml-pkgs@lists.alioth.debian.org>
+Installed-Size: 1916
+Depends: libc6 (>= 2.38), liblzma5 (>= 5.1.1alpha+20120614), zlib1g (>= 1:1.2.3.4)
+Conflicts: w3c-dtd-xhtml
+Filename: ./libxml2_2.12.7+dfsg+really2.9.14-2.1+deb13u3_amd64.deb
+Size: 699724
+MD5sum: 381b30ad5e8669318c82153f776a0e40
+SHA1: 1004cd76d8bbb2b8603eaf4ac38670d6b1b79928
+SHA256: e0c6b63ce4602a036a526f60fe5e6c1586710688058d98fc1001b9b3147b7efd
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://xmlsoft.org
+Description: GNOME XML library
+ XML is a metalanguage to let you design your own markup language.
+ A regular markup language defines a way to describe information in
+ a certain class of documents (eg HTML). XML lets you define your
+ own customized markup languages for many classes of document. It
+ can do this because it's written in SGML, the international standard
+ metalanguage for markup languages.
+ .
+ This package provides a library providing an extensive API to handle
+ such XML data files.
+
+Package: libxtables12
+Source: iptables
+Version: 1.8.11-2
+Architecture: amd64
+Maintainer: Debian Netfilter Packaging Team <team+pkg-netfilter-team@tracker.debian.org>
+Installed-Size: 101
+Depends: libc6 (>= 2.34)
+Filename: ./libxtables12_1.8.11-2_amd64.deb
+Size: 31896
+MD5sum: 148ab3e9d626eb9ee6bdf956d48bf77a
+SHA1: 8f531c4de3a77c8d0501ea62f853c0a0212d5f78
+SHA256: 4de5aa59faef5e98d6ba9f5f521a915be5641f224f597862f8d29e8319e8db16
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.netfilter.org/
+Description: netfilter xtables library
+ The iptables/xtables framework has been replaced by nftables. You should
+ consider migrating now.
+ .
+ However, even if a given system may be fully running on native nftables,
+ there are other reasons why libxtables might be installed. For one, nftables
+ itself uses it to be able to display old rulesets that were created using
+ xtables extensions (to help folks migrate). Other third-party software might
+ also be linked to this library.
+ .
+ This library being installed in the system should be harmless in any case.
+ .
+ This package contains the user-space interface to the Netfilter xtables
+ kernel framework.
+
+Package: netcat-openbsd
+Version: 1.229-1
+Architecture: amd64
+Maintainer: Guilhem Moulin <guilhem@debian.org>
+Installed-Size: 109
+Depends: libbsd0 (>= 0.2.0), libc6 (>= 2.38)
+Provides: netcat
+Filename: ./netcat-openbsd_1.229-1_amd64.deb
+Size: 42520
+MD5sum: 3526cc2c185d9af000da8b275b1095c6
+SHA1: 0a799e3a95c619b7950658015a14a9cc4016f291
+SHA256: d24b18012d4567e9b8fce551293a2373c2bfea5373d012d7f7e81bf5bf17b13e
+Section: net
+Priority: important
+Description: TCP/IP swiss army knife
+ A simple Unix utility which reads and writes data across network connections
+ using TCP or UDP protocol. It is designed to be a reliable "back-end" tool
+ that can be used directly or easily driven by other programs and scripts. At
+ the same time it is a feature-rich network debugging and exploration tool,
+ since it can create almost any kind of connection you would need and has
+ several interesting built-in capabilities.
+ .
+ This package contains the OpenBSD rewrite of netcat, including support for
+ IPv6, proxies, and Unix sockets.
+
+Package: procps
+Version: 2:4.0.4-9
+Architecture: amd64
+Maintainer: Craig Small <csmall@debian.org>
+Installed-Size: 2395
+Depends: libc6 (>= 2.38), libncursesw6 (>= 6), libproc2-0 (>= 2:4.0.4), libsystemd0 (>= 254), libtinfo6 (>= 6), init-system-helpers (>= 1.29~)
+Recommends: psmisc, linux-sysctl-defaults
+Breaks: manpages-de (<< 4.9.1-2), manpages-fr (<< 4.9.1-2), manpages-fr-extra (<< 20151231+nmu1), manpages-pl (<< 1:4.9.1-2)
+Replaces: manpages-de (<< 4.9.1-2), manpages-fr (<< 4.9.1-2), manpages-fr-extra (<< 20151231+nmu1), manpages-pl (<< 1:4.9.1-2)
+Provides: watch
+Filename: ./procps_2%3a4.0.4-9_amd64.deb
+Size: 882088
+MD5sum: 7171002cf30cd38ddcd985332786d2e2
+SHA1: cdbd731553617765ebc9c3caecd0d8b730c692f6
+SHA256: 4db90bb6776772fc52585d6b1fbfc52ec2a85480e1b4363b743fbb2ffa2a5375
+Section: admin
+Priority: important
+Multi-Arch: foreign
+Homepage: https://gitlab.com/procps-ng/procps
+Description: /proc file system utilities
+ This package provides command line and full screen utilities for browsing
+ procfs, a "pseudo" file system dynamically generated by the kernel to
+ provide information about the status of entries in its process table
+ (such as whether the process is running, stopped, or a "zombie").
+ .
+ It contains free, kill, pkill, pgrep, pmap, ps, pwdx, skill, slabtop,
+ snice, sysctl, tload, top, uptime, vmstat, w, and watch.
+
+Package: vim
+Version: 2:9.1.1230-2
+Architecture: amd64
+Maintainer: Debian Vim Maintainers <team+vim@tracker.debian.org>
+Installed-Size: 3930
+Depends: vim-common (= 2:9.1.1230-2), vim-runtime (= 2:9.1.1230-2), libacl1 (>= 2.2.23), libc6 (>= 2.38), libgpm2 (>= 1.20.7), libselinux1 (>= 3.1~), libsodium23 (>= 1.0.14), libtinfo6 (>= 6)
+Suggests: ctags, vim-doc, vim-scripts
+Provides: editor
+Filename: ./vim_2%3a9.1.1230-2_amd64.deb
+Size: 1669984
+MD5sum: 677a10c17a1b230a84d62e486177e784
+SHA1: 11f35f8ce840785248af395279149e4e4fcd148b
+SHA256: 7050d710bbcd5dee68865d90fd95a9aa865bf16d9a3874c5bb6a4f1d69231cfe
+Section: editors
+Priority: optional
+Homepage: https://www.vim.org/
+Description: Vi IMproved - enhanced vi editor
+ Vim is an almost compatible version of the UNIX editor Vi.
+ .
+ Many new features have been added: multi level undo, syntax
+ highlighting, command line history, on-line help, filename
+ completion, block operations, folding, Unicode support, etc.
+ .
+ This package contains a version of vim compiled with a rather
+ standard set of features.  This package does not provide a GUI
+ version of Vim.  See the other vim-* packages if you need more
+ (or less).
+
+Package: vim-common
+Source: vim
+Version: 2:9.1.1230-2
+Architecture: all
+Maintainer: Debian Vim Maintainers <team+vim@tracker.debian.org>
+Installed-Size: 1864
+Recommends: xxd, vim | vim-gtk3 | vim-motif | vim-nox | vim-tiny
+Breaks: vim-runtime (<< 2:9.0.1658-1~)
+Replaces: vim-runtime (<< 2:9.0.1658-1~)
+Filename: ./vim-common_2%3a9.1.1230-2_all.deb
+Size: 420760
+MD5sum: da6baecbf10d1881bc3ce95427c4b3ef
+SHA1: aad648143c20ec0857d37b7bca1f38af3568b9f7
+SHA256: bcf7e3e675cbc4eed1f444ea3a6dfbf420eae141615b0d35cee24cf23e18aa18
+Section: editors
+Priority: important
+Multi-Arch: foreign
+Homepage: https://www.vim.org/
+Description: Vi IMproved - Common files
+ Vim is an almost compatible version of the UNIX editor Vi.
+ .
+ This package contains files shared by all non GUI-enabled vim variants
+ available in Debian.  Examples of such shared files are: manpages and
+ configuration files.
+
+Package: vim-runtime
+Source: vim
+Version: 2:9.1.1230-2
+Architecture: all
+Maintainer: Debian Vim Maintainers <team+vim@tracker.debian.org>
+Installed-Size: 38417
+Recommends: vim | vim-gtk3 | vim-motif | vim-nox | vim-tiny
+Enhances: vim-tiny
+Breaks: vim-tiny (<< 2:9.1.1230-2)
+Filename: ./vim-runtime_2%3a9.1.1230-2_all.deb
+Size: 7126616
+MD5sum: e393c4963814bf0795f53e5f0873c165
+SHA1: a5319e7dd90b31a7d6067e1302c640f2deb5ce2f
+SHA256: 5addd2e7d3aae7d1907aba6c0c16c525e78ccfc0f6ee9ef9651c139a80c97058
+Section: editors
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://www.vim.org/
+Description: Vi IMproved - Runtime files
+ Vim is an almost compatible version of the UNIX editor Vi.
+ .
+ This package contains vimtutor and the architecture independent runtime
+ files, used, if available, by all vim variants available in Debian.
+ Example of such runtime files are: online documentation, rules for
+ language-specific syntax highlighting and indentation, color schemes,
+ and standard plugins.
+

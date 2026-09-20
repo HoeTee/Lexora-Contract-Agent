@@ -1,0 +1,2378 @@
+Package: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 1073
+Depends: libbinutils (= 2.44-3), libc6 (>= 2.38), libgcc-s1 (>= 3.3.1), libgprofng0 (>= 2.44), libstdc++6 (>= 13.1), binutils-common (= 2.44-3), binutils-x86-64-linux-gnu (= 2.44-3)
+Suggests: binutils-doc (>= 2.44-3), gprofng-gui, binutils-gold
+Conflicts: binutils-mingw-w64-i686 (<< 2.23.52.20130612-1+3), binutils-mingw-w64-x86-64 (<< 2.23.52.20130612-1+3), binutils-multiarch (<< 2.27-8), modutils (<< 2.4.19-1)
+Breaks: binutils-aarch64-linux-gnu (<< 2.43.90), binutils-i686-linux-gnu (<< 2.43.90), binutils-riscv64-linux-gnu (<< 2.43.90), binutils-x86-64-linux-gnu (<< 2.43.90)
+Replaces: binutils-aarch64-linux-gnu (<< 2.43.90), binutils-common (<< 2.43.90), binutils-i686-linux-gnu (<< 2.43.90), binutils-riscv64-linux-gnu (<< 2.43.90), binutils-x86-64-linux-gnu (<< 2.43.90)
+Provides: elf-binutils
+Filename: ./binutils_2.44-3_amd64.deb
+Size: 265400
+MD5sum: 326a3d0d8d666c707c89280eb8c06305
+SHA1: f6b0d5bc10135d7427e6164ea170bb1203941e59
+SHA256: 6bc08c02539ba53b5e748142397144c499f9b20b5fa9bb56431545db124addeb
+Section: devel
+Priority: optional
+Homepage: https://www.gnu.org/software/binutils/
+Description: GNU assembler, linker and binary utilities
+ The programs in this package are used to assemble, link and manipulate
+ binary and object files.  They may be used in conjunction with a compiler
+ and various libraries to build programs.
+
+Package: binutils-common
+Source: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 16098
+Breaks: binutils (<< 2.38.50.20220527-2), binutils-multiarch (<< 2.38.50.20220527-2)
+Replaces: binutils (<< 2.38.50.20220527-2), binutils-multiarch (<< 2.38.50.20220527-2)
+Filename: ./binutils-common_2.44-3_amd64.deb
+Size: 2508768
+MD5sum: f2453d21ad64186db1c48a15f647cc10
+SHA1: 273382c5e56614777ef78d42eb213ab1f55139b1
+SHA256: 002da5d23f8757dee97a2c0a40e0e1d4d85a43da094488ee2ee7068d4d3691f9
+Section: devel
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/binutils/
+Description: Common files for the GNU assembler, linker and binary utilities
+ This package contains the localization files used by binutils packages for
+ various target architectures and parts of the binutils documentation. It is
+ not useful on its own.
+
+Package: binutils-x86-64-linux-gnu
+Source: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 5990
+Depends: binutils-common (= 2.44-3), libbinutils (= 2.44-3), libc6 (>= 2.38), libctf-nobfd0 (>= 2.36), libctf0 (>= 2.36), libjansson4 (>= 2.14), libsframe1 (>= 2.41), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4)
+Suggests: binutils-doc (= 2.44-3)
+Breaks: binutils (<< 2.29-6), binutils-dev (<< 2.38.50.20220609-2)
+Replaces: binutils (<< 2.29-6), binutils-dev (<< 2.38.50.20220609-2)
+Filename: ./binutils-x86-64-linux-gnu_2.44-3_amd64.deb
+Size: 1013844
+MD5sum: 2b5be658d9c5315d3d567fbb577421e8
+SHA1: f9458461ce861552a4d173ad8e5b504c957efc68
+SHA256: e6741ce95ff0f7a131c8d9faa3528ccbbc453078bbc62a97da81340ed7462c53
+Section: devel
+Priority: optional
+Multi-Arch: allowed
+Homepage: https://www.gnu.org/software/binutils/
+Description: GNU binary utilities, for x86-64-linux-gnu target
+ This package provides GNU assembler, linker and binary utilities
+ for the x86-64-linux-gnu target.
+ .
+ You don't need this package unless you plan to cross-compile programs
+ for x86-64-linux-gnu and x86-64-linux-gnu is not your native
+ platform.
+
+Package: build-essential
+Version: 12.12
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 17
+Depends: libc6-dev | libc-dev, gcc (>= 4:14.2), g++ (>= 4:14.2), make, dpkg-dev (>= 1.22.11)
+Filename: ./build-essential_12.12_amd64.deb
+Size: 4624
+MD5sum: e82c51bf7ee81f69363728c65d063443
+SHA1: a1f3edfc9367fa57d0bb09f81b86853ece2d5d15
+SHA256: a45159aebea0d98d6652ac5a56b7fff164a7733a7dc736b9f8715ca504519d3a
+Section: devel
+Priority: optional
+Description: Informational list of build-essential packages
+ If you do not plan to build Debian packages, you don't need this
+ package.  Starting with dpkg (>= 1.14.18) this package is required
+ for building Debian packages.
+ .
+ This package contains an informational list of packages which are
+ considered essential for building Debian packages.  This package also
+ depends on the packages on that list, to make it easy to have the
+ build-essential packages installed.
+ .
+ If you have this package installed, you only need to install whatever
+ a package specifies as its build-time dependencies to build the
+ package.  Conversely, if you are determining what your package needs
+ to build-depend on, you can always leave out the packages this
+ package depends on.
+ .
+ This package is NOT the definition of what packages are
+ build-essential; the real definition is in the Debian Policy Manual.
+ This package contains merely an informational list, which is all
+ most people need.   However, if this package and the manual disagree,
+ the manual is correct.
+
+Package: bzip2
+Version: 1.0.8-6
+Architecture: amd64
+Maintainer: Anibal Monsalve Salazar <anibal@debian.org>
+Installed-Size: 113
+Depends: libbz2-1.0 (= 1.0.8-6), libc6 (>= 2.34)
+Suggests: bzip2-doc
+Replaces: libbz2 (<< 0.9.5d-3)
+Filename: ./bzip2_1.0.8-6_amd64.deb
+Size: 40520
+MD5sum: f9e2f91306ce31a447aa51ab618e49a9
+SHA1: fddc4a36f535ca9530e72b0bd42b4d6bc9e91218
+SHA256: 6b5fbe71f0fc41e85919bc4b3c514e6c47577c5005dbf1f5af6e4a49cc221aab
+Section: utils
+Priority: standard
+Multi-Arch: foreign
+Homepage: https://sourceware.org/bzip2/
+Description: high-quality block-sorting file compressor - utilities
+ bzip2 is a freely available, patent free, data compressor.
+ .
+ bzip2 compresses files using the Burrows-Wheeler block-sorting text
+ compression algorithm, and Huffman coding.  Compression is generally
+ considerably better than that achieved by more conventional
+ LZ77/LZ78-based compressors, and approaches the performance of the PPM
+ family of statistical compressors.
+ .
+ The archive file format of bzip2 (.bz2) is incompatible with that of its
+ predecessor, bzip (.bz).
+
+Package: cmake
+Version: 3.31.6-2
+Architecture: amd64
+Maintainer: Debian CMake Team <pkg-cmake-team@lists.alioth.debian.org>
+Installed-Size: 41012
+Depends: cmake-data (= 3.31.6-2), procps, libarchive13t64 (>= 3.3.3), libc6 (>= 2.38), libcurl4t64 (>= 7.16.2), libexpat1 (>= 2.0.1), libgcc-s1 (>= 3.0), libjsoncpp26 (>= 1.9.6), librhash1 (>= 1.2.6), libstdc++6 (>= 14), libuv1t64 (>= 1.38.0), zlib1g (>= 1:1.1.4)
+Recommends: gcc, make
+Suggests: cmake-doc, cmake-format, elpa-cmake-mode, ninja-build
+Filename: ./cmake_3.31.6-2_amd64.deb
+Size: 11969144
+MD5sum: 85582ec55dbba01f105d78bcdb9ac9ad
+SHA1: e6d3ca251ed02e00fdf6155719d523e18bac7251
+SHA256: dee2fc94973325240604ffbca677a3f16b462fb6520946bd81be1ecbac770a02
+Section: devel
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://cmake.org/
+Description: cross-platform, open-source make system
+ CMake is used to control the software compilation process using
+ simple platform and compiler independent configuration files. CMake
+ generates native makefiles and workspaces that can be used in the
+ compiler environment of your choice. CMake is quite sophisticated: it
+ is possible to support complex environments requiring system
+ configuration, pre-processor generation, code generation, and template
+ instantiation.
+
+Package: cmake-data
+Source: cmake
+Version: 3.31.6-2
+Architecture: all
+Maintainer: Debian CMake Team <pkg-cmake-team@lists.alioth.debian.org>
+Installed-Size: 11883
+Filename: ./cmake-data_3.31.6-2_all.deb
+Size: 2268208
+MD5sum: f3eff7146b3c3afbbab54e41617a455d
+SHA1: d6c226e26a939d8da1f17f67c73cd231059f0bbe
+SHA256: d9060145be892f43cd1888024114ceab019c81479d4b0a3383fe14cebe2295cb
+Section: devel
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://cmake.org/
+Description: CMake data files (modules, templates and documentation)
+ CMake is used to control the software compilation process using
+ simple platform and compiler independent configuration files. CMake
+ generates native makefiles and workspaces that can be used in the
+ compiler environment of your choice. CMake is quite sophisticated: it
+ is possible to support complex environments requiring system
+ configuration, pre-processor generation, code generation, and template
+ instantiation.
+ .
+ This package provides CMake architecture independent data files (modules,
+ templates, documentation etc.). Unless you have cmake installed, you probably
+ do not need this package.
+
+Package: cpp
+Source: gcc-defaults (1.220)
+Version: 4:14.2.0-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 18
+Depends: cpp-14 (>= 14.2.0-6~), cpp-x86-64-linux-gnu (= 4:14.2.0-1)
+Suggests: cpp-doc
+Conflicts: cpp-doc (<< 1:2.95.3), gcc (<< 4:13.2.0-3)
+Filename: ./cpp_4%3a14.2.0-1_amd64.deb
+Size: 1568
+MD5sum: cbc461a4914b8d953367de0d83f055d4
+SHA1: f7b230ddaa3127073239649f4af2d6d8897d717a
+SHA256: a6ba40550aadec80437813e0fce5516574945ff40e72306a5b378c03af3a6544
+Section: interpreters
+Priority: optional
+Multi-Arch: allowed
+Description: GNU C preprocessor (cpp)
+ The GNU C preprocessor is a macro processor that is used automatically
+ by the GNU C compiler to transform programs before actual compilation.
+ .
+ This package has been separated from gcc for the benefit of those who
+ require the preprocessor but not the compiler.
+ .
+ This is a dependency package providing the default GNU C preprocessor.
+
+Package: cpp-14
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 11
+Depends: gcc-14-base (= 14.2.0-19), cpp-14-x86-64-linux-gnu (= 14.2.0-19)
+Suggests: gcc-14-locales (>= 14)
+Breaks: hardening-wrapper (<< 2.8+nmu3), libmagics++-dev (<< 2.28.0-4)
+Filename: ./cpp-14_14.2.0-19_amd64.deb
+Size: 1280
+MD5sum: 4f64d2ad43b3b5468651014254bf4ad1
+SHA1: fd8035b2512c7ea141bb362d99cdb8edc83bb65b
+SHA256: 3bae5fe03c56c6d021900ab4fb79e35c6f75eee72a73fccc6f28a39db559d6a0
+Section: interpreters
+Priority: optional
+Homepage: http://gcc.gnu.org/
+Description: GNU C preprocessor
+ A macro processor that is used automatically by the GNU C compiler
+ to transform programs before actual compilation.
+ .
+ This package has been separated from gcc for the benefit of those who
+ require the preprocessor but not the compiler.
+
+Package: cpp-14-x86-64-linux-gnu
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 34503
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.38), libgmp10 (>= 2:6.3.0+dfsg), libisl23 (>= 0.15), libmpc3 (>= 1.1.0), libmpfr6 (>= 3.1.3), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4)
+Suggests: gcc-14-locales (>= 14), cpp-14-doc (>= 14)
+Breaks: hardening-wrapper (<< 2.8+nmu3), libmagics++-dev (<< 2.28.0-4)
+Filename: ./cpp-14-x86-64-linux-gnu_14.2.0-19_amd64.deb
+Size: 11047460
+MD5sum: e044e09878431be4356c4465a1b49956
+SHA1: 9c4366e4fe4d151aef20ec7059fe79f8a6cfbdce
+SHA256: ef274b5379f5f97fc71619d39ecc84d039d3e184570d207b909c90afaa5d79e0
+Section: interpreters
+Priority: optional
+Multi-Arch: foreign
+Homepage: http://gcc.gnu.org/
+Description: GNU C preprocessor for x86_64-linux-gnu
+ A macro processor that is used automatically by the GNU C compiler
+ to transform programs before actual compilation.
+ .
+ This package has been separated from gcc for the benefit of those who
+ require the preprocessor configured for x86_64-linux-gnu architecture but not
+ the compiler.
+
+Package: cpp-x86-64-linux-gnu
+Source: gcc-defaults (1.220)
+Version: 4:14.2.0-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 17
+Depends: cpp-14-x86-64-linux-gnu (>= 14.2.0-6~)
+Suggests: cpp-doc
+Breaks: cpp (<< 4:13.2.0-3)
+Replaces: cpp (<< 4:13.2.0-3)
+Filename: ./cpp-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb
+Size: 4840
+MD5sum: 239e9350ca49d4412b581242c1d02a67
+SHA1: 145f1be0efb24a586282758ea5ea5e3496e2b8dc
+SHA256: d902f484e38bce59e82efc0df2fe20139a0932ca759ecafdfe6e5b6c72238eb8
+Section: interpreters
+Priority: optional
+Multi-Arch: foreign
+Description: GNU C preprocessor (cpp) for the amd64 architecture
+ The GNU C preprocessor is a macro processor that is used automatically
+ by the GNU C compiler to transform programs before actual compilation.
+ .
+ This package has been separated from gcc for the benefit of those who
+ require the preprocessor but not the cross-compiler for amd64 architecture.
+ .
+ This is a dependency package providing the default GNU C preprocessor
+ for the amd64 architecture.
+
+Package: dpkg-dev
+Source: dpkg
+Version: 1.22.22
+Architecture: all
+Maintainer: Dpkg Developers <debian-dpkg@lists.debian.org>
+Installed-Size: 1725
+Depends: perl:any, libdpkg-perl (= 1.22.22), tar (>= 1.28-1), bzip2, xz-utils (>= 5.4.0), patch (>= 2.7), make, binutils
+Recommends: build-essential, gcc | c-compiler, fakeroot, sq | sqop | rsop | gosop | pgpainless-cli | gpg-sq | gnupg, sqv | sqopv | rsopv | sopv | gosop | pgpainless-cli | gpgv-sq | gpgv, libalgorithm-merge-perl
+Suggests: debian-keyring, debian-tag2upload-keyring
+Breaks: debhelper (<< 10.10.1~), gosop (<< 1.1.0~), libsop-java-java (<< 4.0.7~), pgpainless-cli (<< 1.3.13~), rsop (<< 0.4.0~), sq (<< 0.40.0~), sqop (<< 0.27.2~), sqv (<< 1.3.0~)
+Provides: dpkg-build-api (= 0), dpkg-build-api (= 1)
+Filename: ./dpkg-dev_1.22.22_all.deb
+Size: 1337268
+MD5sum: 0195cfec3dcf105991bb58063ef77478
+SHA1: b478d0d91b6c5458686983c1baf28cd347914283
+SHA256: 6d4020421740a70e1fb9c41b07f8bb8306d93aef6fea1a8ce11a1f839921f414
+Section: utils
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://wiki.debian.org/Teams/Dpkg
+Description: Debian package development tools
+ This package provides the development tools (including dpkg-source)
+ required to unpack, build and upload Debian source packages.
+ .
+ Most Debian source packages will require additional tools to build;
+ for example, most packages need make and the C compiler gcc.
+
+Package: g++
+Source: gcc-defaults (1.220)
+Version: 4:14.2.0-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 13
+Depends: cpp (= 4:14.2.0-1), cpp-x86-64-linux-gnu (= 4:14.2.0-1), gcc (= 4:14.2.0-1), g++-14 (>= 14.2.0-6~), g++-x86-64-linux-gnu (= 4:14.2.0-1), gcc-14 (>= 14.2.0-6~)
+Suggests: g++-multilib
+Provides: c++-compiler
+Filename: ./g++_4%3a14.2.0-1_amd64.deb
+Size: 1344
+MD5sum: 995fd0e145217384a37c334812e51f27
+SHA1: c443c0c0f2742f280607b603b6d62a2ae6c2743d
+SHA256: f86661c021ab2acb39ceb87315e7c2d4d420fdadc19945d5d589f3953410445c
+Section: devel
+Priority: optional
+Description: GNU C++ compiler
+ This is the GNU C++ compiler, a fairly portable optimizing compiler for C++.
+ .
+ This is a dependency package providing the default GNU C++ compiler.
+
+Package: g++-14
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 35
+Depends: g++-14-x86-64-linux-gnu (= 14.2.0-19), gcc-14-base (= 14.2.0-19), gcc-14 (= 14.2.0-19)
+Suggests: g++-14-multilib, gcc-14-doc (>= 14)
+Provides: c++-compiler, c++abi2-dev
+Filename: ./g++-14_14.2.0-19_amd64.deb
+Size: 22544
+MD5sum: 89a1ca982d17942fea5d8a5a6c9faeca
+SHA1: de29e541c6398dde3fa1bddc01dae89b95f103b5
+SHA256: 4706ab29eab3d81e93582b45b229fdedc71f1eec3071996a448cf2c8beb83f3a
+Section: devel
+Priority: optional
+Homepage: http://gcc.gnu.org/
+Description: GNU C++ compiler
+ This is the GNU C++ compiler, a fairly portable optimizing compiler for C++.
+
+Package: g++-14-x86-64-linux-gnu
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 36931
+Depends: gcc-14-base (= 14.2.0-19), gcc-14-x86-64-linux-gnu (= 14.2.0-19), libstdc++-14-dev (= 14.2.0-19), libc6 (>= 2.38), libgmp10 (>= 2:6.3.0+dfsg), libisl23 (>= 0.15), libmpc3 (>= 1.1.0), libmpfr6 (>= 3.1.3), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.2.2)
+Suggests: gcc-14-doc (>= 14)
+Provides: c++-compiler-x86-64-linux-gnu
+Filename: ./g++-14-x86-64-linux-gnu_14.2.0-19_amd64.deb
+Size: 12114812
+MD5sum: 1c4594673a37b71eef6efd8d0875a27c
+SHA1: 9a5f16d514fa20032b674b0e0fb2a55e5b077603
+SHA256: c66b009fedd340520279d1af2f91d0668e9f64f0c08fe62179ca1c75e556be58
+Section: devel
+Priority: optional
+Multi-Arch: foreign
+Homepage: http://gcc.gnu.org/
+Description: GNU C++ compiler for x86_64-linux-gnu architecture
+ This is the GNU C++ compiler, a fairly portable optimizing compiler for C++.
+ .
+ This package contains C++ cross-compiler for x86_64-linux-gnu architecture.
+
+Package: g++-x86-64-linux-gnu
+Source: gcc-defaults (1.220)
+Version: 4:14.2.0-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 11
+Depends: cpp-x86-64-linux-gnu (= 4:14.2.0-1), gcc-x86-64-linux-gnu (= 4:14.2.0-1), g++-14-x86-64-linux-gnu (>= 14.2.0-6~)
+Breaks: g++ (<< 4:13.2.0-3)
+Replaces: g++ (<< 4:13.2.0-3)
+Filename: ./g++-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb
+Size: 1200
+MD5sum: 1b29d910e99e16e9750f80d93af8a40a
+SHA1: e9ead5081c3b70e5b5831f6324910c883dd7ef40
+SHA256: 15e10fc3948ec76be8d51b23e75ad9df9c39588c94f1f47059cee02c117c7583
+Section: devel
+Priority: optional
+Multi-Arch: foreign
+Description: GNU C++ compiler for the amd64 architecture
+ This is the GNU C++ compiler, a fairly portable optimizing compiler for C++.
+ .
+ This is a dependency package providing the default GNU C++ cross-compiler
+ for the amd64 architecture.
+
+Package: gcc
+Source: gcc-defaults (1.220)
+Version: 4:14.2.0-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 36
+Depends: cpp (= 4:14.2.0-1), cpp-x86-64-linux-gnu (= 4:14.2.0-1), gcc-14 (>= 14.2.0-6~), gcc-x86-64-linux-gnu (= 4:14.2.0-1)
+Recommends: libc6-dev | libc-dev
+Suggests: gcc-multilib, make, manpages-dev, autoconf, automake, libtool, flex, bison, gdb, gcc-doc
+Conflicts: gcc-doc (<< 1:2.95.3)
+Provides: c-compiler
+Filename: ./gcc_4%3a14.2.0-1_amd64.deb
+Size: 5136
+MD5sum: 222be33eae2b6768bbbedd4ef959fa3e
+SHA1: 23aea262d2c56a31d6557ffe3c1a23c77772d304
+SHA256: eee65c41a441c57c05f754ced1b9d093956966a1c7da9938c3ec00d3dc2f905d
+Section: devel
+Priority: optional
+Description: GNU C compiler
+ This is the GNU C compiler, a fairly portable optimizing compiler for C.
+ .
+ This is a dependency package providing the default GNU C compiler.
+
+Package: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 622
+Depends: gcc-14-x86-64-linux-gnu (= 14.2.0-19), gcc-14-base (= 14.2.0-19), cpp-14 (= 14.2.0-19), binutils (>= 2.39)
+Recommends: libc6-dev (>= 2.23-1~)
+Suggests: gcc-14-multilib, gcc-14-doc (>= 14), gcc-14-locales (>= 14)
+Replaces: cpp-14 (<< 7.1.1-8)
+Provides: c-compiler
+Filename: ./gcc-14_14.2.0-19_amd64.deb
+Size: 540064
+MD5sum: 7b5c03a14224798e9ef3151c46fba48e
+SHA1: a8fad8c57c5cb5a4fa73af4c866d3347ba64fe83
+SHA256: 21500408b5019d8d29f70ce58488e2eea469a1adb4b5fd7db45e819b5efcac4e
+Section: devel
+Priority: optional
+Homepage: http://gcc.gnu.org/
+Description: GNU C compiler
+ This is the GNU C compiler, a fairly portable optimizing compiler for C.
+
+Package: gcc-14-x86-64-linux-gnu
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 68460
+Depends: cpp-14-x86-64-linux-gnu (= 14.2.0-19), gcc-14-base (= 14.2.0-19), libcc1-0 (>= 14.2.0-19), binutils-x86-64-linux-gnu (>= 2.39), libgcc-14-dev (= 14.2.0-19), libc6 (>= 2.38), libgcc-s1 (>= 3.0), libgmp10 (>= 2:6.3.0+dfsg), libisl23 (>= 0.15), libmpc3 (>= 1.1.0), libmpfr6 (>= 3.1.3), libstdc++6 (>= 5), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4)
+Recommends: libc6-dev (>= 2.23-1~)
+Suggests: gcc-14-doc (>= 14), gcc-14-locales (>= 14)
+Provides: c-compiler-x86-64-linux-gnu
+Filename: ./gcc-14-x86-64-linux-gnu_14.2.0-19_amd64.deb
+Size: 21389968
+MD5sum: ba8b61619308e4877d6609025c874e23
+SHA1: 2b1ff33f18d295d06d1dfe4cbd51fb730157cd63
+SHA256: a17ef039f1ba482051c3efb5c2c24070002e60dd0bd09fd456ec31481a11b725
+Section: devel
+Priority: optional
+Multi-Arch: foreign
+Homepage: http://gcc.gnu.org/
+Description: GNU C compiler for the x86_64-linux-gnu architecture
+ This is the GNU C compiler for the x86_64-linux-gnu architecture,
+ a fairly portable optimizing compiler for C.
+
+Package: gcc-x86-64-linux-gnu
+Source: gcc-defaults (1.220)
+Version: 4:14.2.0-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 23
+Depends: cpp-x86-64-linux-gnu (= 4:14.2.0-1), gcc-14-x86-64-linux-gnu (>= 14.2.0-6~)
+Recommends: libc6-dev, libc-dev
+Suggests: make, manpages-dev, autoconf, automake, libtool, flex, bison, gdb-x86-64-linux-gnu, gcc-doc
+Breaks: gcc (<< 4:13.2.0-3)
+Replaces: gcc (<< 4:13.2.0-3)
+Filename: ./gcc-x86-64-linux-gnu_4%3a14.2.0-1_amd64.deb
+Size: 1436
+MD5sum: 70a7403639e33049a8f87ad2833aee04
+SHA1: d04a7083effc3294a82a6db9f050f69bdf1b5adf
+SHA256: 04c28c2760b0094b3d7758154ac095303dd00599b63ebad4086a325b607308b7
+Section: devel
+Priority: optional
+Multi-Arch: foreign
+Description: GNU C compiler for the amd64 architecture
+ This is the GNU C compiler, a fairly portable optimizing compiler for C.
+ .
+ This is a dependency package providing the default GNU C cross-compiler
+ for the amd64 architecture.
+
+Package: libarchive13t64
+Source: libarchive
+Version: 3.7.4-4+deb13u1
+Architecture: amd64
+Maintainer: Peter Pentchev <roam@debian.org>
+Installed-Size: 881
+Depends: libacl1 (>= 2.2.23), libbz2-1.0, libc6 (>= 2.38), liblz4-1 (>= 0.0~r130), liblzma5 (>= 5.2.2), libnettle8t64, libxml2 (>= 2.7.4), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4)
+Suggests: lrzip
+Breaks: libarchive13 (<< 3.7.4-4+deb13u1)
+Replaces: libarchive13
+Provides: libarchive13 (= 3.7.4-4+deb13u1)
+Filename: ./libarchive13t64_3.7.4-4+deb13u1_amd64.deb
+Size: 350192
+MD5sum: 83f24237c142f5f485720ad944e2d692
+SHA1: 48241cf426371a2a003fb094c450f954586287c1
+SHA256: 12e06195a899e8db371803ed70111fc7302573d3ed84e967d3d48ef2d543ace8
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.libarchive.org/
+Description: Multi-format archive and compression library (shared library)
+ The libarchive library provides a flexible interface for reading and writing
+ archives in various formats such as tar and cpio. libarchive also supports
+ reading and writing archives compressed using various compression filters such
+ as gzip and bzip2. The library is inherently stream-oriented; readers serially
+ iterate through the archive, writers serially add things to the archive.
+ .
+ Archive formats supported are:
+ .
+    * tar (read and write, including GNU extensions)
+    * pax (read and write, including GNU and star extensions)
+    * cpio (read and write, including odc and newc variants)
+    * iso9660 (read and write, including Joliet and Rockridge extensions, with
+      some limitations)
+    * zip (read only, with some limitations, uses zlib)
+    * mtree (read and write)
+    * shar (write only)
+    * ar (read and write, including BSD and GNU/SysV variants)
+    * empty (read only; in particular, note that no other format will accept an
+      empty file)
+    * raw (read only)
+    * xar (read only)
+    * rar (read only, with some limitations)
+    * 7zip (read and write, with some limitations)
+ .
+ Filters supported are:
+ .
+    * gzip (read and write, uses zlib)
+    * bzip2 (read and write, uses bzlib)
+    * compress (read and write, uses an internal implementation)
+    * uudecode (read only)
+    * separate command-line compressors with fixed-signature auto-detection
+    * xz and lzma (read and write using liblzma)
+    * zstandard (read and write using libzstd)
+ .
+ This package provides the libarchive shared library.
+
+Package: libasan8
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 10695
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.34), libgcc-s1 (>= 3.3)
+Filename: ./libasan8_14.2.0-19_amd64.deb
+Size: 2725272
+MD5sum: 562d7783317980e9c8e8390e848635f0
+SHA1: 859f439847b6c17ded21ad8499c8e5e45d0a4f52
+SHA256: 771899ade7310fe31aa538a509354c33d62bbe4e408b4e5fc1e513988dc42645
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: AddressSanitizer -- a fast memory error detector
+ AddressSanitizer (ASan) is a fast memory error detector.  It finds
+ use-after-free and {heap,stack,global}-buffer overflow bugs in C/C++ programs.
+
+Package: libatomic1
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 45
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.14)
+Filename: ./libatomic1_14.2.0-19_amd64.deb
+Size: 9308
+MD5sum: ac6daa5a9f8809b24584507f08e54de5
+SHA1: a478fbcba038f4a18db43b9771ee01a7da5ab23c
+SHA256: 212b399aae2f7299203d261a57e49372e09565a9a5ea971905f94a3960366c05
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: support library providing __atomic built-in functions
+ library providing __atomic built-in functions. When an atomic call cannot
+ be turned into lock-free instructions, GCC will make calls into this library.
+
+Package: libbinutils
+Source: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 2390
+Depends: libc6 (>= 2.38), libsframe1, libzstd1 (>= 1.5.5), zlib1g (>= 1:1.2.0), binutils-common (= 2.44-3)
+Breaks: binutils (<< 2.29-6)
+Replaces: binutils (<< 2.29-6)
+Filename: ./libbinutils_2.44-3_amd64.deb
+Size: 534440
+MD5sum: 0a4fede3fa875d18d1226d767450f2ac
+SHA1: 150afad071e8968436aaef066ec3c66082abedf6
+SHA256: 4f4664c8a8f0ad0c8631c39fab02e3d8d86ccc6f4436a1d59f059dbcb0492679
+Section: devel
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/binutils/
+Description: GNU binary utilities (private shared library)
+ This package includes the private shared libraries libbfd and libopcodes.
+
+Package: libbrotli1
+Source: brotli (1.1.0-2)
+Version: 1.1.0-2+b7
+Architecture: amd64
+Maintainer: Tomasz Buchert <tomasz@debian.org>
+Installed-Size: 870
+Depends: libc6 (>= 2.29)
+Filename: ./libbrotli1_1.1.0-2+b7_amd64.deb
+Size: 306624
+MD5sum: e268acc326140ae9f1731f335335fc8d
+SHA1: e5e9327d88edff7e03a5d9f9ab0c46c1d8c06536
+SHA256: 0fb79f88db210afbd69282ab9649e525f393ec6950ca34da1a6b359250b8d7db
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/google/brotli
+Description: library implementing brotli encoder and decoder (shared libraries)
+ Brotli is a generic-purpose lossless compression algorithm
+ that compresses data using a combination of a modern variant
+ of the LZ77 algorithm, Huffman coding and 2nd order context modeling,
+ with a compression ratio comparable to the best currently available
+ general-purpose compression methods. It is similar in speed with
+ deflate but offers more dense compression.
+ .
+ This package installs shared libraries.
+
+Package: libc-bin
+Source: glibc
+Version: 2.41-12+deb13u4
+Architecture: amd64
+Essential: yes
+Maintainer: GNU Libc Maintainers <debian-glibc@lists.debian.org>
+Installed-Size: 2122
+Depends: libc6 (>> 2.41), libc6 (<< 2.42)
+Recommends: manpages
+Breaks: dh-lua (<< 27+nmu1~)
+Filename: ./libc-bin_2.41-12+deb13u4_amd64.deb
+Size: 638452
+MD5sum: 953e2f92e83896730d699bf8b67d00e1
+SHA1: 5262f3fa760a16acde1903de0f1ddc0be8cca6da
+SHA256: dc8c79647fe3a5f37f72a400414f70263d0212f010ff2c09f990e30d91e38d1c
+Section: libs
+Priority: required
+Multi-Arch: foreign
+Homepage: https://www.gnu.org/software/libc/libc.html
+Description: GNU C Library: Binaries
+ This package contains utility programs related to the GNU C Library.
+ .
+  * getconf: query system configuration variables
+  * getent: get entries from administrative databases
+  * iconv, iconvconfig: convert between character encodings
+  * ldd, ldconfig: print/configure shared library dependencies
+  * locale, localedef: show/generate locale definitions
+  * tzselect, zdump, zic: select/dump/compile time zones
+
+Package: libc-dev-bin
+Source: glibc
+Version: 2.41-12+deb13u4
+Architecture: amd64
+Maintainer: GNU Libc Maintainers <debian-glibc@lists.debian.org>
+Installed-Size: 126
+Depends: libc6 (>> 2.41), libc6 (<< 2.42)
+Recommends: manpages, manpages-dev
+Suggests: libc-devtools (>> 2.41)
+Filename: ./libc-dev-bin_2.41-12+deb13u4_amd64.deb
+Size: 59960
+MD5sum: 134e916e5b1b2a07033d6f8f538318ff
+SHA1: 1fd7d8116ab37f41be398769527a36a4a2cd5c5b
+SHA256: 2c21175d6a8283ed566d154c0c0bc06f60836e53b0b9e1f74c14eac586b68c24
+Section: libdevel
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://www.gnu.org/software/libc/libc.html
+Description: GNU C Library: Development binaries
+ This package contains utility programs related to the GNU C Library
+ development package.
+ .
+  * gencat: generate message catalogs
+
+Package: libc6
+Source: glibc
+Version: 2.41-12+deb13u4
+Architecture: amd64
+Maintainer: GNU Libc Maintainers <debian-glibc@lists.debian.org>
+Installed-Size: 13226
+Depends: libgcc-s1
+Recommends: libidn2-0 (>= 2.0.5~)
+Suggests: glibc-doc, debconf | debconf-2.0, libc-l10n, locales, libnss-nis, libnss-nisplus
+Breaks: base-files (<< 13.3~), chrony (<< 4.2-3~), dhcpcd (<< 1:10.1.0-7~), fakechroot (<< 2.19-3.5), firefox (<< 91~), firefox-esr (<< 91~), gnumach-image-1.8-486 (<< 2:1.8+git20210923~), gnumach-image-1.8-486-dbg (<< 2:1.8+git20210923~), gnumach-image-1.8-xen-486 (<< 2:1.8+git20210923~), gnumach-image-1.8-xen-486-dbg (<< 2:1.8+git20210923~), hurd (<< 1:0.9.git20220301-2), libamdhip64-5 (<< 5.7.1-5+b1), libhiprtc-builtins5 (<< 5.7.1-5+b1), librccl1 (<< 5.4.3-3+b1), libswupdate0.1 (<< 2024.12.1+dfsg-1+b3), locales (<< 2.41), locales-all (<< 2.41), lua-swupdate (<< 2024.12.1+dfsg-1+b3), nscd (<< 2.41), pd-scaf (<< 1:0.14.1+darcs20180201-6+b4), postgresql-15-pllua (<< 1:2.0.12-4), postgresql-17-pllua (<< 1:2.0.12-3+b2), python3-iptables (<< 1.0.0-2), python3-mrgingham (<< 1.25-1), python3-onnxruntime (<< 1.20.1+dfsg-2~), sysvinit (<< 3.09-2~), sysvinit-core (<< 3.09-2~), tinydns (<< 1:1.05-14), uwsgi-plugin-pypy3 (<< 0.0.2+b1), valgrind (<< 1:3.19.0-1~)
+Replaces: libc6-amd64
+Filename: ./libc6_2.41-12+deb13u4_amd64.deb
+Size: 2846580
+MD5sum: 5559581916477ef1f57ea9f82cecf22e
+SHA1: 27904cc1b58dd79f0768ba6aa6dd993edc411b97
+SHA256: 967aa62605721081c3eb2a17650611a792aa802d76a6511d1840242623d204c9
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libc/libc.html
+Description: GNU C Library: Shared libraries
+ Contains the standard libraries that are used by nearly all programs on
+ the system. This package includes shared versions of the standard C library
+ and the standard math library, as well as many others.
+
+Package: libc6-dev
+Source: glibc
+Version: 2.41-12+deb13u4
+Architecture: amd64
+Maintainer: GNU Libc Maintainers <debian-glibc@lists.debian.org>
+Installed-Size: 12542
+Depends: libc6 (= 2.41-12+deb13u4), libc-dev-bin (= 2.41-12+deb13u4), linux-libc-dev, libcrypt-dev, rpcsvc-proto
+Suggests: glibc-doc, manpages-dev
+Conflicts: libc0.3-dev, libc6.1-dev
+Breaks: binutils (<< 2.38), catch (<< 1.12.2-0.1), heimdal-multidev (<= 7.7.0+dfsg-4), igblast (<= 1.19.0-1), libassimp-dev (<= 5.2.4~ds0-1), libasyncns-dev (<= 0.8-6+b2), libatm1-dev (<= 1:2.5.1-4), libaws20-dev (<= 20.2-2+b1), libboinc-app-dev (<= 7.20.2+dfsg-1), libbson-dev (<= 1.22.0-1), libc6-dev-amd64-cross (<< 2.41~), libcups2-dev (<= 2.4.2-1), libdeal.ii-dev (<= 9.4.0-1), libdkim-dev (<= 1:1.0.21-4+b2), libdolfin-dev-common (<= 2019.2.0~git20220407.d29e24d-5), libdpkg-perl (<< 1.22.22), libeckit-dev (<= 1.20.0-1), libfclib-dev (<= 3.1.0+dfsg-2), libfltk1.3-dev (<= 1.3.8-4+b1), libghc-resolv-dev (<= 0.1.2.0-3), libghc-resolv-prof (<= 0.1.2.0-3), libglib2.0-dev (<= 2.72.3-1), libgloox-dev (<= 1.0.24-2+b1), libhesiod-dev (<= 3.2.1-3.1+b1), libinfinity-0.7-dev (<= 0.7.2-1+b1), libinsighttoolkit4-dev (<= 4.13.3withdata-dfsg2-3+b1), libinsighttoolkit5-dev (<= 5.2.1-5+b1), libismrmrd-dev (<= 1.8.0-2), libldap-dev (<= 2.5.12+dfsg-2), liblog4cplus-dev (<= 2.0.7-1), libloudmouth1-dev (<= 1.5.4-1), libmgl-dev (<= 8.0.1-2), libmimalloc2.0 (<= 2.0.6+ds-1), libminc-dev (<= 2.4.03-5), libmongoc-dev (<= 1.22.1-1), libmrpt-ros1bridge-dev (<= 1:2.4.9+ds-4+b2), libmysqlclient-dev (<= 8.0.29-1), libnetcdf-dev (<= 1:4.9.0-3), libnetcdf-mpi-dev (<= 1:4.9.0-1), libnetcdf-pnetcdf-dev (<= 1:4.9.0-1), libnfsidmap-dev (<= 1:2.6.1-2), libns3-dev (<= 3.36.1+dfsg-4), libola-dev (<= 0.10.8.nojsmin-2), libopenafs-dev (<= 1.8.8.1-3), libopendkim-dev (<= 2.11.0~beta2-7), libopendmarc-dev (<= 1.4.2-1), libopenms-dev (<= 2.6.0+cleaned1-3+b1), libopenzwave1.6-dev (<= 1.6.1914+ds-1), libpg-query-dev (<= 13-2.1.2-2), librbl-dev (<= 2.11.0~beta2-7), libre-dev (<= 1.1.0-1+b1), libshishi-dev (<= 1.0.2-11), libslurm-dev (<= 21.08.8.2-1), libsocksd0-dev (<= 1.4.2+dfsg-7+b4), libspf2-dev (<= 1.2.10-7.1+b1), libstrophe-dev (<= 0.12.1-2), libtaningia-dev (<= 0.2.2-2+b1), libtrilinos-amesos-dev (<= 13.2.0-3), libtrilinos-amesos2-dev (<= 13.2.0-3), libtrilinos-anasazi-dev (<= 13.2.0-3), libtrilinos-aztecoo-dev (<= 13.2.0-3), libtrilinos-belos-dev (<= 13.2.0-3), libtrilinos-epetra-dev (<= 13.2.0-3), libtrilinos-epetraext-dev (<= 13.2.0-3), libtrilinos-galeri-dev (<= 13.2.0-3), libtrilinos-ifpack-dev (<= 13.2.0-3), libtrilinos-ifpack2-dev (<= 13.2.0-3), libtrilinos-intrepid-dev (<= 13.2.0-3), libtrilinos-intrepid2-dev (<= 13.2.0-3), libtrilinos-isorropia-dev (<= 13.2.0-3), libtrilinos-kokkos-dev (<= 13.2.0-3), libtrilinos-kokkos-kernels-dev (<= 13.2.0-3), libtrilinos-komplex-dev (<= 13.2.0-3), libtrilinos-ml-dev (<= 13.2.0-3), libtrilinos-moertel-dev (<= 13.2.0-3), libtrilinos-muelu-dev (<= 13.2.0-3), libtrilinos-nox-dev (<= 13.2.0-3), libtrilinos-phalanx-dev (<= 13.2.0-3), libtrilinos-pike-dev (<= 13.2.0-3), libtrilinos-piro-dev (<= 13.2.0-3), libtrilinos-pliris-dev (<= 13.2.0-3), libtrilinos-rol-dev (<= 13.2.0-3), libtrilinos-rtop-dev (<= 13.2.0-3), libtrilinos-rythmos-dev (<= 13.2.0-3), libtrilinos-sacado-dev (<= 13.2.0-3), libtrilinos-shylu-dev (<= 13.2.0-3), libtrilinos-stokhos-dev (<= 13.2.0-3), libtrilinos-stratimikos-dev (<= 13.2.0-3), libtrilinos-teko-dev (<= 13.2.0-3), libtrilinos-teuchos-dev (<= 13.2.0-3), libtrilinos-thyra-dev (<= 13.2.0-3), libtrilinos-tpetra-dev (<= 13.2.0-3), libtrilinos-trilinoscouplings-dev (<= 13.2.0-3), libtrilinos-triutils-dev (<= 13.2.0-3), libtrilinos-xpetra-dev (<= 13.2.0-3), libtrilinos-zoltan2-dev (<= 13.2.0-3), libvbr-dev (<= 2.11.0~beta2-7), libvisp-dev (<= 3.5.0-2+b1), libvotca-dev (<= 2022-3), libvtk6-dev (<= 6.3.0+dfsg2-8.1+b1), libvtk7-dev (<= 7.1.1+dfsg2-10.2), open-vm-tools-dev (<= 2:12.0.5-2), pidgin-librvp (<= 0.9.7cvs-3), proftpd-dev (<= 1.3.7d+dfsg-2), slurm-wlm-basic-plugins-dev (<= 21.08.8.2-1)
+Replaces: libc6 (<= 2.32-1)
+Provides: libc-dev (= 2.41-12+deb13u4)
+Filename: ./libc6-dev_2.41-12+deb13u4_amd64.deb
+Size: 1994660
+MD5sum: 418afa25e28a18e3729cd1d9cf3bf010
+SHA1: f3859a3c0528bb85c746a18270793b295d2c80dc
+SHA256: 1fda734dabcd80b77266a09ab62b0f1e3e16d8091db62899890b2200745632a2
+Section: libdevel
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libc/libc.html
+Description: GNU C Library: Development Libraries and Header Files
+ Contains the symlinks, headers, and object files needed to compile
+ and link programs which use the standard C library.
+
+Package: libcc1-0
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 140
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.14), libgcc-s1 (>= 3.0), libstdc++6 (>= 5.2)
+Filename: ./libcc1-0_14.2.0-19_amd64.deb
+Size: 42796
+MD5sum: 4ebf8aac056b24e0843b48b1afa96e96
+SHA1: 1b039a35c6e9d3202f2226ecafd4ba19cce90b4e
+SHA256: 2d587e3bfba4aec701946b7ba0c1640b97b6d8dd0a34ba1c70ae85261ecedefa
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: GCC cc1 plugin for GDB
+ libcc1 is a plugin for GDB.
+
+Package: libcom-err2
+Source: e2fsprogs (1.47.2-3)
+Version: 1.47.2-3+b12
+Architecture: amd64
+Maintainer: Theodore Y. Ts'o <tytso@mit.edu>
+Installed-Size: 64
+Depends: libc6 (>= 2.38)
+Breaks: libcom-err2t64 (<< 1.47.0-2.4~exp1~), libcomerr2 (<< 1.43.9-1~)
+Replaces: libcom-err2t64, libcomerr2 (<< 1.43.9-1~)
+Provides: libcom-err2t64 (= 1.47.2-3+b12), libcomerr2 (= 1.47.2-3+b12)
+Filename: ./libcom-err2_1.47.2-3+b12_amd64.deb
+Size: 25036
+MD5sum: 273bb4a18c17c3ebc1eeda75cf1211fe
+SHA1: 0a08c25cbaba3fbe4faa800fdec8cdd0f05b4155
+SHA256: bd43e020b8fed399db3eebf098111f10fba4c436fff99ccad72cc7e27c9764ec
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://e2fsprogs.sourceforge.net
+Description: common error description library
+ libcomerr is an attempt to present a common error-handling mechanism to
+ manipulate the most common form of error code in a fashion that does not
+ have the problems identified with mechanisms commonly in use.
+
+Package: libcrypt-dev
+Source: libxcrypt
+Version: 1:4.4.38-1
+Architecture: amd64
+Maintainer: Marco d'Itri <md@linux.it>
+Installed-Size: 345
+Depends: libcrypt1 (= 1:4.4.38-1)
+Conflicts: libcrypt1-dev, libcrypt2-dev
+Breaks: libc6-dev (<< 2.29-4), manpages-dev (<< 5.01-1)
+Replaces: libc6-dev (<< 2.29-4), libcrypt1-dev, libcrypt2-dev, manpages-dev (<< 5.01-1)
+Provides: libcrypt1-dev
+Filename: ./libcrypt-dev_1%3a4.4.38-1_amd64.deb
+Size: 119040
+MD5sum: ef4a9106931e8c0994e1881047aa0f12
+SHA1: b94ecbf88226ed3c5175ba9c1f7e37bcd66c78cc
+SHA256: 98e2333aea8d64ca68f9b75c16256d3a05492fd8f9e6dba96adbc6f19e4f5a09
+Section: libdevel
+Priority: optional
+Multi-Arch: same
+Description: libcrypt development files
+ This package contains the files needed for developing applications that
+ use libcrypt.
+
+Package: libctf-nobfd0
+Source: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 293
+Depends: libc6 (>= 2.14), zlib1g (>= 1:1.2.0)
+Breaks: libbinutils (<< 2.33.50.20191128-1~)
+Replaces: libbinutils (<< 2.33.50.20191128-1~)
+Filename: ./libctf-nobfd0_2.44-3_amd64.deb
+Size: 155672
+MD5sum: ed41182f67ed47530cda4f54ef0f653b
+SHA1: 549bb57042a6c6f519445ae550a38aa8b396c589
+SHA256: e280b2be3db6e584500e865c251605b95c346767d87ccb2524e44992048fc657
+Section: devel
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/binutils/
+Description: Compact C Type Format library (runtime, no BFD dependency)
+ This package includes the libctf-nobfd shared library.  The Compact C Type
+ Format (CTF) is a way of representing information about a binary program
+
+Package: libctf0
+Source: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 232
+Depends: libbinutils (= 2.44-3), libc6 (>= 2.33), zlib1g (>= 1:1.2.0)
+Filename: ./libctf0_2.44-3_amd64.deb
+Size: 88616
+MD5sum: d73a3224826d5e9c72440b2ab7a556b8
+SHA1: 6fbef1d79dee50ad3b9be361b21e1a22799b743e
+SHA256: 120cafcd93132a276fa92a8fb4cf39b23d14e5a3e348f4f5580638d71ca95ac5
+Section: devel
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/binutils/
+Description: Compact C Type Format library (runtime, BFD dependency)
+ This package includes the libctf shared library.  The Compact C Type
+ Format (CTF) is a way of representing information about a binary program
+
+Package: libcurl4t64
+Source: curl
+Version: 8.14.1-2+deb13u5
+Architecture: amd64
+Maintainer: Debian Curl Maintainers <team+curl@tracker.debian.org>
+Installed-Size: 1013
+Depends: libbrotli1 (>= 0.6.0), libc6 (>= 2.38), libgssapi-krb5-2 (>= 1.17), libidn2-0 (>= 2.0.0), libldap2 (>= 2.6.2), libnghttp2-14 (>= 1.50.0), libnghttp3-9 (>= 0.15.0), libpsl5t64 (>= 0.16.0), librtmp1 (>= 2.3), libssh2-1t64 (>= 1.11.1), libssl3t64 (>= 3.3.0), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.2.3.4)
+Recommends: ca-certificates
+Conflicts: libcurl3
+Breaks: libcurl4 (<< 8.14.1-2+deb13u5)
+Replaces: libcurl3, libcurl4
+Provides: libcurl4 (= 8.14.1-2+deb13u5)
+Filename: ./libcurl4t64_8.14.1-2+deb13u5_amd64.deb
+Size: 391492
+MD5sum: f4eafe0d0739cc44a3a387a7ab09eba1
+SHA1: df4648d677695dc4fab8714dc297bce2b8bb53d0
+SHA256: 0dedddfe614fc4a4335c9167b73c64a50136edd76b7991aa851408d0795163eb
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://curl.se/
+Description: easy-to-use client-side URL transfer library (OpenSSL flavour)
+ libcurl is an easy-to-use client-side URL transfer library, supporting DICT,
+ FILE, FTP, FTPS, GOPHER, HTTP, HTTPS, IMAP, IMAPS, LDAP, LDAPS, POP3, POP3S,
+ RTMP, RTSP, SCP, SFTP, SMTP, SMTPS, TELNET and TFTP.
+ .
+ libcurl supports SSL certificates, HTTP POST, HTTP PUT, FTP uploading, HTTP
+ form based upload, proxies, cookies, user+password authentication (Basic,
+ Digest, NTLM, Negotiate, Kerberos), file transfer resume, http proxy tunneling
+ and more!
+ .
+ libcurl is free, thread-safe, IPv6 compatible, feature rich, well supported,
+ fast, thoroughly documented and is already used by many known, big and
+ successful companies and numerous applications.
+ .
+ SSL support is provided by OpenSSL.
+
+Package: libdpkg-perl
+Source: dpkg
+Version: 1.22.22
+Architecture: all
+Maintainer: Dpkg Developers <debian-dpkg@lists.debian.org>
+Installed-Size: 2091
+Depends: perl:any, dpkg (>= 1.18.11)
+Recommends: libfile-fcntllock-perl, liblocale-gettext-perl, bzip2, xz-utils (>= 5.4.0)
+Suggests: debian-keyring, debian-tag2upload-keyring, sq | sqop | rsop | gosop | pgpainless-cli | gpg-sq | gnupg, sqv | sqopv | rsopv | sopv | gosop | pgpainless-cli | gpgv-sq | gpgv, gcc | c-compiler, binutils, patch, sensible-utils, git, bzr
+Breaks: dgit (<< 3.13~), gosop (<< 1.1.0~), libsop-java-java (<< 4.0.7~), pgpainless-cli (<< 1.3.13~), pkg-kde-tools (<< 0.15.28~), rsop (<< 0.4.0~), sq (<< 0.40.0~), sqop (<< 0.27.2~), sqv (<< 1.3.0~)
+Filename: ./libdpkg-perl_1.22.22_all.deb
+Size: 650808
+MD5sum: 7a6bf35f7a320b598af2d9340612c000
+SHA1: f5d219d88a8c51e2e363e90a0d80aa159847d908
+SHA256: b41eaeb4879091023f8c1a058510844a244d3d0bd0f437e0e05d58213e36fd9f
+Section: perl
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://wiki.debian.org/Teams/Dpkg
+Description: Dpkg perl modules
+ This package provides the perl modules used by the scripts
+ in dpkg-dev. They cover a wide range of functionality. Among them
+ there are the following public modules:
+ .
+  - Dpkg: core variables
+  - Dpkg::Arch: architecture handling functions
+  - Dpkg::BuildFlags: set, modify and query compilation build flags
+  - Dpkg::BuildInfo: build information functions
+  - Dpkg::BuildOptions: parse and manipulate DEB_BUILD_OPTIONS
+  - Dpkg::BuildProfiles: parse and manipulate build profiles
+  - Dpkg::Changelog: parse changelogs
+  - Dpkg::Changelog::Entry: represents a changelog entry
+  - Dpkg::Changelog::Parse: generic changelog parser for dpkg-parsechangelog
+  - Dpkg::Checksums: generate and parse checksums
+  - Dpkg::Compression: simple database of available compression methods
+  - Dpkg::Compression::FileHandle: transparently (de)compress files
+  - Dpkg::Compression::Process: wrapper around compression tools
+  - Dpkg::Conf: parse dpkg configuration files
+  - Dpkg::Control: parse and manipulate Debian control information
+    (.dsc, .changes, Packages/Sources entries, etc.)
+  - Dpkg::Control::Changelog: represent fields output by dpkg-parsechangelog
+  - Dpkg::Control::Fields: manage (list of known) control fields
+  - Dpkg::Control::Hash: parse and manipulate a block of RFC822-like fields
+  - Dpkg::Control::Info: parse files like debian/control
+  - Dpkg::Control::Tests: parse files like debian/tests/control
+  - Dpkg::Control::Tests::Entry: represents a debian/tests/control stanza
+  - Dpkg::Deps: parse and manipulate dependencies
+  - Dpkg::Deps::Simple: represents a single dependency statement
+  - Dpkg::Deps::Multiple: base module to represent multiple dependencies
+  - Dpkg::Deps::Union: list of unrelated dependencies
+  - Dpkg::Deps::AND: list of AND dependencies
+  - Dpkg::Deps::OR: list of OR dependencies
+  - Dpkg::Deps::KnownFacts: list of installed and virtual packages
+  - Dpkg::Exit: push, pop and run exit handlers
+  - Dpkg::Gettext: wrapper around Locale::gettext
+  - Dpkg::IPC: spawn sub-processes and feed/retrieve data
+  - Dpkg::Index: collections of Dpkg::Control (Packages/Sources files for
+    example)
+  - Dpkg::Interface::Storable: base object serializer
+  - Dpkg::Path: common path handling functions
+  - Dpkg::Source::Format: manipulate debian/source/format files
+  - Dpkg::Source::Package: extract Debian source packages
+  - Dpkg::Substvars: substitute variables in strings
+  - Dpkg::Vendor: identify current distribution vendor
+  - Dpkg::Version: parse and manipulate Debian package versions
+ .
+ All the packages listed in Suggests or Recommends are used by some of the
+ modules.
+
+Package: libexpat1
+Source: expat
+Version: 2.8.3-1~deb13u1
+Architecture: amd64
+Maintainer: Laszlo Boszormenyi (GCS) <gcs@debian.org>
+Installed-Size: 424
+Pre-Depends: libc6 (>= 2.36)
+Filename: ./libexpat1_2.8.3-1~deb13u1_amd64.deb
+Size: 122672
+MD5sum: d02bb9c0c137b7c2f5dcc8187afca31a
+SHA1: 6fa138e8910182e6ae0451779219e7381feba832
+SHA256: 38abe0e710a07688e9c149d74536e67cfee0364bdb64dd6d644c32a1cfad389f
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://libexpat.github.io/
+Description: XML parsing C library - runtime library
+ This package contains the runtime, shared library of expat, the C
+ library for parsing XML. Expat is a stream-oriented parser in
+ which an application registers handlers for things the parser
+ might find in the XML document (like start tags).
+
+Package: libgcc-14-dev
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 17357
+Depends: gcc-14-base (= 14.2.0-19), libgcc-s1 (>= 14.2.0-19), libgomp1 (>= 14.2.0-19), libitm1 (>= 14.2.0-19), libatomic1 (>= 14.2.0-19), libasan8 (>= 14.2.0-19), liblsan0 (>= 14.2.0-19), libtsan2 (>= 14.2.0-19), libubsan1 (>= 14.2.0-19), libhwasan0 (>= 14.2.0-19), libquadmath0 (>= 14.2.0-19)
+Recommends: libc6-dev (>= 2.23-1~)
+Breaks: libtsan2 (<< 12-20211113-2~)
+Replaces: libtsan2 (<< 12-20211113-2~)
+Filename: ./libgcc-14-dev_14.2.0-19_amd64.deb
+Size: 2672328
+MD5sum: 39f291b5a853a4ef843359d007960016
+SHA1: 9581fae9cbf1bb9b8e9c59405f71259c5bb8524f
+SHA256: ca6f2d36d96b19b3eb71405b0b80134d8c89380b02204a2512e5c58ceb090628
+Section: libdevel
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: GCC support library (development files)
+ This package contains the headers and static library files necessary for
+ building C programs which use libgcc, libgomp, libquadmath, libssp or libitm.
+
+Package: libgdbm-compat4t64
+Source: gdbm
+Version: 1.24-2
+Architecture: amd64
+Maintainer: Nicolas Mora <babelouest@debian.org>
+Installed-Size: 75
+Depends: libc6 (>= 2.33), libgdbm6t64 (>= 1.16)
+Breaks: libgdbm-compat4 (<< 1.24-2)
+Replaces: libgdbm-compat4
+Provides: libgdbm-compat4 (= 1.24-2)
+Filename: ./libgdbm-compat4t64_1.24-2_amd64.deb
+Size: 50280
+MD5sum: cc53af617261680fa9ed2d4931697837
+SHA1: 99eade0456a55035ce891d7f85cb620b0dcd7871
+SHA256: 2cbd43cf2dfbf57ff48188b5d79d29cf7ea8f0dedaa61ab0bcc02eceff50ea01
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://gnu.org/software/gdbm
+Description: GNU dbm database routines (legacy support runtime version)
+ GNU dbm ('gdbm') is a library of database functions that use extendible
+ hashing and works similarly to the standard UNIX 'dbm' functions.
+ .
+ The basic use of 'gdbm' is to store key/data pairs in a data file, thus
+ providing a persistent version of the 'dictionary' Abstract Data Type
+ ('hash' to perl programmers).
+ This package includes library files, required to run old programs,
+ that use legacy 'dbm' interface. For new programs, please use modern
+ interface, provided by libgdbm6t64 and libgdbm-dev.
+
+Package: libgnutls30t64
+Source: gnutls28
+Version: 3.8.9-3+deb13u4
+Architecture: amd64
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Installed-Size: 3504
+Depends: libc6 (>= 2.38), libgmp10 (>= 2:6.3.0+dfsg), libhogweed6t64 (>= 3.10), libidn2-0 (>= 2.0.0), libnettle8t64 (>= 3.10), libp11-kit0 (>= 0.25.1), libtasn1-6 (>= 4.14), libunistring5 (>= 1.1)
+Suggests: gnutls-bin
+Breaks: libgnutls30 (<< 3.8.9-3+deb13u4)
+Replaces: libgnutls30
+Provides: libgnutls30 (= 3.8.9-3+deb13u4)
+Filename: ./libgnutls30t64_3.8.9-3+deb13u4_amd64.deb
+Size: 1469024
+MD5sum: ce391a9ff4974eba985481ee3eaf34a5
+SHA1: 72f4c6cf757e4af0acf000271eec501c06f7a97d
+SHA256: 18a8bdfd91c7e3bcb01719d55a2b56849c7160b34f1f52b1c4fdfdd41bf1352b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnutls.org/
+Description: GNU TLS library - main runtime library
+ GnuTLS is a portable library which implements the Transport Layer
+ Security (TLS 1.0, 1.1, 1.2, 1.3) and Datagram
+ Transport Layer Security (DTLS 1.0, 1.2) protocols.
+ .
+ GnuTLS features support for:
+  - certificate path validation, as well as DANE and trust on first use.
+  - the Online Certificate Status Protocol (OCSP).
+  - public key methods, including RSA and Elliptic curves, as well as password
+    and key authentication methods such as SRP and PSK protocols.
+  - all the strong encryption algorithms, including AES and Camellia.
+  - CPU-assisted cryptography with VIA padlock and AES-NI instruction sets.
+  - HSMs and cryptographic tokens, via PKCS #11.
+ .
+ This package contains the main runtime library.
+
+Package: libgomp1
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 368
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.38)
+Breaks: gcc-4.3 (<< 4.3.6-1), gcc-4.4 (<< 4.4.6-4), gcc-4.5 (<< 4.5.3-2)
+Filename: ./libgomp1_14.2.0-19_amd64.deb
+Size: 137148
+MD5sum: 802973e7a4112ca440303b5beecfede6
+SHA1: af0e867223a0b3568ffa77c27fe172fd90ca1487
+SHA256: 72b7a1a33c48f3195efeb044111b34ae684b1e640bb6495c832443b798601cd5
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: GCC OpenMP (GOMP) support library
+ GOMP is an implementation of OpenMP for the C, C++, and Fortran compilers
+ in the GNU Compiler Collection.
+
+Package: libgprofng0
+Source: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 4034
+Depends: libbinutils (= 2.44-3), libc6 (>= 2.38), libgcc-s1 (>= 3.3.1), libstdc++6 (>= 14), zlib1g (>= 1:1.1.4)
+Filename: ./libgprofng0_2.44-3_amd64.deb
+Size: 807764
+MD5sum: 9c14211adbdf98219ffef25f33fa71a1
+SHA1: e2b9ac2d0ea0bb8e1bee2418aba1c592f9c7d5ba
+SHA256: 0d36d0bde85c467ac6735dded08e19dd30ae1369e3908b9eb48ccc0d6ff66648
+Section: devel
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/binutils/
+Description: GNU Next Generation profiler (runtime library)
+ Gprofng is the GNU Next Generation profiler for analyzing the performance
+ of Linux applications.  Gprofng allows you to:
+ .
+  - Profile C / C++ / Java / Scala applications without needing to recompile
+  - Profile multi-threaded applications
+  - Analyze and compare multiple experiments
+  - Use time-based sampling and / or hardware event counters
+ .
+ This package includes the libgprofng shared library.
+
+Package: libgssapi-krb5-2
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 434
+Depends: libkrb5-3 (= 1.21.3-5+deb13u1), libc6 (>= 2.38), libcom-err2 (>= 1.43.9), libk5crypto3 (>= 1.20), libkrb5support0 (= 1.21.3-5+deb13u1)
+Suggests: krb5-doc, krb5-user
+Filename: ./libgssapi-krb5-2_1.21.3-5+deb13u1_amd64.deb
+Size: 138356
+MD5sum: 9d93b5d1adb11eec662012c1b7dcd33b
+SHA1: ddecd0f8bcc988780e6e7811c9c25e68e776b386
+SHA256: 30847c1fde4240567d7ed3aeab4f655dd591203758b857e85e824045aae70299
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries - krb5 GSS-API Mechanism
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains the runtime library for the MIT Kerberos
+ implementation of GSS-API used by applications and Kerberos clients.
+
+Package: libhwasan0
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 4850
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.34), libgcc-s1 (>= 3.3)
+Filename: ./libhwasan0_14.2.0-19_amd64.deb
+Size: 1487768
+MD5sum: 85c6e76097f5ecba39c87ab41548b06d
+SHA1: 9f565e9b731dcf084216fa6ed867cc53c2a820ed
+SHA256: 2cdaf797cad8ac30a964ab081370682dd065ae1b0305a0be9d8e0e14cd0657d7
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: AddressSanitizer -- a fast memory error detector
+ AddressSanitizer (HWASan) is a fast memory error detector.  It finds
+ use-after-free and {heap,stack,global}-buffer overflow bugs in C/C++ programs.
+
+Package: libidn2-0
+Source: libidn2
+Version: 2.3.8-2
+Architecture: amd64
+Maintainer: Debian Libidn team <help-libidn@gnu.org>
+Installed-Size: 446
+Depends: libc6 (>= 2.14), libunistring5 (>= 1.1)
+Filename: ./libidn2-0_2.3.8-2_amd64.deb
+Size: 109096
+MD5sum: c12f652b328832486b6992d355e52c29
+SHA1: 3c7a11b95bf17674f57763834134ebd4214f87ff
+SHA256: 90b039bcdc4578f8e1c4935adf8dbb525e36a164deefdbbb8c45bac347d48278
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libidn/#libidn2
+Description: Internationalized domain names (IDNA2008/TR46) library
+ Libidn2 implements the revised algorithm for internationalized domain
+ names called IDNA2008/TR46.
+ .
+ This package contains runtime libraries.
+
+Package: libisl23
+Source: isl
+Version: 0.27-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 2253
+Depends: libc6 (>= 2.14), libgmp10 (>= 2:6.3.0+dfsg)
+Breaks: libisl-dbg (<< 0.19)
+Replaces: libisl-dbg (<< 0.19)
+Filename: ./libisl23_0.27-1_amd64.deb
+Size: 659152
+MD5sum: b3588a435f44ab74fc24e85d6ac4d807
+SHA1: 1d47b6af368facc2d560a7eaa2f827aea5671aba
+SHA256: ac8518042e81c00de1effb72bba7e88ac4ecd488f7ea8b9e3ebc63159cb53b35
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://openhub.net/p/isl
+Description: manipulating sets and relations of integer points bounded by linear constraints
+ isl is a library for manipulating sets and relations of integer points
+ bounded by linear constraints. Supported operations on sets include
+ intersection, union, set difference, emptiness check, convex hull,
+ (integer) affine hull, integer projection, and computing the lexicographic
+ minimum using parametric integer programming. It also includes an ILP solver
+ based on generalized basis reduction.
+ .
+ This package contains the runtime library.
+
+Package: libitm1
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 115
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.34)
+Filename: ./libitm1_14.2.0-19_amd64.deb
+Size: 25956
+MD5sum: 73c00683cc2eee651925b41f15e321a4
+SHA1: fa3386e16d30fbd33004c03a0a8e3ffc205f4cc3
+SHA256: febdb3c528cde1a3abe952e17a1d3cfa7ccaca5b6f506d983d34385dad199490
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: GNU Transactional Memory Library
+ GNU Transactional Memory Library (libitm) provides transaction support for
+ accesses to the memory of a process, enabling easy-to-use synchronization of
+ accesses to shared memory by several threads.
+
+Package: libjansson4
+Source: jansson (2.14-2)
+Version: 2.14-2+b3
+Architecture: amd64
+Maintainer: Alessandro Ghedini <ghedo@debian.org>
+Installed-Size: 100
+Depends: libc6 (>= 2.38)
+Filename: ./libjansson4_2.14-2+b3_amd64.deb
+Size: 39792
+MD5sum: d5e30120616c31e7cfb1bf082babdcb2
+SHA1: 863b42d49fe03ddab657301ee6c8f4a066b3bcdf
+SHA256: 60707a62fe6c1228c3389b12a13ca4efd76defc5532473e547a29e99cf7d2a6e
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://www.digip.org/jansson/
+Description: C library for encoding, decoding and manipulating JSON data
+ Jansson is a C library for encoding, decoding and manipulating JSON data.
+ .
+ It features:
+  * Simple and intuitive API and data model
+  * Comprehensive documentation
+  * No dependencies on other libraries
+  * Full Unicode support (UTF-8)
+  * Extensive test suite
+
+Package: libjsoncpp26
+Source: libjsoncpp
+Version: 1.9.6-3
+Architecture: amd64
+Maintainer: Timo Röhling <roehling@debian.org>
+Installed-Size: 265
+Depends: libc6 (>= 2.14), libgcc-s1 (>= 3.0), libstdc++6 (>= 13.1)
+Filename: ./libjsoncpp26_1.9.6-3_amd64.deb
+Size: 81684
+MD5sum: 39e78c5b99ab282f4d1c36d8424f4ff6
+SHA1: 6ad049c35173d62b6d4d57915c8ffcbeb1cc30a4
+SHA256: fd0b75839fe7b1a08df49e4203b1fb042df4f7d982db8d91c1fd7bdbcd4b1460
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/open-source-parsers/jsoncpp
+Description: library for reading and writing JSON for C++
+ jsoncpp is an implementation of a JSON reader and writer in C++. JSON
+ (JavaScript Object Notation) is a lightweight data-interchange format
+ that it is easy to parse and redable for human. It is useful for
+ building config files, network communications protocols, etc.
+ .
+ This library provides following features:
+ .
+  * High-level data structures for collecting data from JSON.
+  * Easy-to-use reader and writer.
+
+Package: libk5crypto3
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 266
+Depends: libc6 (>= 2.38), libkrb5support0 (= 1.21.3-5+deb13u1)
+Suggests: krb5-doc, krb5-user
+Breaks: libgssapi-krb5-2 (<= 1.18~), libkrb5-3 (<= 1.18~)
+Filename: ./libk5crypto3_1.21.3-5+deb13u1_amd64.deb
+Size: 81152
+MD5sum: 96cdff8aed6de85e2ac31dc1513207ba
+SHA1: 59b80ae0af88c085973d19dd8e321815455e70e6
+SHA256: 7da07ee674b47f1f0be7cc89317c25310086a1f1761217d0f72e6ae2c5a69b84
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries - Crypto Library
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains the runtime cryptography libraries used by
+ applications and Kerberos clients.
+
+Package: libkeyutils1
+Source: keyutils
+Version: 1.6.3-6
+Architecture: amd64
+Maintainer: Christian Kastner <ckk@debian.org>
+Installed-Size: 41
+Depends: libc6 (>= 2.14)
+Filename: ./libkeyutils1_1.6.3-6_amd64.deb
+Size: 9456
+MD5sum: d94a241f2f7ab7edf5b6fb049fde8380
+SHA1: 510fbc305d8dc86f0279c13f77fa06c4c1a6c75f
+SHA256: 0b11ad17be0300b63ad4eeb4c6450fed24d34b7b740f23e5363dcb29ee6d5eba
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://git.kernel.org/pub/scm/linux/kernel/git/dhowells/keyutils.git
+Description: Linux Key Management Utilities (library)
+ Keyutils is a set of utilities for managing the key retention facility in the
+ kernel, which can be used by filesystems, block devices and more to gain and
+ retain the authorization and encryption keys required to perform secure
+ operations.
+ .
+ This package provides a wrapper library for the key management facility system
+ calls.
+
+Package: libkrb5-3
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 1074
+Depends: libkrb5support0 (= 1.21.3-5+deb13u1), libc6 (>= 2.38), libcom-err2 (>= 1.43.9), libk5crypto3 (>= 1.20), libkeyutils1 (>= 1.5.9), libssl3t64 (>= 3.0.0)
+Recommends: krb5-locales
+Suggests: krb5-doc, krb5-user
+Breaks: libapache2-mod-auth-kerb (<= 5.4-2.4)
+Filename: ./libkrb5-3_1.21.3-5+deb13u1_amd64.deb
+Size: 326056
+MD5sum: c79f19d86512fadcbff5efa5317c23fb
+SHA1: 53d94056269d541890f7e1bc61b4face03061af6
+SHA256: 47d71d6a7f2e59b9bae5f89602397594805113b95889ad18fa703cd53abafc97
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains the runtime library for the main Kerberos v5 API
+ used by applications and Kerberos clients.
+
+Package: libkrb5support0
+Source: krb5
+Version: 1.21.3-5+deb13u1
+Architecture: amd64
+Maintainer: Sam Hartman <hartmans@debian.org>
+Installed-Size: 137
+Depends: libc6 (>= 2.38)
+Breaks: krb5-admin-server (<< 1.20.1-4~), krb5-kdc (<< 1.20.1-4~), krb5-pkinit (<< 1.20.1-4~), krb5-user (<< 1.20.1-4~), libgssapi-krb5-2 (<< 1.20), libk5crypto3 (<< 1.20.1-4~), libkadm5clnt-mit9 (<< 1.13~alpha1-1), libkadm5srv-mit12 (<< 1.20.1-4~), libkadm5srv-mit9 (<< 1.13~alpha1-1), libkdb5-10t64 (<< 1.20.1-4~), libkdb5-8 (<< 1.16), libkrb5-3 (<< 1.20.1-4~)
+Filename: ./libkrb5support0_1.21.3-5+deb13u1_amd64.deb
+Size: 33124
+MD5sum: 20061bfd85a525d45bdce33e5300c43c
+SHA1: fdcbf424c12036172b67ed2d13d14fa441fb3736
+SHA256: 3a0acd8b37955c0e102c756b52c97df2a31f67b96453c35dab70df218d309117
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://web.mit.edu/kerberos/
+Description: MIT Kerberos runtime libraries - Support library
+ Kerberos is a system for authenticating users and services on a network.
+ Kerberos is a trusted third-party service.  That means that there is a
+ third party (the Kerberos server) that is trusted by all the entities on
+ the network (users and services, usually called "principals").
+ .
+ This is the MIT reference implementation of Kerberos V5.
+ .
+ This package contains an internal runtime support library used by other
+ Kerberos libraries.
+
+Package: libldap2
+Source: openldap
+Version: 2.6.10+dfsg-1
+Architecture: amd64
+Maintainer: Debian OpenLDAP Maintainers <pkg-openldap-devel@lists.alioth.debian.org>
+Installed-Size: 576
+Depends: libc6 (>= 2.38), libsasl2-2 (>= 2.1.28+dfsg1), libssl3t64 (>= 3.0.0)
+Recommends: libldap-common
+Filename: ./libldap2_2.6.10+dfsg-1_amd64.deb
+Size: 193576
+MD5sum: fdbf173c3f3056406044b3dedc2c1617
+SHA1: 156554a5a8064d450c2103819c5e1901f2482ef9
+SHA256: 60069e4a550ca890113fa89d3001417781b18e146ec5d637d31e368dec9909bd
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.openldap.org/
+Description: OpenLDAP libraries
+ These are the run-time libraries for the OpenLDAP (Lightweight Directory
+ Access Protocol) servers and clients.
+
+Package: liblsan0
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 3782
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.34), libgcc-s1 (>= 3.3)
+Filename: ./liblsan0_14.2.0-19_amd64.deb
+Size: 1204164
+MD5sum: 8d645f840bfe65d23f4d252b471a2e53
+SHA1: aec3197f6bcf7e2291d03ec699d088f590a33f83
+SHA256: a0df07da76287a45e665d584363dc2a6a1c4e240aee41b8bbc0f67cdff97cd68
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: LeakSanitizer -- a memory leak detector (runtime)
+ LeakSanitizer (Lsan) is a memory leak detector which is integrated
+ into AddressSanitizer.
+
+Package: libmpc3
+Source: mpclib3 (1.3.1-1)
+Version: 1.3.1-1+b3
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 154
+Depends: libc6 (>= 2.4), libgmp10 (>= 2:6.3.0+dfsg), libmpfr6 (>= 4.0.0)
+Filename: ./libmpc3_1.3.1-1+b3_amd64.deb
+Size: 52244
+MD5sum: 18e262a6f25f47f8d6f5650fa6d0fa6f
+SHA1: 270987527962db11968d1d8bf2f50f5c4522b3af
+SHA256: 2af0a5c128e03694a41c0b011bd8a958b7297436cdb3a15ddad7866dae8c300b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://www.multiprecision.org/mpc/
+Description: multiple precision complex floating-point library
+ MPC is a portable library written in C for arbitrary precision
+ arithmetic on complex numbers providing correct rounding. For the time
+ being, it contains all arithmetic operations over complex numbers, the
+ exponential and the logarithm functions, the trigonometric and
+ hyperbolic functions.
+ .
+ Ultimately, it should implement a multiprecision equivalent of the ISO
+ C99 standard.
+ .
+ It builds upon the GNU MP and the MPFR libraries.
+
+Package: libmpfr6
+Source: mpfr4
+Version: 4.2.2-1
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 1225
+Depends: libc6 (>= 2.14), libgmp10 (>= 2:6.3.0+dfsg)
+Breaks: libcgal13 (<< 4.11-2+b1), libflint-2.5.2 (<< 2.5.2-17+b2), libgiac0 (<< 1.2.3.57+dfsg1-2+b4), libgmp3 (<< 4.1.4-3), libmpc3 (<< 1.1.0-1~), libnormaliz3 (<< 3.5.1+ds-4), sagemath (<< 8.1-2+b2)
+Filename: ./libmpfr6_4.2.2-1_amd64.deb
+Size: 729320
+MD5sum: 839426828463b5c4df709f97e7433015
+SHA1: 2390204ccaf310cea4f55ffbcd223d403c7bf0ac
+SHA256: 75dddce11dabc7fc543712c33dc27b7f2ee66a111763eb5eac654d010b42cd92
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.mpfr.org/
+Description: multiple precision floating-point computation
+ MPFR provides a library for multiple-precision floating-point computation
+ with correct rounding.  The computation is both efficient and has a
+ well-defined semantics. It copies the good ideas from the
+ ANSI/IEEE-754 standard for double-precision floating-point arithmetic
+ (53-bit mantissa).
+
+Package: libnghttp2-14
+Source: nghttp2
+Version: 1.64.0-1.1+deb13u1
+Architecture: amd64
+Maintainer: Tomasz Buchert <tomasz@debian.org>
+Installed-Size: 229
+Depends: libc6 (>= 2.17)
+Filename: ./libnghttp2-14_1.64.0-1.1+deb13u1_amd64.deb
+Size: 76188
+MD5sum: 3650643a734bbd58529afd0493d181b2
+SHA1: 5e221d7a3f04f19acb50ae187d26aa7bbcf0d924
+SHA256: 896cb217537c09251fb909b8541349010ac279d802d871e98c06a62a2c67ce2c
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://nghttp2.org/
+Description: library implementing HTTP/2 protocol (shared library)
+ This is an implementation of the Hypertext Transfer Protocol version
+ 2 in C. The framing layer of HTTP/2 is implemented as a reusable C
+ library.
+ .
+ This package installs a shared library.
+
+Package: libnghttp3-9
+Source: nghttp3
+Version: 1.8.0-1
+Architecture: amd64
+Maintainer: Debian Curl Maintainers <team+curl@tracker.debian.org>
+Installed-Size: 201
+Depends: libc6 (>= 2.14)
+Filename: ./libnghttp3-9_1.8.0-1_amd64.deb
+Size: 67656
+MD5sum: 6b1f90e4153530a76878e9fde0244c66
+SHA1: ec2a18da55b53e48472fc88c9893b0c574d4fc3b
+SHA256: 388e4c33b72829cbf0d098afdc8539fa5ba7458eddb077f5538fdb4d5538716b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/ngtcp2/nghttp3
+Description: HTTP/3 library with QUIC and QPACK (library)
+ nghttp3 implements HTTP/3 functions in C. For now it supports several
+ HTTP actions like request, response and server push.
+ .
+ This package contains the shared library.
+
+Package: libp11-kit0
+Source: p11-kit
+Version: 0.25.5-3
+Architecture: amd64
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Installed-Size: 1882
+Depends: libc6 (>= 2.38), libffi8 (>= 3.4)
+Filename: ./libp11-kit0_0.25.5-3_amd64.deb
+Size: 425240
+MD5sum: d27fc7a8b7a7baac77b087b96d69d143
+SHA1: b04bc908531c41504c4197e2e1dc4fca6e820b4e
+SHA256: 784bf2063e166c8bc851a32623b74ebd85c499043a9d57c5bbd64fa63447f45a
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://p11-glue.github.io/p11-glue/p11-kit.html
+Description: library for loading and coordinating access to PKCS#11 modules - runtime
+ The p11-kit library provides a way to load and enumerate Public-Key
+ Cryptography Standard #11 modules, along with a standard configuration
+ setup for installing PKCS#11 modules so that they're discoverable. It
+ also solves problems with coordinating the use of PKCS#11 by different
+ components or libraries living in the same process.
+ .
+ This package contains the shared library required for applications loading
+ and accessing PKCS#11 modules.
+
+Package: libperl5.40
+Source: perl
+Version: 5.40.1-6+deb13u1
+Architecture: amd64
+Maintainer: Niko Tyni <ntyni@debian.org>
+Installed-Size: 29322
+Depends: libbz2-1.0, libc6 (>= 2.38), libcrypt1 (>= 1:4.1.0), libdb5.3t64, libgdbm-compat4t64 (>= 1.18-3), libgdbm6t64 (>= 1.21), zlib1g (>= 1:1.2.3.4), perl-modules-5.40 (>= 5.40.1-6+deb13u1)
+Suggests: sensible-utils
+Breaks: libcompress-raw-bzip2-perl (<< 2.212), libcompress-raw-zlib-perl (<< 2.212), libcompress-zlib-perl (<< 2.212), libdigest-md5-perl (<< 2.58.01), libdigest-sha-perl (<< 6.04), libencode-perl (<< 3.21), libfilter-perl (<< 1.64), libio-compress-base-perl (<< 2.212), libio-compress-bzip2-perl (<< 2.212), libio-compress-perl (<< 2.212), libio-compress-zlib-perl (<< 2.212), libmime-base64-perl (<< 3.16.01), libstorable-perl (<< 3.32), libsys-syslog-perl (<< 0.36), libthreads-perl (<< 2.40), libthreads-shared-perl (<< 1.69), libtime-hires-perl (<< 1.9777), libtime-piece-perl (<< 1.3401.01)
+Replaces: libarchive-tar-perl (<= 1.38-2), libcompress-raw-bzip2-perl (<< 2.212), libcompress-raw-zlib-perl (<< 2.212), libcompress-zlib-perl (<< 2.212), libdigest-md5-perl (<< 2.58.01), libdigest-sha-perl (<< 6.04), libencode-perl (<< 3.21), libio-compress-base-perl (<< 2.212), libio-compress-bzip2-perl (<< 2.212), libio-compress-perl (<< 2.212), libio-compress-zlib-perl (<< 2.212), libmime-base64-perl (<< 3.16.01), libmodule-corelist-perl (<< 2.14-2), libstorable-perl (<< 3.32), libsys-syslog-perl (<< 0.36), libthreads-perl (<< 2.40), libthreads-shared-perl (<< 1.69), libtime-hires-perl (<< 1.9777), libtime-piece-perl (<< 1.3401.01), perl (<< 5.22.0~), perl-base (<< 5.22.0~)
+Filename: ./libperl5.40_5.40.1-6+deb13u1_amd64.deb
+Size: 4325996
+MD5sum: f2c39e14463dcaa069bf73120cdc8279
+SHA1: af4cd0adb0e67e6e30e04a39ff617d94cc05fc77
+SHA256: e44777ff47ad248d1debd57e1f96ab5e89061a341008ae39880ba3b5fc15f273
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://dev.perl.org/perl5/
+Description: shared Perl library
+ This package contains the shared Perl library, used by applications
+ which embed a Perl interpreter.
+ .
+ It also contains the architecture-dependent parts of the standard
+ library (and depends on perl-modules-5.40 which contains the
+ architecture-independent parts).
+
+Package: libproc2-0
+Source: procps
+Version: 2:4.0.4-9
+Architecture: amd64
+Maintainer: Craig Small <csmall@debian.org>
+Installed-Size: 237
+Depends: libc6 (>= 2.38), libsystemd0
+Replaces: procps (<< 1:3.3.2-1)
+Filename: ./libproc2-0_2%3a4.0.4-9_amd64.deb
+Size: 65596
+MD5sum: c446e0ae1fbcab149c5b386d3a680e79
+SHA1: 023abaa2f21ffba84247a595f46ccfd057547582
+SHA256: c9d61caab1b2ddfc3f17edb95be31b9809fcb2daf27d853dff615bc4ebd08b4b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://gitlab.com/procps-ng/procps
+Description: library for accessing process information from /proc
+ The libproc2 library is a way of accessing information out of the /proc
+ filesystem.
+ .
+ This package contains the shared libraries necessary to run programs
+ compiled with libproc2.
+
+Package: libpsl5t64
+Source: libpsl (0.21.2-1.1)
+Version: 0.21.2-1.1+b1
+Architecture: amd64
+Maintainer: Tim Rühsen <tim.ruehsen@gmx.de>
+Installed-Size: 100
+Depends: libidn2-0 (>= 0.16), libc6 (>= 2.33), libunistring5 (>= 1.1)
+Recommends: publicsuffix (>= 20150507)
+Breaks: libpsl5 (<< 0.21.2-1.1)
+Replaces: libpsl5
+Provides: libpsl5 (= 0.21.2-1.1+b1)
+Filename: ./libpsl5t64_0.21.2-1.1+b1_amd64.deb
+Size: 57188
+MD5sum: 09aa06d971ce5ff6d02b452c0e1f15f9
+SHA1: 721d9692ffd65ded56bf4de880f199ec188aa04f
+SHA256: 59d42bb1f9ebc0d1776fe616efb08a7a8568b05982e00f70b03c63863db768ab
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/rockdaboot/libpsl
+Description: Library for Public Suffix List (shared libraries)
+ Libpsl allows checking domains against the Public Suffix List.
+ It can be used to avoid privacy-leaking 'super-cookies',
+ 'super domain' certificates, for domain highlighting purposes
+ sorting domain lists by site and more.
+ .
+ Please see https://publicsuffix.org for more detailed information.
+ .
+ This package contains runtime libraries.
+
+Package: libquadmath0
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 296
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.38)
+Filename: ./libquadmath0_14.2.0-19_amd64.deb
+Size: 145068
+MD5sum: 002522328d0e10d30642fb25c075fdf7
+SHA1: 71836091317421d399f7961093c95f4a1861ba92
+SHA256: f5b51cf0ece3ec3bb7494d0cdbff3ce715ae00cfb2b6ed787f7db91319d64a7b
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: GCC Quad-Precision Math Library
+ A library, which provides quad-precision mathematical functions on targets
+ supporting the __float128 datatype. The library is used to provide on such
+ targets the REAL(16) type in the GNU Fortran compiler.
+
+Package: librhash1
+Source: rhash
+Version: 1.4.5-1
+Architecture: amd64
+Maintainer: Debian Security Tools <team+pkg-security@tracker.debian.org>
+Installed-Size: 243
+Depends: libc6 (>= 2.34)
+Recommends: libssl3
+Filename: ./librhash1_1.4.5-1_amd64.deb
+Size: 132184
+MD5sum: f1b9c1c0daee98643cc71c6f7009ffec
+SHA1: 972a71fb56f614c7c38ef38415e21b823045a831
+SHA256: 9bf56d7d8ce3e7680a0dd8e3cfe8acdf50e0aa3b98b0a907cf744a4d1711af72
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://rhash.sourceforge.net
+Description: shared library for hash functions computing
+ LibRHash is a professional, portable, thread-safe C library for computing
+ magnet links and a wide variety of hash sums, such as CRC32, MD4, MD5, SHA1,
+ SHA256, SHA512, AICH, ED2K, Tiger, DC++ TTH, BitTorrent BTIH,
+ GOST R 34.11-94, RIPEMD-160, HAS-160, EDON-R, Whirlpool and Snefru.
+ Hash sums are used to ensure and verify integrity of large volumes of data
+ for a long-term storing or transferring.
+ .
+ Features:
+  * Small and easy to learn interface.
+  * Hi-level and Low-level API.
+  * Allows calculating of several hash functions simultaneously.
+  * Portability: the library works on Linux, *BSD and Windows.
+
+Package: librtmp1
+Source: rtmpdump (2.4+20151223.gitfa8646d.1-2)
+Version: 2.4+20151223.gitfa8646d.1-2+b5
+Architecture: amd64
+Maintainer: Debian Multimedia Maintainers <debian-multimedia@lists.debian.org>
+Installed-Size: 144
+Depends: libc6 (>= 2.34), libgmp10 (>= 2:6.3.0+dfsg), libgnutls30t64 (>= 3.8.1), libhogweed6t64, libnettle8t64, zlib1g (>= 1:1.1.4)
+Filename: ./librtmp1_2.4+20151223.gitfa8646d.1-2+b5_amd64.deb
+Size: 58840
+MD5sum: 355aeaaf937d70dcc873a458f6244c6e
+SHA1: 890c75ffd3bd595233728f775acfa20693e53810
+SHA256: 93baa2004cbe6c8721b9e81beed078612540aef120970b4751305c51c6697368
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://rtmpdump.mplayerhq.hu/
+Description: toolkit for RTMP streams (shared library)
+ A small dumper for media content streamed over the RTMP protocol (like BBC's
+ iPlayer high quality streams). Supplying an RTMP URL will result in a dumped
+ flv file, which can be played/transcoded with standard tools.
+ .
+ This package contains the shared libraries, header files needed by
+ programs that want to use librtmp.
+
+Package: libsasl2-2
+Source: cyrus-sasl2
+Version: 2.1.28+dfsg1-9
+Architecture: amd64
+Maintainer: Debian Cyrus Team <team+cyrus@tracker.debian.org>
+Installed-Size: 156
+Depends: libsasl2-modules-db (>= 2.1.28+dfsg1-9), libc6 (>= 2.38), libssl3t64 (>= 3.0.0)
+Recommends: libsasl2-modules (>= 2.1.28+dfsg1-9)
+Replaces: libsasl2
+Filename: ./libsasl2-2_2.1.28+dfsg1-9_amd64.deb
+Size: 57512
+MD5sum: 35ad5deb812b880a16b7ae25bbfcc6b9
+SHA1: d33dd3ff8f88f8ae9a84bad1df925ea1b2ea0904
+SHA256: 66e49d7ae026811b49a0050f18b0325960a2625ffd1ff60d91b7844a815fa9d2
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.cyrusimap.org/sasl/
+Description: Cyrus SASL - authentication abstraction library
+ This is the Cyrus SASL API implementation, version 2.1.
+ .
+ SASL is the Simple Authentication and Security Layer, a method for
+ adding authentication support to connection-based protocols. To use
+ SASL, a protocol includes a command for identifying and
+ authenticating a user to a server and for optionally negotiating
+ protection of subsequent protocol interactions. If its use is
+ negotiated, a security layer is inserted between the protocol and the
+ connection. See RFC 2222 for more information.
+ .
+ Any of: ANONYMOUS, SCRAM, CRAM-MD5, DIGEST-MD5, GSSAPI (MIT or Heimdal
+ Kerberos 5), NTLM, OTP, PLAIN, or LOGIN can be used.
+
+Package: libsasl2-modules-db
+Source: cyrus-sasl2
+Version: 2.1.28+dfsg1-9
+Architecture: amd64
+Maintainer: Debian Cyrus Team <team+cyrus@tracker.debian.org>
+Installed-Size: 70
+Depends: libc6 (>= 2.14), libdb5.3t64
+Filename: ./libsasl2-modules-db_2.1.28+dfsg1-9_amd64.deb
+Size: 19768
+MD5sum: 697b55318a5683646f3f4c637576f3f3
+SHA1: 8c66ab6412351683261d50959984811c0480087b
+SHA256: a5c38659fbd62c33c6d9bfa2be43e75a572d1818531aad32dd74d0a58cc4bd19
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.cyrusimap.org/sasl/
+Description: Cyrus SASL - pluggable authentication modules (DB)
+ This is the Cyrus SASL API implementation, version 2.1. See package
+ libsasl2-2 and RFC 2222 for more information.
+ .
+ This package provides the DB plugin, which supports Berkeley DB lookups.
+
+Package: libsframe1
+Source: binutils
+Version: 2.44-3
+Architecture: amd64
+Maintainer: Matthias Klose <doko@debian.org>
+Installed-Size: 110
+Depends: libc6 (>= 2.14)
+Filename: ./libsframe1_2.44-3_amd64.deb
+Size: 78360
+MD5sum: 7438ed05450a8a28f307e973a57bfa72
+SHA1: 816e8b1e4f5d0845fb01a1743a6f3de33395d0f5
+SHA256: 38f625dfdc582717029ac3a3e97c51d994ec2e7a0e9b230c6b44e40d1276311f
+Section: devel
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/binutils/
+Description: Library to handle the SFrame format (runtime library)
+ SFrame stands for Simple Frame format.  SFrame format keeps track
+ of the minimal necessary information needed for generating stack traces.
+ .
+ This package includes the libsframe shared library.
+
+Package: libssh2-1t64
+Source: libssh2
+Version: 1.11.1-1+deb13u2
+Architecture: amd64
+Maintainer: Nicolas Mora <babelouest@debian.org>
+Installed-Size: 441
+Depends: libc6 (>= 2.25), libssl3t64 (>= 3.0.0), zlib1g (>= 1:1.1.4)
+Breaks: libssh2-1 (<< 1.11.1-1+deb13u2)
+Replaces: libssh2-1
+Provides: libssh2-1 (= 1.11.1-1+deb13u2)
+Filename: ./libssh2-1t64_1.11.1-1+deb13u2_amd64.deb
+Size: 245240
+MD5sum: be952cf8c3cec0f7f280602d4ed8650a
+SHA1: 4bad10a74dc7fc97d2b5a01d0528ea60a22b39de
+SHA256: dbb1024c192d4d292b7cfa902b96076cfe81b56a5eed4fb28da36e8bf543e49a
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://libssh2.org/
+Description: SSH2 client-side library
+ libssh2 is a client-side C library implementing the SSH2 protocol.
+ It supports regular terminal, SCP and SFTP (v1-v5) sessions;
+ port forwarding, X11 forwarding; password, key-based and
+ keyboard-interactive authentication.
+ .
+ This package contains the runtime library.
+
+Package: libssl-dev
+Source: openssl
+Version: 3.5.7-1~deb13u2
+Architecture: amd64
+Maintainer: Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>
+Installed-Size: 15998
+Depends: libssl3t64 (= 3.5.7-1~deb13u2)
+Suggests: libssl-doc
+Filename: ./libssl-dev_3.5.7-1~deb13u2_amd64.deb
+Size: 2964784
+MD5sum: 66a8e276da9e0a7c946800f26a179f69
+SHA1: a65d99c4a03eeac87e01bb916bbd254bf7848dcf
+SHA256: f245b646a4fe5beb31d6a387da9db3399e3b14a904efef1a23227ff5465a1d11
+Section: libdevel
+Priority: optional
+Multi-Arch: same
+Homepage: https://openssl-library.org
+Description: Secure Sockets Layer toolkit - development files
+ This package is part of the OpenSSL project's implementation of the SSL
+ and TLS cryptographic protocols for secure communication over the
+ Internet.
+ .
+ It contains development libraries, header files, and manpages for libssl
+ and libcrypto.
+
+Package: libssl3t64
+Source: openssl
+Version: 3.5.7-1~deb13u2
+Architecture: amd64
+Maintainer: Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>
+Installed-Size: 8103
+Depends: libc6 (>= 2.38), libzstd1 (>= 1.5.5), zlib1g (>= 1:1.1.4), openssl-provider-legacy
+Breaks: freeradius (<< 3.2.7+dfsg-1+deb13u1), libssl3 (<< 3.5.7-1~deb13u2), openssh-client (<< 1:9.4p1), openssh-server (<< 1:9.4p1), python3-m2crypto (<< 0.38.0-4)
+Replaces: libssl3
+Provides: libssl3 (= 3.5.7-1~deb13u2)
+Filename: ./libssl3t64_3.5.7-1~deb13u2_amd64.deb
+Size: 2453872
+MD5sum: 4477e2a5e52680f53fde3b97cab1847e
+SHA1: 8a2c262e9de449cc7b5f444865b52e6f3e202290
+SHA256: 916f7f40b34a06e6ebfaefcdab331bff458328411da672598f126a760472467d
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://openssl-library.org
+Description: Secure Sockets Layer toolkit - shared libraries
+ This package is part of the OpenSSL project's implementation of the SSL
+ and TLS cryptographic protocols for secure communication over the
+ Internet.
+ .
+ It provides the libssl and libcrypto shared libraries.
+
+Package: libstdc++-14-dev
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 22065
+Depends: gcc-14-base (= 14.2.0-19), libgcc-14-dev (= 14.2.0-19), libstdc++6 (>= 14.2.0-19), libc6-dev (>= 2.23-1~)
+Suggests: libstdc++-14-doc
+Provides: libstdc++-dev
+Filename: ./libstdc++-14-dev_14.2.0-19_amd64.deb
+Size: 2375760
+MD5sum: 43bb5c62f553c0241d0ea1e2388397cf
+SHA1: cece15016d9bd18e9069e361ef1381a8a6667382
+SHA256: 4b962fac5f1af0bd8b1b3f97e0f47b9d8e9a79e88802143f00ebfbd78ad87a7b
+Section: libdevel
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: GNU Standard C++ Library v3 (development files)
+ This package contains the headers and static library files necessary for
+ building C++ programs which use libstdc++.
+ .
+ libstdc++-v3 is a complete rewrite from the previous libstdc++-v2, which
+ was included up to g++-2.95. The first version of libstdc++-v3 appeared
+ in g++-3.0.
+
+Package: libtasn1-6
+Version: 4.20.0-2+deb13u1
+Architecture: amd64
+Maintainer: Debian GnuTLS Maintainers <pkg-gnutls-maint@lists.alioth.debian.org>
+Installed-Size: 122
+Depends: libc6 (>= 2.38)
+Filename: ./libtasn1-6_4.20.0-2+deb13u1_amd64.deb
+Size: 50112
+MD5sum: 0dee8d137e0d8bbc8a57e721c13a5f66
+SHA1: 16154349d857a93b3e689959b9cb2e72886edeb4
+SHA256: 23fec6e06583ce2bad9b2c04c9b485e90440e259b1abf8677cd80d3ce60831ad
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libtasn1/
+Description: Manage ASN.1 structures (runtime)
+ Manage ASN1 (Abstract Syntax Notation One) structures.
+ The main features of this library are:
+   * on-line ASN1 structure management that doesn't require any C code
+     file generation.
+   * off-line ASN1 structure management with C code file generation
+     containing an array.
+   * DER (Distinguish Encoding Rules) encoding
+   * no limits for INTEGER and ENUMERATED values
+ .
+ This package contains runtime libraries.
+
+Package: libtsan2
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 8807
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.34), libgcc-s1 (>= 3.4)
+Filename: ./libtsan2_14.2.0-19_amd64.deb
+Size: 2460216
+MD5sum: 1d0da369861896521af8a6844d0eaa64
+SHA1: 519e4ffbb01aeefa404f227fcf2577e1185d80aa
+SHA256: 529d7f68227d16975076c5f842e8b687faea1b5df8e0dcf62e436d5402844ca5
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: ThreadSanitizer -- a Valgrind-based detector of data races (runtime)
+ ThreadSanitizer (Tsan) is a data race detector for C/C++ programs.
+ The Linux and Mac versions are based on Valgrind.
+
+Package: libubsan1
+Source: gcc-14
+Version: 14.2.0-19
+Architecture: amd64
+Maintainer: Debian GCC Maintainers <debian-gcc@lists.debian.org>
+Installed-Size: 3319
+Depends: gcc-14-base (= 14.2.0-19), libc6 (>= 2.34), libgcc-s1 (>= 3.3), libstdc++6 (>= 4.1.1)
+Filename: ./libubsan1_14.2.0-19_amd64.deb
+Size: 1074340
+MD5sum: a216e2e96287a76cbee144756b873247
+SHA1: 53a0e29312de0b90b4cf033a5cf9b91acd6ed153
+SHA256: 9205a1bef7d6a52ffc06548e0cde169ff303e688c12d9be3a98f734449077e22
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://gcc.gnu.org/
+Description: UBSan -- undefined behaviour sanitizer (runtime)
+ UndefinedBehaviorSanitizer can be enabled via -fsanitize=undefined.
+ Various computations will be instrumented to detect undefined behavior
+ at runtime. Available for C and C++.
+
+Package: libunistring5
+Source: libunistring
+Version: 1.3-2
+Architecture: amd64
+Maintainer: Jörg Frings-Fürst <debian@jff.email>
+Installed-Size: 2092
+Depends: libc6 (>= 2.34)
+Filename: ./libunistring5_1.3-2_amd64.deb
+Size: 476768
+MD5sum: 954d362e7a674be8969e0c223782de72
+SHA1: 49e3032a7bb85c144d013d237eb8022e499a640c
+SHA256: 6dd3490bef06ea1096f32d10766b7e016cf579bfae8451d1b7df15ce05b8aa46
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://www.gnu.org/software/libunistring/
+Description: Unicode string library for C
+ The 'libunistring' library implements Unicode strings (in the UTF-8,
+ UTF-16, and UTF-32 encodings), together with functions for Unicode
+ characters (character names, classifications, properties) and
+ functions for string processing (formatted output, width, word
+ breaks, line breaks, normalization, case folding, regular
+ expressions).
+ .
+ This package contains the shared library.
+
+Package: libuv1t64
+Source: libuv1
+Version: 1.50.0-2
+Architecture: amd64
+Maintainer: Dominique Dumont <dod@debian.org>
+Installed-Size: 321
+Depends: libc6 (>= 2.38)
+Breaks: libuv1 (<< 1.48.0-1.1)
+Replaces: libuv1
+Provides: libuv1 (= 1.50.0-2)
+Filename: ./libuv1t64_1.50.0-2_amd64.deb
+Size: 153752
+MD5sum: d98e814a0b3e998b7536ae92a2c551cd
+SHA1: dc02e2fb87ccc4bd0715a2e026026e269382afdf
+SHA256: 5fec8035002e0c745b64d1c5b3e1dc42790d1a77574315b976cf3e4aab9ddc0a
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: https://github.com/libuv/libuv
+Description: asynchronous event notification library - runtime library
+ Libuv is the asynchronous library behind Node.js. Very similar to libevent or
+ libev, it provides the main elements for event driven systems: watching and
+ waiting for availability in a set of sockets, and some other events like timers
+ or asynchronous messages. However, libuv also comes with some other extras
+ like:
+  * files watchers and asynchronous operations
+  * a portable TCP and UDP API, as well as asynchronous DNS resolution
+  * processes and threads management, and a portable inter-process
+    communications mechanism, with pipes and work queues
+  * a plugins mechanism for loading libraries dynamically
+  * interface with external libraries that also need to access the I/O.
+ .
+ This package includes the dynamic library against which you can link
+ your program.
+
+Package: libxml2
+Version: 2.12.7+dfsg+really2.9.14-2.1+deb13u3
+Architecture: amd64
+Maintainer: Debian XML/SGML Group <debian-xml-sgml-pkgs@lists.alioth.debian.org>
+Installed-Size: 1916
+Depends: libc6 (>= 2.38), liblzma5 (>= 5.1.1alpha+20120614), zlib1g (>= 1:1.2.3.4)
+Conflicts: w3c-dtd-xhtml
+Filename: ./libxml2_2.12.7+dfsg+really2.9.14-2.1+deb13u3_amd64.deb
+Size: 699724
+MD5sum: 381b30ad5e8669318c82153f776a0e40
+SHA1: 1004cd76d8bbb2b8603eaf4ac38670d6b1b79928
+SHA256: e0c6b63ce4602a036a526f60fe5e6c1586710688058d98fc1001b9b3147b7efd
+Section: libs
+Priority: optional
+Multi-Arch: same
+Homepage: http://xmlsoft.org
+Description: GNOME XML library
+ XML is a metalanguage to let you design your own markup language.
+ A regular markup language defines a way to describe information in
+ a certain class of documents (eg HTML). XML lets you define your
+ own customized markup languages for many classes of document. It
+ can do this because it's written in SGML, the international standard
+ metalanguage for markup languages.
+ .
+ This package provides a library providing an extensive API to handle
+ such XML data files.
+
+Package: linux-libc-dev
+Source: linux
+Version: 6.12.107-1
+Architecture: all
+Maintainer: Debian Kernel Team <debian-kernel@lists.debian.org>
+Installed-Size: 10975
+Filename: ./linux-libc-dev_6.12.107-1_all.deb
+Size: 2919204
+MD5sum: 0083d1655c47f6781366f430d166336d
+SHA1: b10cb849084121247812039a0d80ff406c0f2235
+SHA256: dc68dd53c7356598d005866da0d19d7bd33af2a62971aced624cdf04492902b4
+Section: devel
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://www.kernel.org/
+Description: Linux support headers for userspace development
+ This package provides userspaces headers from the Linux kernel.  These
+ files are going to be installed into /usr/include, and are used by the
+ installed headers for GNU libc and other system libraries.
+
+Package: make
+Source: make-dfsg
+Version: 4.4.1-2
+Architecture: amd64
+Maintainer: Stephen Kitt <skitt@debian.org>
+Installed-Size: 1766
+Depends: libc6 (>= 2.38)
+Suggests: make-doc
+Conflicts: make-guile
+Replaces: make-guile
+Filename: ./make_4.4.1-2_amd64.deb
+Size: 463104
+MD5sum: 350a0c1b4b19d2ea8d2ff98ba42a54da
+SHA1: 22d70a0fdb62bb5301a59e3cf0b5ce66f3868009
+SHA256: 70a9709e665383b06068ccd423d62ea191b65355f318a25565dbf324b254cec6
+Section: devel
+Priority: optional
+Multi-Arch: allowed
+Homepage: https://www.gnu.org/software/make/
+Description: utility for directing compilation
+ GNU Make is a utility which controls the generation of executables
+ and other target files of a program from the program's source
+ files. It determines automatically which pieces of a large program
+ need to be (re)created, and issues the commands to (re)create
+ them. Make can be used to organize any task in which targets (files)
+ are to be automatically updated based on input files whenever the
+ corresponding input is newer --- it is not limited to building
+ computer programs. Indeed, Make is a general purpose dependency
+ solver.
+
+Package: openssl
+Version: 3.5.7-1~deb13u2
+Architecture: amd64
+Maintainer: Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>
+Installed-Size: 2510
+Depends: libc6 (>= 2.34), libssl3t64 (>= 3.5.0)
+Suggests: ca-certificates
+Filename: ./openssl_3.5.7-1~deb13u2_amd64.deb
+Size: 1507300
+MD5sum: 05f22d3b92498fee94a7432828d030e3
+SHA1: 6d4bae935f8e24b3cc0f65b9161150239a8a40ca
+SHA256: 4ff006f431d8c2e69fa736885a3b6e779f2448535f69dbde821d9f0ff87ad8ea
+Section: utils
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://openssl-library.org
+Description: Secure Sockets Layer toolkit - cryptographic utility
+ This package is part of the OpenSSL project's implementation of the SSL
+ and TLS cryptographic protocols for secure communication over the
+ Internet.
+ .
+ It contains the general-purpose command line binary /usr/bin/openssl,
+ useful for cryptographic operations such as:
+  * creating RSA, DH, and DSA key parameters;
+  * creating X.509 certificates, CSRs, and CRLs;
+  * calculating message digests;
+  * encrypting and decrypting with ciphers;
+  * testing SSL/TLS clients and servers;
+  * handling S/MIME signed or encrypted mail.
+
+Package: openssl-provider-legacy
+Source: openssl
+Version: 3.5.7-1~deb13u2
+Architecture: amd64
+Maintainer: Debian OpenSSL Team <pkg-openssl-devel@alioth-lists.debian.net>
+Installed-Size: 424
+Depends: libc6 (>= 2.14), libssl3t64 (>= 3.0.3)
+Breaks: libssl3 (<< 3.3.1-5), libssl3t64 (<< 3.3.1-5)
+Replaces: libssl3 (<< 3.3.1-5), libssl3t64 (<< 3.3.1-5)
+Filename: ./openssl-provider-legacy_3.5.7-1~deb13u2_amd64.deb
+Size: 316132
+MD5sum: f8f48c1c31c8c7aea0365ebd519e568f
+SHA1: cc8a26ecd8266f59453e37c8b912933e91993839
+SHA256: f155c8191ae6d41da73d792f4182680aeafeb85c3dd223934ee9fdd115c4f1fa
+Section: utils
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://openssl-library.org
+Description: Secure Sockets Layer toolkit - cryptographic utility
+ This package is part of the OpenSSL project's implementation of the SSL
+ and TLS cryptographic protocols for secure communication over the
+ Internet.
+ .
+ This package contains the legacy provider. The OpenSSL legacy provider
+ supplies OpenSSL implementations of algorithms that have been deemed legacy.
+ Such algorithms have commonly fallen out of use, have been deemed insecure by
+ the cryptography community, or something similar.
+ For details see OSSL_PROVIDER-legacy man page.
+
+Package: patch
+Version: 2.8-2
+Architecture: amd64
+Maintainer: Laszlo Boszormenyi (GCS) <gcs@debian.org>
+Installed-Size: 242
+Depends: libc6 (>= 2.34)
+Suggests: ed, diffutils-doc
+Filename: ./patch_2.8-2_amd64.deb
+Size: 134328
+MD5sum: 7c3af69c5e164a29a7a4261bfc26a21c
+SHA1: c2ef3be7b58282247f219cc21a518e4eda6cbd90
+SHA256: 80c46a0085b33acc74bf451fddb6a70cb43d4ebcc4a873aec04d8d0a63ffc630
+Section: vcs
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://savannah.gnu.org/projects/patch/
+Description: Apply a diff file to an original
+ Patch will take a patch file containing any of the four forms
+ of difference listing produced by the diff program and apply
+ those differences to an original file, producing a patched
+ version.
+
+Package: perl
+Version: 5.40.1-6+deb13u1
+Architecture: amd64
+Maintainer: Niko Tyni <ntyni@debian.org>
+Installed-Size: 841
+Depends: perl-base (= 5.40.1-6+deb13u1), perl-modules-5.40 (>= 5.40.1-6+deb13u1), libperl5.40 (= 5.40.1-6+deb13u1)
+Recommends: netbase
+Suggests: perl-doc, libterm-readline-gnu-perl | libterm-readline-perl-perl, make, libtap-harness-archive-perl
+Conflicts: libjson-pp-perl (<< 2.27200-2)
+Breaks: apt-show-versions (<< 0.22.10), libdist-inkt-perl (<< 0.024-5), libmarc-charset-perl (<< 1.35-3), libperl-dev (<< 5.24.0~), perl-doc (<< 5.40.1-1), perl-modules-5.22, perl-modules-5.24, perl-modules-5.26 (<< 5.26.2-5)
+Replaces: perl-base (<< 5.36.0-2), perl-modules (<< 5.22.0~)
+Provides: libansicolor-perl (= 5.01), libarchive-tar-perl (= 3.02.001), libattribute-handlers-perl (= 1.03), libautodie-perl (= 2.37), libcompress-raw-bzip2-perl (= 2.212), libcompress-raw-zlib-perl (= 2.212), libcompress-zlib-perl (= 2.212), libcpan-meta-perl (= 2.150010), libcpan-meta-requirements-perl (= 2.143), libcpan-meta-yaml-perl (= 0.018), libdigest-md5-perl (= 2.58.01), libdigest-perl (= 1.20), libdigest-sha-perl (= 6.04), libencode-perl (= 3.21), libexperimental-perl (= 0.032), libextutils-cbuilder-perl (= 0.280240), libextutils-command-perl (= 7.70), libextutils-install-perl (= 2.22), libextutils-parsexs-perl (= 3.510000), libfile-spec-perl (= 3.9100), libhttp-tiny-perl (= 0.088), libi18n-langtags-perl (= 0.45), libio-compress-base-perl (= 2.212), libio-compress-bzip2-perl (= 2.212), libio-compress-perl (= 2.212), libio-compress-zlib-perl (= 2.212), libio-zlib-perl (= 1.15), libjson-pp-perl (= 4.16000), liblocale-maketext-perl (= 1.33), liblocale-maketext-simple-perl (= 0.21.01), libmath-bigint-perl (= 2.003002), libmath-complex-perl (= 1.6200), libmime-base64-perl (= 3.16.01), libmodule-corelist-perl (= 5.20250118.40), libmodule-load-conditional-perl (= 0.74), libmodule-load-perl (= 0.36), libmodule-metadata-perl (= 1.000038), libnet-perl (= 1:3.15), libnet-ping-perl (= 2.76), libparams-check-perl (= 0.38), libparent-perl (= 0.241), libparse-cpan-meta-perl (= 2.150010), libperl-ostype-perl (= 1.010), libpod-escapes-perl (= 1.07), libpod-simple-perl (= 3.45), libstorable-perl (= 3.32), libsys-syslog-perl (= 0.36), libterm-table-perl (= 0.018), libtest-harness-perl (= 3.48), libtest-simple-perl (= 1.302199), libtest-tester-perl (= 1.302199), libtest-use-ok-perl (= 1.302199), libtext-balanced-perl (= 2.06), libthread-queue-perl (= 3.14), libthreads-perl (= 2.40), libthreads-shared-perl (= 1.69), libtime-hires-perl (= 1.9777), libtime-local-perl (= 1.3500), libtime-piece-perl (= 1.3401.01), libunicode-collate-perl (= 1.31), libversion-perl (= 1:0.9930), libversion-requirements-perl, podlators-perl (= 5.01.02)
+Filename: ./perl_5.40.1-6+deb13u1_amd64.deb
+Size: 267736
+MD5sum: fe29dbce2114537b3b7e8cc763252597
+SHA1: 5a70387ff0f86c1336fe17ce0c6adb1620d20a6c
+SHA256: ef145c247787d6f40dcdefd5b417502484827cde0d555998c17fd5b27ec1e1dd
+Section: perl
+Priority: standard
+Multi-Arch: allowed
+Homepage: https://dev.perl.org/perl5/
+Description: Larry Wall's Practical Extraction and Report Language
+ Perl is a highly capable, feature-rich programming language with over
+ 20 years of development. Perl 5 runs on over 100 platforms from
+ portables to mainframes. Perl is suitable for both rapid prototyping
+ and large scale development projects.
+ .
+ Perl 5 supports many programming styles, including procedural,
+ functional, and object-oriented. In addition to this, it is supported
+ by an ever-growing collection of reusable modules which accelerate
+ development. Some of these modules include Web frameworks, database
+ integration, networking protocols, and encryption. Perl provides
+ interfaces to C and C++ for custom extension development.
+
+Package: perl-base
+Source: perl
+Version: 5.40.1-6+deb13u1
+Architecture: amd64
+Essential: yes
+Maintainer: Niko Tyni <ntyni@debian.org>
+Installed-Size: 7815
+Pre-Depends: libc6 (>= 2.38), libcrypt1 (>= 1:4.1.0)
+Suggests: perl, sensible-utils
+Conflicts: defoma (<< 0.11.12), doc-base (<< 0.10.3), mono-gac (<< 2.10.8.1-3), safe-rm (<< 0.8), update-inetd (<< 4.41)
+Breaks: amanda-common (<< 1:3.3.9-2), backuppc (<< 4.4.0-7~), bucardo (<< 5.5.0-1.1), debconf (<< 1.5.61), dh-haskell (<< 0.3), duck (<< 0.14.1), intltool (<< 0.51.0-4), kio-perldoc (<< 20.04.1-1), latexml (<< 0.8.4-2), libdevel-mat-dumper-perl (<< 0.42-3), libencode-arabic-perl (<< 14.2-2), libexception-class-perl (<< 1.42), libfile-path-perl (<< 2.18), libfile-spec-perl (<< 3.9100), libfile-temp-perl (<< 0.2311), libgnupg-interface-perl (<< 1.02-4), libio-socket-ip-perl (<< 0.42), liblexical-failure-perl (<< 0.001000), libmp3-tag-perl (<< 1.13-1.2), libnumber-format-perl (<< 1.76), libsbuild-perl (<< 0.67.0-1), libscalar-list-utils-perl (<< 1:1.63), libsocket-perl (<< 2.038), libur-perl (<< 0.470+ds-3), libxsloader-perl (<< 0.32), mailagent (<< 1:3.1-81-2), perl (<< 5.40.1~), perl-modules (<< 5.40.1~), pod2pdf (<< 0.42-5.1), slic3r (<< 1.2.9+dfsg-6.1), slic3r-prusa (<< 1.37.0+dfsg-1.1), texinfo (<< 6.1.0.dfsg.1-8)
+Replaces: libfile-path-perl (<< 2.18), libfile-temp-perl (<< 0.2311), libio-socket-ip-perl (<< 0.42), libscalar-list-utils-perl (<< 1:1.63), libsocket-perl (<< 2.038), libxsloader-perl (<< 0.32), perl (<< 5.10.1-12), perl-modules (<< 5.20.1-3)
+Provides: libfile-path-perl (= 2.18), libfile-temp-perl (= 0.2311), libio-socket-ip-perl (= 0.42), libscalar-list-utils-perl (= 1:1.63), libsocket-perl (= 2.038), libxsloader-perl (= 0.32), perlapi-5.40.0, perlapi-5.40.1
+Filename: ./perl-base_5.40.1-6+deb13u1_amd64.deb
+Size: 1666320
+MD5sum: bb99bd2a5be201fd258fe19ca8d9f6ce
+SHA1: e08e47a606c27af0d1f47901b1d75beec5282bbb
+SHA256: b795464137a0f4d443fc9284f4b93e883fb83883cb533adf300ac660807a352a
+Section: perl
+Priority: required
+Homepage: https://dev.perl.org/perl5/
+Description: minimal Perl system
+ Perl is a scripting language used in many system scripts and utilities.
+ .
+ This package provides a Perl interpreter and the small subset of the
+ standard run-time library required to perform basic tasks. For a full
+ Perl installation, install "perl" (and its dependencies, "perl-modules-5.40"
+ and "perl-doc").
+
+Package: perl-modules-5.40
+Source: perl
+Version: 5.40.1-6+deb13u1
+Architecture: all
+Maintainer: Niko Tyni <ntyni@debian.org>
+Installed-Size: 19993
+Depends: perl-base (>= 5.40.1-1)
+Recommends: perl (>= 5.40.1-1)
+Conflicts: perl-modules (<< 5.22.0~)
+Breaks: libansicolor-perl (<< 5.01), libarchive-tar-perl (<< 3.02.001), libattribute-handlers-perl (<< 1.03), libautodie-perl (<< 2.37), libcpan-meta-perl (<< 2.150010), libcpan-meta-requirements-perl (<< 2.143), libcpan-meta-yaml-perl (<< 0.018), libdigest-perl (<< 1.20), libexperimental-perl (<< 0.032), libextutils-cbuilder-perl (<< 0.280240), libextutils-command-perl (<< 7.70), libextutils-install-perl (<< 2.22), libextutils-parsexs-perl (<< 3.510000), libfile-spec-perl (<< 3.9100), libhttp-tiny-perl (<< 0.088), libi18n-langtags-perl (<< 0.45), libio-zlib-perl (<< 1.15), libjson-pp-perl (<< 4.16000), liblocale-maketext-perl (<< 1.33), liblocale-maketext-simple-perl (<< 0.21.01), libmath-bigint-perl (<< 2.003002), libmath-complex-perl (<< 1.6200), libmodule-corelist-perl (<< 5.20250118.40), libmodule-load-conditional-perl (<< 0.74), libmodule-load-perl (<< 0.36), libmodule-metadata-perl (<< 1.000038), libnet-perl (<< 1:3.15), libnet-ping-perl (<< 2.76), libparams-check-perl (<< 0.38), libparent-perl (<< 0.241), libparse-cpan-meta-perl (<< 2.150010), libperl-ostype-perl (<< 1.010), libpod-escapes-perl (<< 1.07), libpod-simple-perl (<< 3.45), libterm-table-perl (<< 0.018), libtest-harness-perl (<< 3.48), libtest-simple-perl (<< 1.302199), libtest-tester-perl (<< 1.302199), libtest-use-ok-perl (<< 1.302199), libtest2-suite-perl (<< 0.000162), libtext-balanced-perl (<< 2.06), libthread-queue-perl (<< 3.14), libtime-local-perl (<< 1.3500), libunicode-collate-perl (<< 1.31), libversion-perl (<< 1:0.9930), maildirsync (<< 1.2-2.1), perl (<< 5.40.1~), podlators-perl (<< 5.01.02)
+Replaces: libansicolor-perl (<< 5.01), libarchive-tar-perl (<< 3.02.001), libattribute-handlers-perl (<< 1.03), libautodie-perl (<< 2.37), libcpan-meta-perl (<< 2.150010), libcpan-meta-requirements-perl (<< 2.143), libcpan-meta-yaml-perl (<< 0.018), libdigest-perl (<< 1.20), libexperimental-perl (<< 0.032), libextutils-cbuilder-perl (<< 0.280240), libextutils-command-perl (<< 7.70), libextutils-install-perl (<< 2.22), libextutils-parsexs-perl (<< 3.510000), libfile-spec-perl (<< 3.9100), libhttp-tiny-perl (<< 0.088), libi18n-langtags-perl (<< 0.45), libio-zlib-perl (<< 1.15), libjson-pp-perl (<< 4.16000), liblocale-maketext-perl (<< 1.33), liblocale-maketext-simple-perl (<< 0.21.01), libmath-bigint-perl (<< 2.003002), libmath-complex-perl (<< 1.6200), libmodule-corelist-perl (<< 5.20250118.40), libmodule-load-conditional-perl (<< 0.74), libmodule-load-perl (<< 0.36), libmodule-metadata-perl (<< 1.000038), libnet-perl (<< 1:3.15), libnet-ping-perl (<< 2.76), libparams-check-perl (<< 0.38), libparent-perl (<< 0.241), libparse-cpan-meta-perl (<< 2.150010), libperl-ostype-perl (<< 1.010), libpod-escapes-perl (<< 1.07), libpod-simple-perl (<< 3.45), libterm-table-perl (<< 0.018), libtest-harness-perl (<< 3.48), libtest-simple-perl (<< 1.302199), libtest-tester-perl (<< 1.302199), libtest-use-ok-perl (<< 1.302199), libtest2-suite-perl (<< 0.000162), libtext-balanced-perl (<< 2.06), libthread-queue-perl (<< 3.14), libtime-local-perl (<< 1.3500), libunicode-collate-perl (<< 1.31), libversion-perl (<< 1:0.9930), perl-base (<< 5.22.0~), perl-modules, podlators-perl (<< 5.01.02)
+Provides: perl-modules
+Filename: ./perl-modules-5.40_5.40.1-6+deb13u1_all.deb
+Size: 3013728
+MD5sum: 8898e8a6ac5bd932c35e473dcc36c0a0
+SHA1: c2434b7c6d75e490cbf036fce4d99970f50ce44f
+SHA256: 4c46cdd8f3135aa1c95f07e817f8e5d9be590687441ac1c27e3a8c49400f35ce
+Section: libs
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://dev.perl.org/perl5/
+Description: Core Perl modules
+ Architecture independent Perl modules.  These modules are part of Perl and
+ required if the `perl' package is installed.
+ .
+ Note that this package only exists to save archive space and should be
+ considered an internal implementation detail of the `perl' package.
+ Other packages should not depend on `perl-modules-5.40' directly, they
+ should use `perl' (which depends on `perl-modules-5.40') instead.
+
+Package: procps
+Version: 2:4.0.4-9
+Architecture: amd64
+Maintainer: Craig Small <csmall@debian.org>
+Installed-Size: 2395
+Depends: libc6 (>= 2.38), libncursesw6 (>= 6), libproc2-0 (>= 2:4.0.4), libsystemd0 (>= 254), libtinfo6 (>= 6), init-system-helpers (>= 1.29~)
+Recommends: psmisc, linux-sysctl-defaults
+Breaks: manpages-de (<< 4.9.1-2), manpages-fr (<< 4.9.1-2), manpages-fr-extra (<< 20151231+nmu1), manpages-pl (<< 1:4.9.1-2)
+Replaces: manpages-de (<< 4.9.1-2), manpages-fr (<< 4.9.1-2), manpages-fr-extra (<< 20151231+nmu1), manpages-pl (<< 1:4.9.1-2)
+Provides: watch
+Filename: ./procps_2%3a4.0.4-9_amd64.deb
+Size: 882088
+MD5sum: 7171002cf30cd38ddcd985332786d2e2
+SHA1: cdbd731553617765ebc9c3caecd0d8b730c692f6
+SHA256: 4db90bb6776772fc52585d6b1fbfc52ec2a85480e1b4363b743fbb2ffa2a5375
+Section: admin
+Priority: important
+Multi-Arch: foreign
+Homepage: https://gitlab.com/procps-ng/procps
+Description: /proc file system utilities
+ This package provides command line and full screen utilities for browsing
+ procfs, a "pseudo" file system dynamically generated by the kernel to
+ provide information about the status of entries in its process table
+ (such as whether the process is running, stopped, or a "zombie").
+ .
+ It contains free, kill, pkill, pgrep, pmap, ps, pwdx, skill, slabtop,
+ snice, sysctl, tload, top, uptime, vmstat, w, and watch.
+
+Package: rpcsvc-proto
+Version: 1.4.3-1
+Architecture: amd64
+Maintainer: GNU Libc Maintainers <debian-glibc@lists.debian.org>
+Installed-Size: 246
+Depends: libc6 (>= 2.34)
+Breaks: libc-dev-bin (<< 2.31-14), libc6-dev (<< 2.31-14)
+Replaces: libc-dev-bin (<< 2.31-14), libc6-dev (<< 2.31-14)
+Filename: ./rpcsvc-proto_1.4.3-1_amd64.deb
+Size: 63268
+MD5sum: 863959fc5bf804d0e575681f5b1ba374
+SHA1: 42fc22c76dade04c99d8a23141a5fe12d46ae697
+SHA256: 32ac0692694f8a34cc90c895f4fc739680fb2ef0e2d4870a68833682bf1c81a3
+Section: libs
+Priority: optional
+Multi-Arch: foreign
+Homepage: https://github.com/thkukuk/rpcsvc-proto
+Description: RPC protocol compiler and definitions
+ rpcgen is a tool that generates C code to implement an RPC protocol. The input
+ to rpcgen is a language similar to C known as RPC Language (Remote Procedure
+ Call Language).
+ .
+ This package also includes several rpcsvc header files and RPC protocol
+ definitions from SunRPC sources that were previously shipped by glibc.
+
+Package: xz-utils
+Version: 5.8.1-1+deb13u1
+Architecture: amd64
+Maintainer: Sebastian Andrzej Siewior <sebastian@breakpoint.cc>
+Installed-Size: 1424
+Depends: libc6 (>= 2.34), liblzma5 (>= 5.6.2)
+Conflicts: lzma (<< 9.22-1), xz-lzma
+Breaks: lzip (<< 1.8~rc2), manpages-de (<< 4.17.0-2~bpo11+1), manpages-fr (<< 4.17.0-2~bpo11+1), pristine-tar (<< 1.50+nmu1)
+Replaces: lzip (<< 1.8~rc2), manpages-de (<< 4.17.0-2~bpo11+1), manpages-fr (<< 4.17.0-2~bpo11+1), xz-lzma
+Provides: lzma
+Filename: ./xz-utils_5.8.1-1+deb13u1_amd64.deb
+Size: 659488
+MD5sum: f1d86e1ebee20b0616f055aed01a9ebc
+SHA1: 4979f0e9421eff39878d78d09c701f082e3a4685
+SHA256: 9e0a39d95373afdaad3c9dfaab3c8b0beb9a2c4654e6be10b4bcf458509a3217
+Section: utils
+Priority: standard
+Multi-Arch: foreign
+Homepage: https://tukaani.org/xz/
+Description: XZ-format compression utilities
+ XZ is the successor to the Lempel-Ziv/Markov-chain Algorithm
+ compression format, which provides memory-hungry but powerful
+ compression (often better than bzip2) and fast, easy decompression.
+ .
+ This package provides the command line tools for working with XZ
+ compression, including xz, unxz, xzcat, xzgrep, and so on. They can
+ also handle the older LZMA format, and if invoked via appropriate
+ symlinks will emulate the behavior of the commands in the lzma
+ package.
+ .
+ The XZ format is similar to the older LZMA format but includes some
+ improvements for general use:
+ .
+  * 'file' magic for detecting XZ files;
+  * crc64 data integrity check;
+  * limited random-access reading support;
+  * improved support for multithreading (not used in xz-utils);
+  * support for flushing the encoder.
+

@@ -1,23 +1,29 @@
 # syntax=docker/dockerfile:1.7
 
 # STAGE 1: Compile Python bytecode, encrypt it, and build loader.so + host.
-FROM python:3.12-slim AS protect-builder
+FROM python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17 AS protect-builder
 
 ENV PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 WORKDIR /src
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+COPY packages/debian/trixie-amd64/protect-builder/ /opt/offline-debs/
+RUN --network=none cd /opt/offline-debs \
+    && sha256sum -c SHA256SUMS \
+    && apt-get install -y --no-install-recommends ./*.deb \
+    && cd / \
+    && rm -rf /opt/offline-debs /var/lib/apt/lists/*
+
+RUN cmake --version \
+    && openssl version \
+    && dpkg-query -W \
         build-essential \
         cmake \
         libssl-dev \
-        binutils \
-    && rm -rf /var/lib/apt/lists/*
+        binutils >/dev/null
 
-COPY packages/ /packages/
+COPY packages/*.whl /packages/
 COPY protect/requirements.txt /tmp/protect-requirements.txt
 RUN python -m pip install \
         --no-index \
@@ -75,7 +81,7 @@ RUN --mount=type=bind,from=vmp_tools,target=/run/vmp-tools,rw \
 
 # STAGE 3: Final runtime image. VMProtect build tools and the unprotected
 # libloader.so are intentionally excluded.
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:7a8b475003c4fe15a2cd4e55e5cfc2f3560bdc9333d624f24cdd6d4340fd7a17 AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -86,9 +92,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list.d/debian.sources \
-    && apt-get -o Acquire::Retries=5 update \
-    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
+COPY packages/debian/trixie-amd64/runtime/ /opt/offline-debs/
+RUN --network=none cd /opt/offline-debs \
+    && sha256sum -c SHA256SUMS \
+    && apt-get install -y --no-install-recommends ./*.deb \
+    && cd / \
+    && dpkg-query -W \
         vim \
         curl \
         dnsutils \
@@ -96,11 +105,11 @@ RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.l
         iproute2 \
         netcat-openbsd \
         procps \
-        less \
-    && rm -rf /var/lib/apt/lists/*
+        less >/dev/null \
+    && rm -rf /opt/offline-debs /var/lib/apt/lists/*
 
 COPY requirements.txt /app/requirements.txt
-COPY packages/ /packages/
+COPY packages/*.whl /packages/
 RUN python -m pip install \
         --no-index \
         --find-links=/packages \

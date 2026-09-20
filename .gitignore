@@ -70,7 +70,14 @@ build/
 /scripts/docx_retrieval_eval/
 /scripts/docxindex/
 /scripts/api_review_callback_receiver.py
-/packages/
+/packages/*
+!/packages/debian/
+/packages/debian/*
+!/packages/debian/trixie-amd64/
+/packages/debian/trixie-amd64/*
+!/packages/debian/trixie-amd64/README.md
+!/packages/debian/trixie-amd64/protect-builder/
+!/packages/debian/trixie-amd64/runtime/
 /pageindex/
 /deploy/
 
