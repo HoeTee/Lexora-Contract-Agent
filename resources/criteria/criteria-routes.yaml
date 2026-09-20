@@ -1,6 +1,9 @@
 version: 1
+
 criteria_count: 18
+
 policies:
+
 - id: H01
   section: 合同主体
   criterion: 合同提供信息是否齐全，包括联系地址、联系电话、传真、法定代表人或负责人、联系人等信息，如无。则在合同首部写明“注意：请补充合同基本信息（具体的信息）”
@@ -19,6 +22,7 @@ policies:
     note: 未填写字段分别批注在对应首部原文处。
   coverage_audit: true
   dedupe_priority: 300
+
 - id: H02
   section: 合同框架
   criterion: 合同框架内需要具备至少以下标题：保密条款、验收、知识产权、甲方义务、乙方义务、甲方违约责任、乙方违约责任、不可抗力、（合同的补充、变更与解除）、诚信廉洁合作承诺、适用法律及合同争议解决、合同的生效及合同份数、双方约定的其他事项、附件。
@@ -32,6 +36,7 @@ policies:
   placement:
     target: summary
     note: 缺失标题属于全局结构问题，写入 AI 审查总结。
+
 - id: H03
   section: 合同框架
   criterion: 合同当中是否出现项目负责人，并且检查是否对该负责人预留了姓名、身份证号码及电话号码。
@@ -45,6 +50,7 @@ policies:
   placement:
     target: inline
     note: 在对应负责人字段处分别批注。
+
 - id: H04
   section: 合同框架
   criterion: 如果合同名称出现“采购”二字，就直接在合同首部写明“注意：采购内容中品种、规格、型号、等级、花色等应具体注明，必要时可通过附件说明标的物的实际情况”。
@@ -61,6 +67,7 @@ policies:
   placement:
     target: summary
     note: 关键词触发的固定提示写入 AI 审查总结。
+
 - id: H05
   section: 合同框架
   criterion: 如果合同目录中出现“金额”二字，就直接在合同首部写明“注意：合同金额中数量、价款要明确，包括数额的计量单位，同时写明标的物的单价、总价、币种等”。
@@ -75,6 +82,7 @@ policies:
   placement:
     target: summary
     note: 关键词触发的固定提示写入 AI 审查总结。
+
 - id: H06
   section: 合同框架
   criterion: 如果合同目录中出现“支付方式”四字，对于这个标题下的内容进行检索。如果发现付款计划只有一条，需要直接在标题处提醒“注意：建议分期付款。”此外，付款计划要有明确节点确认付款，应预留一部分金额待免费维保期结束后支付，并且明确发票类型。是否付款计划所有总和与合同总金额不一致（不同类别的支付计划分别加总（百分比、金额）计算核验
@@ -93,6 +101,7 @@ policies:
   placement:
     target: inline
     note: 仅“付款计划只有一条”锚定支付方式标题；具体字段问题锚定对应原文，无直接原文位置的整条缺失进入总结。
+
 - id: H07
   section: 合同框架
   criterion: 合同期限：正文中约定具体的合同履行期限，可按照年度、季度、月、旬、日计算；同时，明确各期限的概念，如自然日或工作日、自然季度或从起始日开始计算至第三个月同一日的前一天等，避免模棱两可的语言。如果没有合同日期，则在合同首部写明“补充合同履行期限”。
@@ -118,6 +127,7 @@ policies:
   placement:
     target: inline
     note: 首部日期问题锚定对应首部字段，正文期限问题锚定对应正文；本标准不比较正文与附件。
+
 - id: H08
   section: 合同框架
   criterion: 如果合同目录中出现“违约责任”四字，就直接在合同首部写明“注意：涉及对方违约责任应明确具体，设置兜底条款，对于除明确约定的违约情形外的其他对方违约情形，也明确相应的违约责任。”
@@ -132,6 +142,7 @@ policies:
   placement:
     target: summary
     note: 关键词触发的固定提示写入 AI 审查总结。
+
 - id: H09
   section: 合同框架
   criterion: 全文检索如果没有“甲方住所地人民法院”，在合同首部写明“注意：缺少甲方住所地人民法院”。
@@ -147,6 +158,7 @@ policies:
   placement:
     target: summary
     note: 确认缺失时写入 AI 审查总结。
+
 - id: H10
   section: 合同框架
   criterion: 合同主体名称和签订主体名称首尾须保持一致，例如甲乙方信息需要分别保持一致。
@@ -167,6 +179,7 @@ policies:
   placement:
     target: inline
     note: 不一致问题锚定需要修改的一侧，另一侧仅作为证据。
+
 - id: H11
   section: 合同框架
   criterion: 校验相同条款在正文与附件中约定是否一致。
@@ -188,6 +201,7 @@ policies:
     target: inline
     note: 锚定需要修改的正文，附件对应内容作为证据。
   evidence_region: attachments
+
 - id: H12
   section: 其他基本问题
   criterion: 是否有错别字。
@@ -202,6 +216,7 @@ policies:
     note: 锚定具体错别字。
   dedupe_priority: 100
   dedupe_domain: language_quality
+
 - id: H13
   section: 其他基本问题
   criterion: 是否标题顺序杂乱。
@@ -215,6 +230,7 @@ policies:
   placement:
     target: summary
     note: 标题顺序作为一个全局结构问题合并说明。
+
 - id: H14
   section: 其他基本问题
   criterion: 是否存在合同金额大小写不一致。
@@ -233,6 +249,7 @@ policies:
     target: inline
     note: 不一致时锚定金额原文。
   dedupe_priority: 300
+
 - id: H15
   section: 其他基本问题
   criterion: 是否存在语句语病，例如挨着重复这类“一致一致”、一句话主语缺失。
@@ -247,6 +264,7 @@ policies:
     note: 锚定具体语病原文且每处只保留一条批注。
   dedupe_priority: 200
   dedupe_domain: language_quality
+
 - id: H16
   section: 其他基本问题
   criterion: 是否存在如下相关招标单位、谈判单位、投标单位等其他流程中相关敏感词：招标单位、中标单位、投标单位、谈判单位、谈判响应单位、采购人、投标人、入围单位、征集单位。
@@ -268,7 +286,8 @@ policies:
     fallback: false
   placement:
     target: inline
-    note: 仅锚定实际命中的敏感词。
+    note: 仅锚定实际命中的敏感词
+
 - id: H17
   section: 其他基本问题
   criterion: 正文最后，正文结尾处是否写上“以下为合同签署栏”或“以下无正文”的内容，如无，在正文结尾处写入“注意：补充“以下为合同签署栏”或“以下无正文””。
@@ -285,6 +304,7 @@ policies:
   placement:
     target: body_end
     note: 缺失时锚定索引提供的正文内容结束边界。
+
 - id: H18
   section: 其他基本问题
   criterion: 正文结尾处提到附件是否附在正文后，名称是否一致。
