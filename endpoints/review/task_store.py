@@ -455,6 +455,23 @@ def update_task(client_dir: str, task_id: str, **updates: Any) -> dict[str, Any]
     return write_task(task)
 
 
+def copy_contract_to_result(contract_path: Path | str, result_path: Path | str) -> Path:
+    """Atomically copy the original contract to the task's existing result path."""
+    source = Path(contract_path)
+    target = Path(result_path)
+    if source.resolve() == target.resolve():
+        return target
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        shutil.copy2(source, temporary)
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return target
+
+
 def create_task(
     *,
     client_id: str,
@@ -470,6 +487,7 @@ def create_task(
     model_config_meta: dict[str, Any] | None = None,
     meta_fields: dict[str, str] | None = None,
 ) -> dict[str, Any]:
+    copy_contract_to_result(contract_path, result_path)
     task_api_log = task_api_events_path(client_dir, task_id)
     task_trace_log = task_trace_path(client_dir, task_id)
     task_review_outputs_log = task_review_outputs_path(client_dir, task_id)

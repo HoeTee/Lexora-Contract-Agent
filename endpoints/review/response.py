@@ -18,6 +18,12 @@ def present_review_task(
     include_meta_fields: bool = False,
 ) -> dict[str, Any]:
     result_path = Path(task["output"]["result_path"])
+    source_path = Path(task["input"]["contract_path"])
+    terminal_status = task["status"] in {"succeeded", "failed", "cancelled"}
+    source_fallback_available = (
+        task["status"] in {"failed", "cancelled"}
+        and source_path.exists()
+    )
     response = {
         "task_id": task["task_id"],
         "status": task["status"],
@@ -36,7 +42,10 @@ def present_review_task(
         },
         "output": {
             "result_filename": task["output"]["result_filename"],
-            "ready": task["status"] == "succeeded" and result_path.exists(),
+            "ready": (
+                terminal_status
+                and (result_path.exists() or source_fallback_available)
+            ),
         },
         "logs": {
             "enabled": any(task.get("logs", {}).values()),

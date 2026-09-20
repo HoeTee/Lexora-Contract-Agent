@@ -13,6 +13,7 @@ from config import MCP_SERVER_TARGET
 from agents.base_agent import Settings
 from endpoints.review.task_store import (
     cleanup_runtime_input,
+    copy_contract_to_result,
     is_cancel_requested,
     mark_cancelled,
     mark_queued,
@@ -154,6 +155,10 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
             reset_conversation_log_dir(token)
 
         if is_cancel_requested(client_dir, task_id):
+            copy_contract_to_result(
+                task["input"]["contract_path"],
+                task["output"]["result_path"],
+            )
             mark_cancelled(client_dir, task_id)
             write_task_log_event(client_dir, task_id, "review_cancelled")
             return
@@ -166,6 +171,19 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                        criteria_manifest=result.get("criteria_manifest"))
         write_task_log_event(client_dir, task_id, "review_completed", result_file=str(output_path))
     except Exception as exc:
+        try:
+            copy_contract_to_result(
+                task["input"]["contract_path"],
+                task["output"]["result_path"],
+            )
+        except Exception as source_result_exc:
+            logger.exception("Failed to restore source result for task %s", task_id)
+            write_task_log_event(
+                client_dir,
+                task_id,
+                "source_result_restore_failed",
+                error=repr(source_result_exc),
+            )
         if isinstance(exc, ModelCallError):
             write_task_log_event(
                 client_dir,

@@ -33,6 +33,7 @@ from endpoints.review.response import (
 )
 from endpoints.review.result_upload import ResultUploadError, upload_result_file
 from endpoints.review.task_store import (
+    copy_contract_to_result,
     create_task,
     ensure_task_dirs,
     mark_failed,
@@ -258,11 +259,15 @@ async def _export_review_job_result(
     output_type: str,
 ):
     status = task["status"]
-    if status != "succeeded":
+    if status not in {"succeeded", "failed", "cancelled"}:
         raise HTTPException(status_code=409, detail=f"Task is not finished. Current status: {status}")
 
     task_id = task["task_id"]
     result_path = Path(task["output"]["result_path"])
+    if status in {"failed", "cancelled"} and not result_path.exists():
+        source_path = Path(task["input"]["contract_path"])
+        if source_path.exists():
+            copy_contract_to_result(source_path, result_path)
     if not result_path.exists():
         raise HTTPException(status_code=500, detail="Result file does not exist.")
 
