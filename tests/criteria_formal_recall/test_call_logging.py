@@ -47,6 +47,7 @@ class CallLoggingTests(unittest.TestCase):
             self.assertEqual(record["stage"], "route.1.scan")
             self.assertEqual(record["request"]["messages"][0]["content"], "contract excerpt")
             self.assertIsNone(record["error"]["http_status"])
+            self.assertRegex(Path(error.call_path).name, rf"^H12__docxindex-scan__\d{{8}}T\d{{9}}Z__{error.call_id}\.json$")
 
     def test_nested_workers_keep_criterion_context_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -61,6 +62,15 @@ class CallLoggingTests(unittest.TestCase):
             self.assertEqual({record.payload["criterion_id"] for record in records}, {"H15"})
             self.assertEqual(len({record.call_id for record in records}), 2)
             self.assertTrue(all(record.path.is_file() for record in records))
+            self.assertTrue(all(record.path.name.startswith("H15__docxindex-scan__") for record in records))
+
+    def test_task_level_agent_uses_role_in_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            record = new_call(component="agent", model="fake", request={"messages": []},
+                              directory=Path(temp_dir), stage="agent_model_call", source="Summarizer")
+            self.assertTrue(record.path.name.startswith("Summarizer__model__"))
+            self.assertEqual(record.payload["source"], "Summarizer")
+            self.assertIsNone(record.payload["criterion_id"])
 
     def test_retrieval_error_returns_structured_docxindex_origin(self) -> None:
         retriever = object.__new__(DocxIndexRetriever)
@@ -94,3 +104,23 @@ class CallLoggingTests(unittest.TestCase):
             self.assertEqual(len(trace.runs), 1)
             self.assertEqual(trace.runs[0]["parent_id"], "mcp-run")
             self.assertEqual(trace.runs[0]["outputs"]["call_id"], record.call_id)
+
+    def test_mcp_import_reads_legacy_uuid_only_filename(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            logs = Path(temp_dir) / "logs"
+            calls = logs / "calls"
+            calls.mkdir(parents=True)
+            old = calls / ("a" * 32 + ".json")
+            old.write_text(json.dumps({
+                "call_id": "a" * 32, "operation_id": "old-op", "component": "docxindex.llm",
+                "model": "fake", "status": "failed", "started_at": "2026-09-23T00:00:00+00:00",
+                "error": {"type": "TimeoutError", "message": "timeout", "http_status": None},
+            }), encoding="utf-8")
+            trace = TraceLogger(logs / "trace.json")
+            token = set_current_trace(trace)
+            try:
+                object.__new__(MinimalMCPClient)._import_operation_records(
+                    str(logs / "events.log"), "old-op", "mcp-old")
+            finally:
+                reset_current_trace(token)
+            self.assertEqual(trace.runs[0]["outputs"]["call_path"], str(old))

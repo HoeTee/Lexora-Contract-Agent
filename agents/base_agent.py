@@ -300,6 +300,7 @@ class Agent:
                         request=request_kwargs, directory=agent_call_log_dir(),
                         criterion_id=self.name.removeprefix("SubAgent_") if self.name.startswith("SubAgent_") else None,
                         stage="agent_model_call",
+                        source=self.name,
                     )
                     span.set_metadata({"call_id": record.call_id,
                                        "call_path": str(record.path) if record.path else None})

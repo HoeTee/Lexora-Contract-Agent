@@ -285,6 +285,7 @@ class ScopedRegionTests(unittest.TestCase):
                 reset_call_context(token)
             files = list((Path(temp_dir) / "route_events").glob("*.json"))
             self.assertEqual(len(files), 1)
+            self.assertRegex(files[0].name, r"^H12__step__\d{8}T\d{9}Z__[0-9a-f]{32}\.json$")
             content = files[0].read_text(encoding="utf-8")
 
         self.assertIn('"event": "step"', content)

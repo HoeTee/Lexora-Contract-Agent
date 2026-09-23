@@ -2,7 +2,7 @@
 
 ## 当前任务日志（2026-09）
 
-新任务的完整模型请求和响应统一写入 `logs/calls/<call_id>.json`。每条记录在发出请求前先以 `pending` 状态落盘，再更新为 `succeeded` 或 `failed`。记录包含 `operation_id`、`criterion_id`、`component`、`stage`、`model`、请求、响应或异常、`http_status`。超时发生在收到 HTTP 响应前时，`http_status` 为 `null`；`failure_stage=semaphore_wait` 表示等待全局并发许可时失败。这里可能包含合同正文，应按敏感业务数据保护。
+新任务的完整模型请求和响应统一写入 `logs/calls/`；文件名包含来源、调用阶段、UTC 时间和 `call_id`，格式见[任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。每条记录在发出请求前先以 `pending` 状态落盘，再更新为 `succeeded` 或 `failed`。记录包含 `operation_id`、`criterion_id`、`component`、`stage`、`model`、请求、响应或异常、`http_status`。超时发生在收到 HTTP 响应前时，`http_status` 为 `null`；`failure_stage=semaphore_wait` 表示等待全局并发许可时失败。这里可能包含合同正文，应按敏感业务数据保护。
 
 `trace.json` 由任务 worker 写入，包含 `criterion.H12`、`mcp.contract_search`、DocxIndex 内部模型调用、`llm.SubAgent_H12` 等节点。节点中的 `call_id` 和 `call_path` 指向完整调用记录。DocxIndex 路线规划、执行步骤、回退和结果写入 `logs/route_events/*.json` 并导入同一 trace；确定性步骤不会伪装成模型调用。DocxIndex MCP 进程只写自身的调用与路线记录，不直接修改 worker 的 `trace.json`。
 
