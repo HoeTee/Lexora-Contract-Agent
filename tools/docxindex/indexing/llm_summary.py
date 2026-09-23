@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from loggers.call_log import map_with_context
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def summarize_nodes(
     tasks = _prepare_tasks(nodes, client, cache)
     batches = _pack_tasks(tasks, batch_max_nodes, batch_max_tokens)
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
-        fallback_nodes = sum(executor.map(lambda batch: _summarize_batch(batch, client, cache), batches))
+        fallback_nodes = sum(map_with_context(executor, lambda batch: _summarize_batch(batch, client, cache), batches))
     return {
         "eligible_nodes": len(tasks),
         "batches": len(batches),

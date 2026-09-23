@@ -21,6 +21,7 @@ from tools.document.report_generator import ReportGenerator
 from tools.retrieval.index_retriever import IndexRetriever
 from tools.docxindex.retriever import DocxIndexRetriever
 from loggers.model_event_context import reset_model_event_path, set_model_event_path
+from loggers.call_log import reset_call_context, set_call_context
 from config import (
     CHUNK_OVERLAP,
     CHUNK_SIZE,
@@ -235,9 +236,11 @@ async def docxindex_build_index(
     docx_path: str,
     api_events_path: str | None = None,
     artifact_dir: str | None = None,
+    log_operation_id: str | None = None,
 ) -> str:
     """Build the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
+    call_token = set_call_context(api_events_path, operation_id=log_operation_id, stage="indexing")
     try:
         with redirect_stdout(sys.stderr):
             retriever = _get_docxindex_retriever()
@@ -249,6 +252,7 @@ async def docxindex_build_index(
                 _write_docxindex_artifacts(artifact_dir, retriever.artifact_snapshot())
             return result
     finally:
+        reset_call_context(call_token)
         reset_model_event_path(token)
 
 
@@ -258,9 +262,12 @@ async def docxindex_search(
     route_override: dict | None = None,
     criterion_id: str | None = None,
     return_metadata: bool = False,
+    log_operation_id: str | None = None,
 ) -> str:
     """Search the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
+    call_token = set_call_context(api_events_path, operation_id=log_operation_id,
+                                  criterion_id=criterion_id, stage="route_plan")
     try:
         with redirect_stdout(sys.stderr):
             return await _get_docxindex_retriever().search(
@@ -270,6 +277,7 @@ async def docxindex_search(
                 return_metadata=return_metadata,
             )
     finally:
+        reset_call_context(call_token)
         reset_model_event_path(token)
 
 
@@ -277,10 +285,11 @@ async def contract_build_index(
     docx_path: str,
     api_events_path: str | None = None,
     artifact_dir: str | None = None,
+    log_operation_id: str | None = None,
 ) -> str:
     """Build the configured temporary contract retrieval index."""
     if RETRIEVAL_BACKEND == "docxindex":
-        return await docxindex_build_index(docx_path, api_events_path, artifact_dir)
+        return await docxindex_build_index(docx_path, api_events_path, artifact_dir, log_operation_id)
     return await llamaindex_build_index(docx_path, api_events_path)
 
 
@@ -290,6 +299,7 @@ async def contract_search(
     route_override: dict | None = None,
     criterion_id: str | None = None,
     return_metadata: bool = False,
+    log_operation_id: str | None = None,
 ) -> str:
     """Search the configured temporary contract retrieval index."""
     if RETRIEVAL_BACKEND == "docxindex":
@@ -299,6 +309,7 @@ async def contract_search(
             route_override=route_override,
             criterion_id=criterion_id,
             return_metadata=return_metadata,
+            log_operation_id=log_operation_id,
         )
     return await llamaindex_search(query, api_events_path)
 

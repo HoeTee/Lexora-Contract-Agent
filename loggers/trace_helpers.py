@@ -28,6 +28,10 @@ def error_info(exc: BaseException) -> dict[str, Any]:
     component = getattr(exc, "component", None)
     if component:
         info["component"] = component
+    for key in ("origin", "failure_stage", "call_id", "call_path"):
+        value = getattr(exc, key, None)
+        if value is not None:
+            info[key] = value
     code = getattr(exc, "event_type", None) or _extract_error_code(text)
     if code:
         info["code"] = code

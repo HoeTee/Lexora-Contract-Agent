@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import json
@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from loggers.model_event_context import append_model_event
+from loggers.call_log import append_route_event, reset_call_stage, set_call_stage
 from routing.schemas import RoutePlan
 from tools.docxindex import build_document_index
 from tools.docxindex.indexing.config import IndexingConfig
@@ -91,9 +91,13 @@ class DocxIndexRetriever:
             return json.dumps(
                 {
                     "error": {
+                        "origin": "docxindex",
+                        "failure_stage": getattr(exc, "failure_stage", "indexing"),
                         "http_status": getattr(exc, "http_status", getattr(exc, "status_code", None)),
                         "error_type": getattr(exc, "error_type", type(exc).__name__),
                         "detail": str(exc),
+                        "call_id": getattr(exc, "call_id", None),
+                        "call_path": getattr(exc, "call_path", None),
                     }
                 },
                 ensure_ascii=False,
@@ -155,6 +159,14 @@ class DocxIndexRetriever:
             _terminal(f"[DocxIndex] Search failed: {type(exc).__name__}: {exc}")
             http_status = getattr(exc, "http_status", getattr(exc, "status_code", None))
             error_type = getattr(exc, "error_type", type(exc).__name__)
+            if return_metadata:
+                return json.dumps({"error": {
+                    "origin": "docxindex", "failure_stage": getattr(exc, "failure_stage", "retrieval"),
+                    "error_type": error_type, "exception_type": type(exc).__name__,
+                    "http_status": http_status, "detail": str(exc),
+                    "call_id": getattr(exc, "call_id", None),
+                    "call_path": getattr(exc, "call_path", None),
+                }}, ensure_ascii=False)
             return (
                 "Error in contract DocxIndex search: "
                 f"http_status={http_status if http_status is not None else 'null'}; "
@@ -248,6 +260,7 @@ class DocxIndexRetriever:
         complete_title_matches: list[dict[str, Any]] = []
         deterministic_notices: list[str] = []
         for step_index, step in enumerate(route_plan.steps, 1):
+            stage_token = set_call_stage(f"route.{step_index}.{step.method}")
             if step.method == "title":
                 current = title_matches(index, step)
                 if step.all_titles:
@@ -297,6 +310,7 @@ class DocxIndexRetriever:
                 )
             else:
                 raise ValueError(f"Unsupported docxindex route method: {step.method}")
+            reset_call_stage(stage_token)
             current = _add_route_source(current, step.method)
             step_groups.append(current)
             _route_event(
@@ -633,7 +647,7 @@ def _merge_duplicate_match(existing: dict[str, Any], incoming: dict[str, Any]) -
 
 
 def _route_event(event: str, **payload: Any) -> None:
-    append_model_event("docxindex_route", route_event=event, **payload)
+    append_route_event(event, payload)
     _terminal(
         "[DocxIndex][Route] "
         + json.dumps({"event": event, **payload}, ensure_ascii=False, sort_keys=True)

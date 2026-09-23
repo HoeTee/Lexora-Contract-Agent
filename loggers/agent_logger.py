@@ -23,6 +23,11 @@ def reset_conversation_log_dir(token) -> None:
     _CONVERSATION_LOG_DIR.reset(token)
 
 
+def agent_call_log_dir() -> Path | None:
+    directory = _CONVERSATION_LOG_DIR.get()
+    return directory.parent / "calls" if directory else None
+
+
 def _serialize_messages(messages: list) -> list:
     serializable = []
     for msg in messages:
@@ -70,6 +75,8 @@ def log_conversation(agent_name: str, messages: list) -> Path | None:
     if log_dir is None:
         print("Conversation log directory is not set; skipping agent conversation log.")
         return None
+    if log_dir.name == "conversations" and log_dir.parent.name == "logs":
+        return None  # Task calls contain the full request and response.
 
     log_dir.mkdir(parents=True, exist_ok=True)
     serializable = _serialize_messages(messages)

@@ -543,6 +543,8 @@ def create_task(
             "api_events_path": str(task_api_log) if task_api_log else None,
             "events_log_path": str(task_api_log) if task_api_log else None,
             "trace_path": str(task_trace_log) if task_trace_log else None,
+            "calls_dir": str(task_trace_log.parent / "calls") if task_trace_log else None,
+            "route_events_dir": str(task_trace_log.parent / "route_events") if task_trace_log else None,
             "review_outputs_path": str(task_review_outputs_log) if task_review_outputs_log else None,
             "annotation_events_path": str(task_annotation_events_log) if task_annotation_events_log else None,
             "conversation_log_dir": str(task_conversation_log) if task_conversation_log else None,

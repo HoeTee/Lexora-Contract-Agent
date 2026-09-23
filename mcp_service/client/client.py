@@ -4,7 +4,9 @@ import json
 import os
 import sys
 import traceback # help show where the error happended
+import uuid
 from contextlib import AsyncExitStack
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from loggers.mcp_logger import create_mcp_logger
@@ -142,6 +144,10 @@ class MinimalMCPClient:
         """Call tool and return text result as string."""
         if not self.session:
             raise RuntimeError("Client not connected")
+        operation_id = None
+        if name in {"contract_search", "contract_build_index", "docxindex_search", "docxindex_build_index"} and args.get("api_events_path"):
+            operation_id = uuid.uuid4().hex
+            args = {**args, "log_operation_id": operation_id}
         # Functions in an MCP server that are exposed as tools cannot use variable arguments like *args or **kwargs. 
         # This restriction is because the protocol requires a complete and predictable parameter schema to be generated 
         # for the Language Model (LLM) client, which is not possible with variable argument lists.
@@ -150,7 +156,11 @@ class MinimalMCPClient:
             run_type="mcp_tool",
             inputs=mcp_inputs(name, args),
         ) as span:
-            result = await self.session.call_tool(name, args)
+            try:
+                result = await self.session.call_tool(name, args)
+            finally:
+                if operation_id:
+                    self._import_operation_records(args["api_events_path"], operation_id, span.run["id"])
             # Extract .text from TextContent objects
             if hasattr(result, 'content') and isinstance(result.content, list):
                 texts = []
@@ -166,6 +176,27 @@ class MinimalMCPClient:
                 text_result = str(result)
             span.set_outputs(mcp_outputs(text_result))
             return text_result
+
+    def _import_operation_records(self, events_path: str, operation_id: str, parent_id: str) -> None:
+        calls_dir = Path(events_path).parent / "calls"
+        external_records = []
+        if calls_dir.is_dir():
+            for path in calls_dir.glob("*.json"):
+                call = json.loads(path.read_text(encoding="utf-8"))
+                if call.get("operation_id") == operation_id:
+                    call["call_path"] = str(path)
+                    external_records.append((call.get("started_at") or "", "call", call, path))
+        route_dir = calls_dir.parent / "route_events"
+        if route_dir.is_dir():
+            for path in route_dir.glob("*.json"):
+                event = json.loads(path.read_text(encoding="utf-8"))
+                if event.get("operation_id") == operation_id:
+                    external_records.append((event.get("at") or "", "route", event, path))
+        for _, kind, payload, path in sorted(external_records, key=lambda item: item[0]):
+            if kind == "call":
+                get_current_trace().add_external_call(payload, parent_id=parent_id)
+            else:
+                get_current_trace().add_external_route(payload, parent_id=parent_id, path=path)
 
     async def get_available_tools(self) -> List[Dict[str, Any]]:
         """Return cached tools list in OpenAI format."""

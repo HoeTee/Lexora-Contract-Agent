@@ -143,6 +143,11 @@ class ReviewStateStore:
             "http_status": getattr(exc, "http_status", None),
             "component": getattr(exc, "component", None),
             "event_type": getattr(exc, "event_type", None),
+            "origin": getattr(exc, "origin", getattr(exc, "component", "agent")),
+            "failure_stage": getattr(exc, "failure_stage", "output_validation" if "Validation" in type(exc).__name__ else "criterion_execution"),
+            "upstream_error_type": str(getattr(exc, "error_type", type(exc).__name__)),
+            "call_id": getattr(exc, "call_id", None),
+            "call_path": getattr(exc, "call_path", None),
         }
         attempts.append(error)
         return _write_json(

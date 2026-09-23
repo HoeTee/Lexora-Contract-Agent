@@ -8,9 +8,11 @@ from threading import BoundedSemaphore, Lock
 
 import numpy as _numpy  # noqa: F401 - eagerly load before background response parsing
 from pydantic import BaseModel, ConfigDict
+from redis.exceptions import RedisError
 
 from tools.docxindex.llm.config import find_local_env, find_project_config, load_env_file, load_yaml
 from tools.docxindex.llm.client import os_env
+from loggers.call_log import new_call
 
 EMBEDDING_BATCH_SIZE = 10
 
@@ -80,16 +82,25 @@ class EmbeddingClient:
         if not texts:
             return []
         for attempt in range(self._rate_limit_retries + 1):
+            record = new_call(component="docxindex.embedding", model=self.settings.model,
+                              request={"input": texts, "attempt": attempt + 1})
             self._wait_for_start_slot()
             try:
                 with self._limiter:
                     with _global_model_slot("embedding", "DocxIndexEmbedding", self.settings.model):
                         response = self.client.embeddings.create(model=self.settings.model, input=texts)
-                return [list(item.embedding) for item in response.data]
+                vectors = [list(item.embedding) for item in response.data]
             except Exception as exc:
+                record.failed(exc, stage="semaphore_wait" if isinstance(exc, RedisError) or type(exc).__name__ == "LLMGlobalSemaphoreTimeout" else "request")
                 if not _is_rate_limit_error(exc) or attempt >= self._rate_limit_retries:
+                    exc.call_id = record.call_id
+                    exc.call_path = str(record.path) if record.path else None
+                    exc.failure_stage = record.payload["failure_stage"]
                     raise
                 time.sleep(2**attempt)
+                continue
+            record.succeeded({"vector_count": len(vectors), "dimensions": len(vectors[0]) if vectors else 0})
+            return vectors
         raise RuntimeError("unreachable embedding retry state")
 
     def _wait_for_start_slot(self) -> None:

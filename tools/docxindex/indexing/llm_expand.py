@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from loggers.call_log import map_with_context
 from pathlib import Path
 
 from tools.docxindex.llm import LLMClient
@@ -59,7 +60,7 @@ def expand_large_leaves(
                 else:
                     infer_entries.append((node, depth))
 
-            results = list(executor.map(infer, infer_entries))
+            results = map_with_context(executor, infer, infer_entries)
             for (node, depth), children in zip(infer_entries, results, strict=True):
                 if not children:
                     _fallback_chunk(node, items, split_threshold_tokens, chunk_target_tokens)

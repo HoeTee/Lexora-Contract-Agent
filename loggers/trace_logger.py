@@ -70,6 +70,34 @@ class TraceLogger:
         self.runs.append(run)
         self._write()
 
+    def add_external_call(self, call: dict[str, Any], *, parent_id: str) -> None:
+        """Import one MCP-process call without sharing the trace writer."""
+        started = call.get("started_at") or _now_iso()
+        finished = call.get("finished_at")
+        self._append_run({
+            "id": self._next_run_id(), "parent_id": parent_id,
+            "name": f"llm.{call.get('component')}", "type": "llm",
+            "status": call.get("status"), "start_time": started,
+            "end_time": finished, "duration_seconds": None,
+            "inputs": {"model": call.get("model"), "criterion_id": call.get("criterion_id"),
+                       "stage": call.get("stage")},
+            "outputs": {"call_id": call.get("call_id"),
+                        "call_path": call.get("call_path")},
+            "metadata": {"operation_id": call.get("operation_id")},
+            "error": call.get("error"),
+        })
+
+    def add_external_route(self, event: dict[str, Any], *, parent_id: str, path: Path) -> None:
+        self._append_run({
+            "id": self._next_run_id(), "parent_id": parent_id,
+            "name": f"docxindex.{event.get('event')}", "type": "retrieval",
+            "status": "succeeded", "start_time": event.get("at"),
+            "end_time": event.get("at"), "duration_seconds": 0,
+            "inputs": {"criterion_id": event.get("criterion_id"), "stage": event.get("stage")},
+            "outputs": event.get("payload") or {},
+            "metadata": {"event_path": str(path)}, "error": None,
+        })
+
     def _write(self) -> None:
         if self.path is None:
             return
@@ -152,6 +180,12 @@ class TraceSpan:
 
 
 class NoopTraceLogger:
+    def add_external_call(self, call: dict[str, Any], *, parent_id: str) -> None:
+        return None
+
+    def add_external_route(self, event: dict[str, Any], *, parent_id: str, path: Path) -> None:
+        return None
+
     def span(self, *args, **kwargs) -> "NoopTraceSpan":
         return NoopTraceSpan()
 

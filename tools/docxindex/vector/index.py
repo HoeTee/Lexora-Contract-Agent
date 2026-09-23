@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from loggers.call_log import map_with_context
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,7 @@ def build_vector_index(
     texts = [_truncate_embedding_text(entry["vector_text"], max_input_tokens) for entry in entries]
     batches = [texts[start : start + EMBEDDING_BATCH_SIZE] for start in range(0, len(texts), EMBEDDING_BATCH_SIZE)]
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
-        embedded_batches = list(executor.map(client.embed_batch, batches))
+        embedded_batches = map_with_context(executor, client.embed_batch, batches)
     embeddings = [embedding for batch in embedded_batches for embedding in batch]
     items = []
     for entry, embedding in zip(entries, embeddings, strict=True):

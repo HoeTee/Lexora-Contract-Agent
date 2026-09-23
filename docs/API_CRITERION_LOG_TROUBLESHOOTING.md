@@ -1,5 +1,14 @@
 # API 审查要点记录排查
 
+> 新任务请优先查 `state/criteria/H12.error.json` 中的 `origin`、`failure_stage`、`call_id` 和 `call_path`，然后打开 `logs/calls/<call_id>.json` 看实际请求、响应或异常。`logs/trace.json` 展示该调用在要点、MCP、DocxIndex 路线和 SubAgent 之间的位置；`logs/route_events/` 保存路线细节。下面涉及 `logs/conversations/` 的步骤适用于旧任务。
+
+```sh
+python3 -m json.tool "$TASK_DIR/state/criteria/H12.error.json"
+find "$TASK_DIR/logs/calls" -maxdepth 1 -name '*.json' -type f -exec grep -l '"criterion_id": "H12"' {} +
+grep -n -F 'criterion.H12' "$TASK_DIR/logs/trace.json"
+grep -n -F 'docxindex.llm' "$TASK_DIR/logs/trace.json"
+```
+
 本文用于按 `task_id` 排查某一条 API 审查要点。以下以固定要点 `H12` 为例；查询其他要点时替换 ID。先确认任务目录，再依次检查计划、要点状态和执行日志。这个顺序用于定位记录在哪个阶段中断，不代表运行时逐个要点串行执行。
 
 ## 1. 确认执行位置和任务目录

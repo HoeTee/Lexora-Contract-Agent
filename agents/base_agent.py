@@ -4,7 +4,9 @@ management, token tracking, and conversation logging.
 """
 from pydantic import BaseModel
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError, APIStatusError
-from loggers.agent_logger import log_agent_step, log_conversation
+from redis.exceptions import RedisError
+from loggers.agent_logger import agent_call_log_dir, log_agent_step, log_conversation
+from loggers.call_log import new_call
 from loggers.trace_helpers import llm_inputs, llm_outputs
 from loggers.trace_logger import get_current_trace
 from config import (
@@ -293,6 +295,15 @@ class Agent:
                         "seed": self.settings.seed,
                     },
                 ) as span:
+                    record = new_call(
+                        component="agent", model=self.settings.model,
+                        request=request_kwargs, directory=agent_call_log_dir(),
+                        criterion_id=self.name.removeprefix("SubAgent_") if self.name.startswith("SubAgent_") else None,
+                        stage="agent_model_call",
+                    )
+                    span.set_metadata({"call_id": record.call_id,
+                                       "call_path": str(record.path) if record.path else None})
+                    request_started = False
                     try:
                         async with llm_global_semaphore(
                             agent_name=self.name,
@@ -306,34 +317,51 @@ class Agent:
                                         "llm_global_semaphore_max_requests": lease.max_concurrent_requests,
                                     }
                                 )
+                            request_started = True
                             completion = await self.client.chat.completions.create(**request_kwargs)
-                    except MODEL_API_ERRORS:
+                    except Exception as exc:
+                        record.failed(exc, stage="request" if request_started else "semaphore_wait")
                         conversation_path = log_conversation(self.name, self.messages)
                         span.set_metadata(
                             {"conversation_path": str(conversation_path) if conversation_path else None}
                         )
                         raise
-                    except LLMGlobalSemaphoreTimeout:
-                        conversation_path = log_conversation(self.name, self.messages)
-                        span.set_metadata(
-                            {"conversation_path": str(conversation_path) if conversation_path else None}
-                        )
-                        raise
+                    record.succeeded(completion.model_dump())
                     span.set_outputs(llm_outputs(completion))
             except MODEL_API_ERRORS as exc:
-                raise ModelCallError(
+                error = ModelCallError(
                     "agent",
                     f"{self.name}: {exc}",
                     http_status=getattr(exc, "status_code", None),
                     error_type=type(exc).__name__,
-                ) from exc
+                )
+                error.origin = "agent"
+                error.failure_stage = "agent_model_call"
+                error.call_id = record.call_id
+                error.call_path = str(record.path) if record.path else None
+                raise error from exc
             except LLMGlobalSemaphoreTimeout as exc:
-                raise ModelCallError(
+                error = ModelCallError(
                     "agent",
                     f"{self.name}: {exc}",
                     http_status=None,
                     error_type=type(exc).__name__,
-                ) from exc
+                )
+                error.origin = "agent"
+                error.failure_stage = "semaphore_wait"
+                error.call_id = record.call_id
+                error.call_path = str(record.path) if record.path else None
+                raise error from exc
+            except RedisError as exc:
+                error = ModelCallError(
+                    "agent", f"{self.name}: {exc}", http_status=None,
+                    error_type=type(exc).__name__,
+                )
+                error.origin = "semaphore"
+                error.failure_stage = "semaphore_wait"
+                error.call_id = record.call_id
+                error.call_path = str(record.path) if record.path else None
+                raise error from exc
 
             response_message = completion.choices[0].message
             finish_reason = completion.choices[0].finish_reason

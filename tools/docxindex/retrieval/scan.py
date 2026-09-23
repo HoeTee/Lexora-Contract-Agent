@@ -7,6 +7,7 @@ from tools.docxindex.indexing import estimate_tokens
 from tools.docxindex.llm import LLMClient
 from tools.docxindex.llm.prompts import scan_prompt
 from tools.docxindex.llm.schemas import ScanResponse
+from loggers.call_log import map_with_context
 
 from .title import _candidate
 
@@ -61,7 +62,7 @@ def scan_matches(
         return findings
 
     with ThreadPoolExecutor(max_workers=max(1, min(concurrency, len(batches)))) as executor:
-        groups = list(executor.map(inspect, batches))
+        groups = map_with_context(executor, inspect, batches)
     return [finding for group in groups for finding in group]
 
 

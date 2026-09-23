@@ -23,6 +23,7 @@ from agents.prompts.cn_prompts import SUB_AGENT_BASE_PROMPT
 from agents.schemas import SubAgentOutput
 from endpoints.runtime.errors import ModelCallError, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
+from endpoints.review.task_store import write_task_log_event
 from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_info
 from loggers.trace_logger import get_current_trace
 from tools.docxindex.indexing import estimate_tokens
@@ -342,17 +343,33 @@ class OrchestratorAgent:
         }
         if RETRIEVAL_BACKEND == "docxindex":
             search_payload["return_metadata"] = True
+            search_payload["criterion_id"] = cid
         if route_override:
             search_payload["route_override"] = route_override
-            search_payload["criterion_id"] = cid
         search_result = await self.mcp_client.call_tool(
             "contract_search",
             search_payload,
         )
+        if RETRIEVAL_BACKEND == "docxindex" and isinstance(search_result, str):
+            try:
+                error_payload = json.loads(search_result).get("error")
+            except (ValueError, AttributeError):
+                error_payload = None
+            if isinstance(error_payload, dict):
+                error = ModelCallError(
+                    "docxindex", str(error_payload.get("detail") or "DocxIndex retrieval failed"),
+                    http_status=error_payload.get("http_status"),
+                    error_type=error_payload.get("error_type"),
+                )
+                error.origin = "docxindex"
+                error.failure_stage = error_payload.get("failure_stage")
+                error.call_id = error_payload.get("call_id")
+                error.call_path = error_payload.get("call_path")
+                raise error
         if isinstance(search_result, str) and search_result.startswith("Error"):
             raise classify_model_call_error(
                 search_result,
-                default_component="embedding" if RETRIEVAL_BACKEND == "llamaindex" else "agent",
+                default_component="embedding" if RETRIEVAL_BACKEND == "llamaindex" else "docxindex",
             )
         contexts = [search_result] if search_result else ["未找到相关内容。"]
         if RETRIEVAL_BACKEND == "docxindex" and isinstance(search_result, str):
@@ -1278,6 +1295,15 @@ class OrchestratorAgent:
                     )
                     continue
                 print(f"[Orchestrator] {cid}: failed after {max_attempts} attempt(s): {exc}")
+                if self.state_store is not None:
+                    write_task_log_event(
+                        self.state_store.client_dir, self.state_store.task_id,
+                        "criterion_failed", criterion_id=cid,
+                        origin=getattr(exc, "origin", getattr(exc, "component", None)),
+                        failure_stage=getattr(exc, "failure_stage", None),
+                        http_status=getattr(exc, "http_status", None),
+                        call_id=getattr(exc, "call_id", None),
+                    )
                 raise
 
         if last_error is not None:

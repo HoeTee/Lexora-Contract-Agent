@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from loggers.call_log import map_with_context
 from pathlib import Path
 
 from tools.docxindex.detection import attachment_starts, heading_level, heading_score, is_plain_label, is_visual_title
@@ -125,7 +126,7 @@ def build_attachments(
             )
 
         with ThreadPoolExecutor(max_workers=max(1, llm_concurrency)) as executor:
-            inferred_results = list(executor.map(infer, attachment_ranges))
+            inferred_results = map_with_context(executor, infer, attachment_ranges)
 
     nodes: list[DocumentNode] = []
     for (node, attach_start, attach_end), inferred_children in zip(attachment_ranges, inferred_results, strict=True):

@@ -8,8 +8,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 
-from loggers.api_event_logger import _LOGGERS
-from loggers.model_event_context import reset_model_event_path, set_model_event_path
+from loggers.call_log import reset_call_context, set_call_context
 from endpoints.review.task_store import docxindex_state_dir
 from tools.docxindex.llm.schemas import RouteStep, ScanResponse
 from tools.docxindex.indexing.config import IndexingConfig
@@ -279,20 +278,18 @@ class ScopedRegionTests(unittest.TestCase):
     def test_route_event_is_persisted_without_contract_text(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "events.log"
-            token = set_model_event_path(path)
+            token = set_call_context(path, operation_id="test-operation", criterion_id="H12")
             try:
                 _route_event("step", method="region", regions=["body"], node_ids=["body/a"])
             finally:
-                reset_model_event_path(token)
-            content = path.read_text(encoding="utf-8")
-            logger = _LOGGERS.pop(str(path.resolve()))
-            for handler in logger.handlers:
-                handler.close()
-            logger.handlers.clear()
+                reset_call_context(token)
+            files = list((Path(temp_dir) / "route_events").glob("*.json"))
+            self.assertEqual(len(files), 1)
+            content = files[0].read_text(encoding="utf-8")
 
-        self.assertIn("docxindex_route", content)
-        self.assertIn("route_event=step", content)
-        self.assertIn('regions=["body"]', content)
+        self.assertIn('"event": "step"', content)
+        self.assertIn('"criterion_id": "H12"', content)
+        self.assertIn('"regions": [', content)
 
 
 class FullScanTests(unittest.TestCase):
