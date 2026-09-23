@@ -2,6 +2,8 @@
 
 日志是任务级排障数据，不是任务状态源。API 和 Web 都以 `task.json` 保存生命周期状态；只有 `logging.enabled=true` 时才写入 `logs/`。
 
+按单条 API 审查要点定位输入、结果及缺失记录时，见 [API 审查要点记录排查](API_CRITERION_LOG_TROUBLESHOOTING.md)。
+
 ## 目录边界
 
 ```text
