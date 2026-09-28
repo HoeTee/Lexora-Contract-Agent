@@ -42,7 +42,7 @@
 | ReflectorAgent | `agents/reflector.py` | 逐条质量复核 finding，并检查完整覆盖任务是否漏判输入证据 | criterion + subagent_output + 检索证据 | `{ status, feedback, finding_decisions[], coverage_gaps[] }` |
 | SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；程序只接受 edit anchor 与 placement 完全相同的重复组，不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题 | `{ overall_comment, priority_comments, duplicate_groups }` |
 
-同一审查要点在 Reflector 修订后由程序按原文 edit anchor 恢复已有 `issue_id`；新增问题若占用了已有编号，程序分配无碰撞后缀。修订模型或修订结果校验失败时保留上一份已通过 schema 的结果并标记为 `pending_review`。单个要点的异常记录为该要点 `ERROR`，只要仍有至少一个有效要点，工作流继续生成总结和 DOCX；只有全部要点均失败时才终止整份任务。
+同一审查要点在 Reflector 修订后由程序按原文 edit anchor 恢复已有 `issue_id`；新增问题若占用了已有编号，程序分配无碰撞后缀。Reflector 或修订模型调用失败、修订结果校验失败时抛回 criterion 恢复流程；完整重试耗尽后记录为该要点 `ERROR`。只要仍有至少一个有效要点，工作流继续生成总结和 DOCX；只有全部要点均失败时才终止整份任务。
 
 SubAgent 的一个 issue 含多个 edit anchor 时，FindingLedger 按锚点拆成独立 finding，并为拆分结果生成唯一的局部 `issue_id`；原 issue 的判断内容不变，每个位置仍分别进入 Reflector 与批注写入器。
 
@@ -103,7 +103,7 @@ class SummaryOutput:
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：
    - 固定任务直接使用强制路由已提供的证据，不对 `anchors=[]` 问题反复执行缺失文本补充检索；用户上传要点仍可执行该补充检索。每轮 Reflector 使用独立会话，避免完整证据在历史消息中叠加。
    - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`；一个 finding 需修改不会连带删除同一 criterion 中已经确认的问题。
-   - 全部 finding 决策完整且满足 PASS 才结束；达到上限或反思异常时标记 `quality_status=pending_review`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。
+   - 全部 finding 决策完整且满足 PASS 才结束；达到轮次上限时标记 `quality_status=incomplete`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。反思调用异常会进入 criterion 恢复流程，重试耗尽后记录为 `ERROR`。
    - 修订仍指向同一 edit 原文缺陷时，Orchestrator 恢复原 `issue_id`，避免模型改号导致 finding 身份漂移。
 
 每次 Planner、SubAgent、Reflector、Summarizer 等 `Agent` 调用在发送前统一计算完整消息及工具 schema 的 token 预算。`llm.max_prompt_tokens` 默认 88k 且配置值必须小于 90k；超限请求不会发送，trace 的 LLM input 记录 `estimated_prompt_tokens` 和 `prompt_token_limit`。
@@ -116,7 +116,7 @@ class SummaryOutput:
 - `asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)` 负责并发限制：同一时间最多允许指定数量的 criterion 进入 `execute_single_criterion()`；其余 coroutine 会等待 semaphore 释放。
 - 因此，当前并发边界是“多条 criterion / 多个 SubAgent 审查任务并发”，不是单个 SubAgent 内部把同一条标准拆成多个并发步骤。
 - 单条 criterion 最多执行 `workflow.criterion_retry_max_attempts` 次；重试耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 降级为该条 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
-- 未知程序异常保持任务级失败；全部 criterion 都失败时也不生成伪成功结果。部分 criterion 失败时任务为 `succeeded`，同时以 `quality.status=pending_review`、`quality.error_criteria` 和 DOCX“未完成审查项”披露缺口。
+- 未知程序异常保持任务级失败；全部 criterion 都失败时也不生成伪成功结果。部分 criterion 失败时任务为 `succeeded`，同时以 `criteria[].execution_status=error`、`quality.error_criteria` 和 DOCX“未完成审查项”披露缺口。
 
 简化结构如下：
 

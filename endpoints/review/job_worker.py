@@ -15,6 +15,7 @@ from endpoints.review.task_store import (
     cleanup_runtime_input,
     copy_contract_to_result,
     is_cancel_requested,
+    initialize_task_criteria,
     mark_cancelled,
     mark_queued,
     mark_failed,
@@ -31,6 +32,8 @@ from endpoints.review.task_store import (
     task_mcp_log_file,
     task_review_outputs_path,
     task_trace_path,
+    update_task,
+    update_task_criterion,
     write_task_log_event,
 )
 from endpoints.runtime.errors import ModelCallError
@@ -122,6 +125,23 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
             index_artifacts_path=str(docxindex_state_dir(client_dir, task_id)),
         )
 
+        async def persist_progress(update: dict) -> None:
+            criteria = update.get("criteria")
+            if isinstance(criteria, list):
+                initialize_task_criteria(client_dir, task_id, criteria)
+            criterion_id = update.get("criterion_id")
+            if criterion_id:
+                update_task_criterion(
+                    client_dir,
+                    task_id,
+                    str(criterion_id),
+                    execution_status=str(update.get("execution_status") or "not_started"),
+                    review_result=update.get("review_result"),
+                    error=update.get("error") if isinstance(update.get("error"), dict) else None,
+                )
+            elif update.get("message"):
+                update_task(client_dir, task_id, message=str(update["message"]))
+
         token = set_conversation_log_dir(task_conversation_log_dir(client_dir, task_id))
         try:
             if review_semaphore is None:
@@ -135,6 +155,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                     contract_path=task["input"]["contract_path"],
                     criteria_path=task["input"].get("criteria_path"),
                     output_path=task["output"]["result_path"],
+                    progress_callback=persist_progress,
                 )
             else:
                 if review_semaphore.locked():
@@ -150,6 +171,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                         contract_path=task["input"]["contract_path"],
                         criteria_path=task["input"].get("criteria_path"),
                         output_path=task["output"]["result_path"],
+                        progress_callback=persist_progress,
                     )
         finally:
             reset_conversation_log_dir(token)
@@ -167,8 +189,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
         if not output_path.exists():
             raise RuntimeError("Output DOCX file was not found.")
 
-        mark_succeeded(client_dir, task_id, quality=result.get("quality"),
-                       criteria_manifest=result.get("criteria_manifest"))
+        mark_succeeded(client_dir, task_id, criteria=result.get("criteria"))
         write_task_log_event(client_dir, task_id, "review_completed", result_file=str(output_path))
     except Exception as exc:
         try:

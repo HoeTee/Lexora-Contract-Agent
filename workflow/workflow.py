@@ -32,12 +32,48 @@ from agents.summarizer import SummarizerAgent, apply_summary_duplicate_groups
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
+from endpoints.review.task_store import summarize_criteria
 from routing import load_mandatory_tasks, mandatory_source_manifest
 from tools.document.reporting.docx_report import deduplicate_review_results_by_range
 
 
 def _normalize_annotation_text(value: str) -> str:
     return "".join(str(value or "").split()).strip("，。：；、“”\"'")
+
+
+def _public_criteria(criteria_list: list[dict], results: list[dict]) -> list[dict[str, Any]]:
+    by_id = {str(result.get("criterion_id")): result for result in results}
+    entries: list[dict[str, Any]] = []
+    for criterion in criteria_list:
+        criterion_id = str(criterion["id"])
+        result = by_id.get(criterion_id)
+        if result is None:
+            execution_status = "not_started"
+            review_result = None
+            error = None
+        elif str(result.get("status") or "").upper() == "ERROR":
+            execution_status = "error"
+            review_result = None
+            error = {
+                "type": str(result.get("error_type") or "CriterionError"),
+                "message": str(result.get("error_message") or "Criterion execution failed."),
+            }
+        else:
+            execution_status = (
+                "incomplete" if result.get("quality_status") == "incomplete" else "completed"
+            )
+            review_result = str(result.get("status") or "").lower() or None
+            error = None
+        entries.append(
+            {
+                "id": criterion_id,
+                "criterion": str(criterion.get("criterion") or ""),
+                "execution_status": execution_status,
+                "review_result": review_result,
+                "error": error,
+            }
+        )
+    return entries
 
 
 def _confirmed_review_instruction(result: dict) -> str | None:
@@ -241,10 +277,11 @@ class ContractReviewWorkflow:
                     progress_callback,
                     "reviewing",
                     f"Reviewing {len(criteria_list)} criteria with the agent workflow",
+                    criteria=criteria_list,
                 )
 
                 async with self.trace.span("phase.execute", run_type="phase", inputs={"criteria_count": len(criteria_list)}) as span:
-                    results = await self._phase_execute(criteria_list)
+                    results = await self._phase_execute(criteria_list, progress_callback)
                     results, deduplication = deduplicate_review_results_by_range(contract_path, results)
                     span.set_outputs(
                         {
@@ -254,12 +291,8 @@ class ContractReviewWorkflow:
                         }
                     )
 
-                pending_ids = [r["criterion_id"] for r in results if r.get("quality_status") == "pending_review"]
-                error_ids = [r["criterion_id"] for r in results if r.get("status") == "ERROR"]
-                quality = {"status": "pending_review" if pending_ids or error_ids else "passed",
-                           "pending_criteria": pending_ids, "error_criteria": error_ids}
-                criteria_manifest = {**self.criteria_source, "count": len(criteria_list),
-                                     "criteria": [{"id": c["id"], "criterion": c["criterion"]} for c in criteria_list]}
+                public_criteria = _public_criteria(criteria_list, results)
+                quality = summarize_criteria(public_criteria)
 
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
@@ -334,7 +367,7 @@ class ContractReviewWorkflow:
                         "report_docx": annotated_docx_path,
                         "criteria_count": len(results),
                         "quality": quality,
-                        "criteria_manifest": criteria_manifest,
+                        "criteria": public_criteria,
                         "issue_count": sum(len(result.get("issues", [])) for result in results),
                         "error_count": sum(1 for result in results if result.get("status") == "ERROR"),
                         "elapsed_seconds": elapsed,
@@ -358,7 +391,7 @@ class ContractReviewWorkflow:
 
                 return {
                     "quality": quality,
-                    "criteria_manifest": criteria_manifest,
+                    "criteria": public_criteria,
                     "report_docx": annotated_docx_path,
                     "criteria_count": len(results),
                     "issue_count": sum(len(result.get("issues", [])) for result in results),
@@ -392,12 +425,13 @@ class ContractReviewWorkflow:
         progress_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None,
         stage: str,
         message: str,
+        **details: Any,
     ) -> None:
         """Forward a lightweight stage update to the optional UI callback."""
         if progress_callback is None:
             return
 
-        update = {"stage": stage, "message": message}
+        update = {"stage": stage, "message": message, **details}
         maybe_awaitable = progress_callback(update)
         if inspect.isawaitable(maybe_awaitable):
             await maybe_awaitable
@@ -563,7 +597,8 @@ class ContractReviewWorkflow:
 
     async def _phase_execute(
         self,
-        criteria_list: list[dict]
+        criteria_list: list[dict],
+        progress_callback: Callable[[dict[str, Any]], Awaitable[None] | None] | None = None,
     ) -> list[dict]:
         """Phase 4: Orchestrator runs sub-agents with configured retrieval + reflection."""
         print(f"\n[Phase 4] Executing {len(criteria_list)} criteria reviews...")
@@ -576,7 +611,10 @@ class ContractReviewWorkflow:
             api_events_path=self.api_events_path,
             state_store=self.state_store,
         )
-        results = await orchestrator.execute_criteria(criteria_list)
+        results = await orchestrator.execute_criteria(
+            criteria_list,
+            progress_callback=progress_callback,
+        )
         self._retrieval_tokens = getattr(orchestrator, 'retrieval_tokens', 0)
 
         self.logger.log(

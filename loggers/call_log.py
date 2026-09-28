@@ -107,12 +107,20 @@ class CallRecord:
                             http_status=http_status)
         self._write()
 
-    def failed(self, exc: BaseException, *, stage: str = "request") -> None:
+    def failed(
+        self,
+        exc: BaseException,
+        *,
+        stage: str = "request",
+        timing: dict[str, float] | None = None,
+    ) -> None:
         self.payload.update(
             status="failed", finished_at=_now(), failure_stage=stage,
             error={"type": type(exc).__name__, "message": str(exc),
                    "http_status": getattr(exc, "http_status", getattr(exc, "status_code", None))},
         )
+        if timing is not None:
+            self.payload["timing"] = timing
         self._write()
 
     def _write(self) -> None:

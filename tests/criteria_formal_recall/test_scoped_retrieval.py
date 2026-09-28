@@ -351,6 +351,24 @@ class FullScanTests(unittest.TestCase):
         self.assertIn("提取正文附件引用", client.prompts[0])
 
 
+    def test_scan_retries_only_the_failed_batch(self) -> None:
+        owner = {"node_id": "body/sec", "title": "正文"}
+        index = {
+            "nodes": [owner],
+            "anchor_map": {
+                "p_0001": {"node_id": "body/sec", "body_child_index": 1, "raw_text": "甲" * 20},
+                "p_0002": {"node_id": "body/sec", "body_child_index": 2, "raw_text": "乙" * 20},
+            },
+        }
+        client = _RetryingScanClient()
+
+        matches = scan_matches(index, "检查错别字", client, batch_tokens=1, concurrency=1)
+
+        self.assertEqual(client.calls_by_anchor["p_0001"], 2)
+        self.assertEqual(client.calls_by_anchor["p_0002"], 1)
+        self.assertEqual({item["start_anchor"] for item in matches}, {"p_0001", "p_0002"})
+
+
 class _ScanClient:
     def __init__(self) -> None:
         self.call_count = 0
@@ -362,6 +380,20 @@ class _ScanClient:
         with self._lock:
             self.call_count += 1
             self.prompts.append(prompt)
+        return schema.model_validate({
+            "findings": [{"anchor_id": anchor_id, "reason": "测试发现"}],
+        })
+
+
+class _RetryingScanClient:
+    def __init__(self) -> None:
+        self.calls_by_anchor: dict[str, int] = {}
+
+    def complete_model(self, prompt: str, schema: type[ScanResponse]) -> ScanResponse:
+        anchor_id = re.search(r'"anchor_id": "([^"]+)"', prompt).group(1)  # type: ignore[union-attr]
+        self.calls_by_anchor[anchor_id] = self.calls_by_anchor.get(anchor_id, 0) + 1
+        if anchor_id == "p_0001" and self.calls_by_anchor[anchor_id] == 1:
+            raise TimeoutError("simulated scan timeout")
         return schema.model_validate({
             "findings": [{"anchor_id": anchor_id, "reason": "测试发现"}],
         })

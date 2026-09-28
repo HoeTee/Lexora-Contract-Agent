@@ -306,13 +306,36 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/status" `
     "result_filename": "【已AI审查】contract.docx",
     "ready": false
   },
-  "logs": {
-    "enabled": true
-  }
+  "quality": {
+    "total_count": 18,
+    "completed_count": 7,
+    "incomplete_count": 0,
+    "error_count": 0,
+    "not_started_count": 8,
+    "running_count": 3,
+    "incomplete_criteria": [],
+    "error_criteria": []
+  },
+  "criteria": [
+    {
+      "id": "H01",
+      "criterion": "审查要点原文",
+      "execution_status": "completed",
+      "review_result": "issues_found",
+      "error": null
+    },
+    {
+      "id": "H02",
+      "criterion": "审查要点原文",
+      "execution_status": "running",
+      "review_result": null,
+      "error": null
+    }
+  ]
 }
 ```
 
-任务状态为 `succeeded` 表示输出 DOCX 已成功生成。若单个审查标准在完整重试后仍发生模型调用或结构化输出错误，系统仍提供其他标准的有效结果，同时返回 `quality.status=pending_review` 和非空 `quality.error_criteria`；DOCX 的 AI 审查总结会列出未完成的标准。调用方必须同时读取 `quality`，不能只根据 `status` 判断所有标准均已完成。
+任务状态为 `succeeded` 表示输出 DOCX 已成功生成。`criteria` 始终展示全部审查项；`execution_status` 为 `not_started / running / completed / incomplete / error`。`incomplete` 仅表示 Reflector 达到最大轮次后仍未完成确认，模型调用超时、结构化输出错误等异常在完整重试后记为 `error`。`review_result` 仅在执行产生有效审查结果时填写。调用方应同时读取 `quality` 汇总和 `criteria` 明细，不能只根据任务级 `status` 判断所有标准均已完成。
 
 | HTTP 状态码 | 返回场景 | 响应 |
 | --- | --- | --- |
@@ -552,4 +575,4 @@ data/api/<task_id>/
 
 ## 审查输出质量契约更新
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：`quality.pending_criteria` 只表示内部质量状态，不会以“待复核”写入用户 DOCX；固定18条始终执行，上传的 `criteria_file` 作为附加用户标准进入动态规划。
+见[审查质量与批注规则](REVIEW_QUALITY.md)：`quality.incomplete_criteria` 表示 Reflector 达到轮次上限后仍未完成确认，`quality.error_criteria` 表示调用或校验重试耗尽；固定18条始终执行，上传的 `criteria_file` 作为附加用户标准进入动态规划。

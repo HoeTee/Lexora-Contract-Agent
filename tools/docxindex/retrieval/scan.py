@@ -1,13 +1,19 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import time
 from typing import Any
 
 from tools.docxindex.indexing import estimate_tokens
 from tools.docxindex.llm import LLMClient
 from tools.docxindex.llm.prompts import scan_prompt
 from tools.docxindex.llm.schemas import ScanResponse
-from loggers.call_log import map_with_context
+from loggers.call_log import (
+    append_route_event,
+    map_with_context,
+    reset_call_stage,
+    set_call_stage,
+)
 
 from .title import _candidate
 
@@ -29,12 +35,60 @@ def scan_matches(
     if not batches:
         return []
 
-    def inspect(batch: list[tuple[str, dict[str, Any], dict[str, Any], str]]) -> list[dict[str, Any]]:
+    def inspect(entry: tuple[int, list[tuple[str, dict[str, Any], dict[str, Any], str]]]) -> list[dict[str, Any]]:
+        batch_index, batch = entry
         items = [{"anchor_id": anchor_id, "text": text} for anchor_id, _, _, text in batch]
-        response = client.complete_model(
-            scan_prompt(query, items, candidate_instruction=candidate_instruction),
-            ScanResponse,
-        )
+        prompt = scan_prompt(query, items, candidate_instruction=candidate_instruction)
+        text_tokens = sum(estimate_tokens(item[3]) for item in batch)
+        prompt_tokens = estimate_tokens(prompt)
+        response = None
+        for attempt in range(1, 3):
+            stage_token = set_call_stage(f"scan.batch-{batch_index:03d}")
+            started = time.monotonic()
+            append_route_event(
+                "scan_batch_started",
+                {
+                    "batch_index": batch_index,
+                    "batch_count": len(batches),
+                    "attempt": attempt,
+                    "anchor_count": len(batch),
+                    "text_tokens": text_tokens,
+                    "prompt_tokens": prompt_tokens,
+                },
+            )
+            try:
+                response = client.complete_model(prompt, ScanResponse)
+            except Exception as exc:
+                append_route_event(
+                    "scan_batch_failed",
+                    {
+                        "batch_index": batch_index,
+                        "batch_count": len(batches),
+                        "attempt": attempt,
+                        "duration_seconds": round(time.monotonic() - started, 3),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+                if attempt == 2:
+                    raise
+                time.sleep(1)
+            else:
+                append_route_event(
+                    "scan_batch_succeeded",
+                    {
+                        "batch_index": batch_index,
+                        "batch_count": len(batches),
+                        "attempt": attempt,
+                        "duration_seconds": round(time.monotonic() - started, 3),
+                        "finding_count": len(response.findings),
+                    },
+                )
+                break
+            finally:
+                reset_call_stage(stage_token)
+        if response is None:
+            raise RuntimeError(f"Scan batch {batch_index} did not produce a response.")
         by_anchor = {anchor_id: (record, owner, text) for anchor_id, record, owner, text in batch}
         findings: list[dict[str, Any]] = []
         seen: set[str] = set()
@@ -62,7 +116,7 @@ def scan_matches(
         return findings
 
     with ThreadPoolExecutor(max_workers=max(1, min(concurrency, len(batches)))) as executor:
-        groups = map_with_context(executor, inspect, batches)
+        groups = map_with_context(executor, inspect, list(enumerate(batches, 1)))
     return [finding for group in groups for finding in group]
 
 

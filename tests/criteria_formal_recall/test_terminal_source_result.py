@@ -23,6 +23,22 @@ class TerminalSourceResultTests(unittest.IsolatedAsyncioTestCase):
             "finished_at": None,
             "message": "test",
             "error": None,
+            "criteria": [
+                {
+                    "id": "H01",
+                    "criterion": "测试标准",
+                    "execution_status": "completed",
+                    "review_result": "compliant",
+                    "error": None,
+                },
+                {
+                    "id": "H12",
+                    "criterion": "是否有错别字。",
+                    "execution_status": "error",
+                    "review_result": None,
+                    "error": {"type": "ModelCallError", "message": "Request timed out."},
+                },
+            ],
             "input": {
                 "contract_filename": "source.docx",
                 "criteria_source": "mandatory",
@@ -34,6 +50,7 @@ class TerminalSourceResultTests(unittest.IsolatedAsyncioTestCase):
                 "result_path": str(result_path),
             },
             "logs": {},
+            "criteria_manifest": {"count": 2},
         }
 
     def test_create_task_stages_source_at_existing_result_path(self) -> None:
@@ -69,6 +86,18 @@ class TerminalSourceResultTests(unittest.IsolatedAsyncioTestCase):
                 with self.subTest(status=status):
                     response = present_review_task(self._task(status, result))
                     self.assertTrue(response["output"]["ready"])
+
+    def test_status_response_keeps_quality_summary_and_all_criteria(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = Path(temp_dir) / "reviewed.docx"
+            result.write_bytes(b"reviewed")
+            response = present_review_task(self._task("succeeded", result))
+
+        self.assertEqual(response["quality"]["total_count"], 2)
+        self.assertEqual(response["quality"]["error_criteria"], ["H12"])
+        self.assertEqual([item["id"] for item in response["criteria"]], ["H01", "H12"])
+        self.assertNotIn("logs", response)
+        self.assertNotIn("criteria_manifest", response)
 
     async def test_result_endpoint_serves_all_terminal_statuses(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

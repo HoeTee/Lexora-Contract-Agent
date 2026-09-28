@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from endpoints.review.task_store import summarize_criteria
+
 
 def present_submit_response(task: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -32,8 +34,8 @@ def present_review_task(
         "finished_at": task["finished_at"],
         "message": task["message"],
         "error": task["error"],
-        "quality": task.get("quality", {}),
-        "criteria_manifest": task.get("criteria_manifest", {}),
+        "quality": summarize_criteria(task.get("criteria") or []),
+        "criteria": task.get("criteria", []),
         "input": {
             "contract_filename": task["input"]["contract_filename"],
             "criteria_source": task["input"]["criteria_source"],
@@ -46,9 +48,6 @@ def present_review_task(
                 terminal_status
                 and (result_path.exists() or source_fallback_available)
             ),
-        },
-        "logs": {
-            "enabled": any(task.get("logs", {}).values()),
         },
     }
     if include_meta_fields:

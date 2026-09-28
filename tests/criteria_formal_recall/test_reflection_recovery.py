@@ -20,31 +20,29 @@ class _InvalidJsonReflector:
 
 
 class ReflectionRecoveryTests(unittest.IsolatedAsyncioTestCase):
-    async def test_reflector_model_failure_preserves_valid_subagent_review(self) -> None:
+    async def test_reflector_model_failure_enters_criterion_recovery(self) -> None:
         orchestrator = OrchestratorAgent()
 
-        result = await orchestrator._review_with_fallback(
-            _FailingReflector(),
-            cid="C01",
-            round_num=1,
-            reflector_input='{"subagent_output": {"status": "issues_found"}}',
-            missing_text_review_notes="",
-        )
+        with self.assertRaises(ModelCallError):
+            await orchestrator._review_with_fallback(
+                _FailingReflector(),
+                cid="C01",
+                round_num=1,
+                reflector_input='{"subagent_output": {"status": "issues_found"}}',
+                missing_text_review_notes="",
+            )
 
-        self.assertIsNone(result)
-
-    async def test_reflector_schema_failure_preserves_valid_subagent_review(self) -> None:
+    async def test_reflector_schema_failure_enters_criterion_recovery(self) -> None:
         orchestrator = OrchestratorAgent()
 
-        result = await orchestrator._review_with_fallback(
-            _InvalidJsonReflector(),
-            cid="C04",
-            round_num=1,
-            reflector_input='{"subagent_output": {"status": "issues_found"}}',
-            missing_text_review_notes="",
-        )
-
-        self.assertIsNone(result)
+        with self.assertRaises(AgentOutputValidationError):
+            await orchestrator._review_with_fallback(
+                _InvalidJsonReflector(),
+                cid="C04",
+                round_num=1,
+                reflector_input='{"subagent_output": {"status": "issues_found"}}',
+                missing_text_review_notes="",
+            )
 
 
 if __name__ == "__main__":

@@ -5,9 +5,11 @@ OrchestratorAgent - dispatches sub-agents per criterion with retrieval + reflect
 import asyncio
 from copy import deepcopy
 import hashlib
+import inspect
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 
 from config import (
     CRITERION_RETRY_MAX_ATTEMPTS,
@@ -945,8 +947,8 @@ class OrchestratorAgent:
         round_num: int,
         reflector_input: str,
         missing_text_review_notes: str,
-    ) -> dict | None:
-        """Return a reflection result, or preserve the valid review on model failure."""
+    ) -> dict:
+        """Return a reflection result and propagate model failures for criterion retry."""
         try:
             return await reflector.review(
                 agent_output=reflector_input,
@@ -954,21 +956,21 @@ class OrchestratorAgent:
             )
         except (AgentOutputValidationError, ModelCallError) as exc:
             print(
-                f"[Orchestrator] {cid}: reflection round {round_num} unavailable; "
-                f"preserving the latest valid review: {exc}"
+                f"[Orchestrator] {cid}: reflection round {round_num} failed; "
+                f"retrying the criterion through recovery: {exc}"
             )
             if self.logger:
                 self.logger.log(
                     phase="Reflect",
                     sender="Reflector",
                     receiver=f"SubAgent_{cid}",
-                    action=f"reflect_fallback({cid}, round={round_num})",
+                    action=f"reflect_failed({cid}, round={round_num})",
                     input_summary=reflector_input,
                     output_summary=f"ModelCallError: {exc}",
                     tokens=reflector.token_usage.get("total_tokens", 0),
                     duration=0,
                 )
-            return None
+            raise
 
     async def execute_single_criterion(
             self,
@@ -1120,7 +1122,7 @@ class OrchestratorAgent:
         # Step 3: Reflection loop. Use a fresh reflector conversation per round;
         # otherwise complete retrieval evidence is duplicated in message history.
         ledger = _FindingLedger(parsed_opinion)
-        quality_status = "pending_review"
+        quality_status = "incomplete"
         reflector_tokens = 0
         for round_num in range(MAX_REFLECTION_ROUNDS):
             if criterion.get("review_source") == "mandatory":
@@ -1144,9 +1146,6 @@ class OrchestratorAgent:
                 missing_text_review_notes=missing_text_review_notes,
             )
             reflector_tokens += reflector.token_usage.get("total_tokens", 0)
-            if review is None:
-                break
-
             coverage_gaps = review.get("coverage_gaps") or []
             if coverage_gaps:
                 gap_feedback = "\n".join(
@@ -1198,24 +1197,22 @@ class OrchestratorAgent:
                     )
                     ledger.observe(parsed_opinion)
                 except (AgentOutputValidationError, ModelCallError) as exc:
-                    parsed_opinion = previous_opinion
-                    quality_status = "pending_review"
                     print(
-                        f"[Orchestrator] {cid}: refinement unavailable; "
-                        f"preserving the latest schema-valid review: {exc}"
+                        f"[Orchestrator] {cid}: refinement failed; "
+                        f"retrying the criterion through recovery: {exc}"
                     )
                     if self.logger:
                         self.logger.log(
                             phase="Reflect",
                             sender=f"SubAgent_{cid}",
                             receiver="Orchestrator",
-                            action=f"revision_fallback({cid}, round={round_num+1})",
+                            action=f"revision_failed({cid}, round={round_num+1})",
                             input_summary=review.get("feedback", ""),
                             output_summary=f"{type(exc).__name__}: {exc}",
                             tokens=sub_agent.token_usage.get("total_tokens", 0),
                             duration=round(time.time() - start, 2),
                         )
-                    break
+                    raise
         else:
             print(f"[Orchestrator] {cid}: Max {MAX_REFLECTION_ROUNDS} rounds reached")
 
@@ -1312,7 +1309,8 @@ class OrchestratorAgent:
 
     async def execute_criteria(
             self,
-            criteria_list: list[dict]
+            criteria_list: list[dict],
+            progress_callback: Callable[[dict], Awaitable[None] | None] | None = None,
     ) -> list[dict]:
         """Execute criteria with concurrency control and auto-retry for failures."""
         # execute_tasks = [self.execute_single_criterion(criterion) for criterion in criteria_list]
@@ -1324,6 +1322,15 @@ class OrchestratorAgent:
             await semaphore.acquire()
             span = None
             try:
+                await _emit_criterion_progress(
+                    progress_callback,
+                    {
+                        "criterion_id": str(criterion["id"]),
+                        "execution_status": "running",
+                        "review_result": None,
+                        "error": None,
+                    },
+                )
                 async with get_current_trace().span(
                     f"criterion.{criterion.get('id')}",
                     run_type="criterion",
@@ -1336,10 +1343,23 @@ class OrchestratorAgent:
                     if result.get("recovered_from_state"):
                         span.set_metadata({"recovered_from_state": True})
                     span.set_outputs(criterion_outputs(result))
+                    await _emit_criterion_progress(
+                        progress_callback,
+                        _criterion_progress_from_result(result),
+                    )
                     return result
             except Exception as exc:
                 if span is not None:
                     span.set_error(error_info(exc))
+                await _emit_criterion_progress(
+                    progress_callback,
+                    {
+                        "criterion_id": str(criterion["id"]),
+                        "execution_status": "error",
+                        "review_result": None,
+                        "error": {"type": type(exc).__name__, "message": str(exc)},
+                    },
+                )
                 raise
             finally: 
                 semaphore.release()
@@ -1379,3 +1399,34 @@ class OrchestratorAgent:
         print(f"  Completed: {len(final_results)} reviews, Total tokens: {total_tokens:,}")
 
         return final_results
+
+
+def _criterion_progress_from_result(result: dict) -> dict:
+    status = str(result.get("status") or "").lower()
+    execution_status = "error" if status == "error" else (
+        "incomplete" if result.get("quality_status") == "incomplete" else "completed"
+    )
+    return {
+        "criterion_id": str(result.get("criterion_id") or ""),
+        "execution_status": execution_status,
+        "review_result": None if execution_status == "error" else status,
+        "error": (
+            {
+                "type": str(result.get("error_type") or "CriterionError"),
+                "message": str(result.get("error_message") or "Criterion execution failed."),
+            }
+            if execution_status == "error"
+            else None
+        ),
+    }
+
+
+async def _emit_criterion_progress(
+    callback: Callable[[dict], Awaitable[None] | None] | None,
+    update: dict,
+) -> None:
+    if callback is None:
+        return
+    result = callback(update)
+    if inspect.isawaitable(result):
+        await result

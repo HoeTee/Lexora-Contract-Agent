@@ -107,9 +107,12 @@ class LLMClient:
                                        "temperature": self.settings.temperature,
                                        "extra_body": extra_body or None, "attempt": attempt + 1})
             self._wait_for_start_slot()
+            queue_started = time.monotonic()
+            request_started: float | None = None
             try:
                 with self._limiter:
                     with _global_model_slot("llm", "DocxIndexLLM", self.settings.model):
+                        request_started = time.monotonic()
                         response = self.client.chat.completions.create(
                             model=self.settings.model,
                             messages=[{"role": "user", "content": prompt}],
@@ -118,7 +121,22 @@ class LLMClient:
                         )
                 content = response.choices[0].message.content or ""
             except Exception as exc:
-                record.failed(exc, stage="semaphore_wait" if isinstance(exc, RedisError) or type(exc).__name__ == "LLMGlobalSemaphoreTimeout" else "request")
+                finished = time.monotonic()
+                timing = {
+                    "queue_wait_seconds": round(
+                        (request_started or finished) - queue_started,
+                        3,
+                    ),
+                    "request_seconds": round(
+                        finished - request_started,
+                        3,
+                    ) if request_started is not None else 0.0,
+                }
+                record.failed(
+                    exc,
+                    stage="semaphore_wait" if isinstance(exc, RedisError) or type(exc).__name__ == "LLMGlobalSemaphoreTimeout" else "request",
+                    timing=timing,
+                )
                 if not _is_rate_limit_error(exc) or attempt >= self._rate_limit_retries:
                     error = LLMClientError(
                         str(exc),
@@ -131,7 +149,15 @@ class LLMClient:
                     raise error from exc
                 time.sleep(2**attempt)
                 continue
-            record.succeeded({"content": content, "usage": response.usage.model_dump() if response.usage else None})
+            finished = time.monotonic()
+            record.succeeded({
+                "content": content,
+                "usage": response.usage.model_dump() if response.usage else None,
+                "timing": {
+                    "queue_wait_seconds": round((request_started or finished) - queue_started, 3),
+                    "request_seconds": round(finished - (request_started or finished), 3),
+                },
+            })
             _LAST_CALL.set((record.call_id, str(record.path) if record.path else None))
             return content
         raise RuntimeError("unreachable LLM retry state")

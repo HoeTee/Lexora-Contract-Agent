@@ -455,6 +455,84 @@ def update_task(client_dir: str, task_id: str, **updates: Any) -> dict[str, Any]
     return write_task(task)
 
 
+def summarize_criteria(criteria: list[dict[str, Any]] | None) -> dict[str, Any]:
+    items = criteria or []
+    statuses = [str(item.get("execution_status") or "not_started") for item in items]
+    incomplete_ids = [
+        str(item.get("id")) for item in items
+        if item.get("id") and item.get("execution_status") == "incomplete"
+    ]
+    error_ids = [
+        str(item.get("id")) for item in items
+        if item.get("id") and item.get("execution_status") == "error"
+    ]
+    return {
+        "total_count": len(items),
+        "completed_count": statuses.count("completed"),
+        "incomplete_count": len(incomplete_ids),
+        "error_count": len(error_ids),
+        "not_started_count": statuses.count("not_started"),
+        "running_count": statuses.count("running"),
+        "incomplete_criteria": incomplete_ids,
+        "error_criteria": error_ids,
+    }
+
+
+def initialize_task_criteria(
+    client_dir: str,
+    task_id: str,
+    criteria: list[dict[str, Any]],
+) -> dict[str, Any]:
+    entries = [
+        {
+            "id": str(item["id"]),
+            "criterion": str(item.get("criterion") or ""),
+            "execution_status": "not_started",
+            "review_result": None,
+            "error": None,
+        }
+        for item in criteria
+    ]
+    return update_task(client_dir, task_id, criteria=entries, quality=summarize_criteria(entries))
+
+
+def update_task_criterion(
+    client_dir: str,
+    task_id: str,
+    criterion_id: str,
+    *,
+    execution_status: str,
+    review_result: str | None = None,
+    error: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    task = read_task(client_dir, task_id)
+    if task is None:
+        raise FileNotFoundError(task_id)
+    criteria = [dict(item) for item in task.get("criteria") or []]
+    for item in criteria:
+        if str(item.get("id")) != str(criterion_id):
+            continue
+        item.update(
+            execution_status=execution_status,
+            review_result=review_result,
+            error=error,
+        )
+        break
+    else:
+        criteria.append(
+            {
+                "id": str(criterion_id),
+                "criterion": "",
+                "execution_status": execution_status,
+                "review_result": review_result,
+                "error": error,
+            }
+        )
+    task["criteria"] = criteria
+    task["quality"] = summarize_criteria(criteria)
+    return write_task(task)
+
+
 def copy_contract_to_result(contract_path: Path | str, result_path: Path | str) -> Path:
     """Atomically copy the original contract to the task's existing result path."""
     source = Path(contract_path)
@@ -504,6 +582,8 @@ def create_task(
         "finished_at": None,
         "message": "Review job submitted.",
         "error": None,
+        "criteria": [],
+        "quality": summarize_criteria([]),
         "meta_fields": dict(meta_fields or {}),
         "input": {
             "contract_filename": contract_filename,
@@ -603,17 +683,34 @@ def mark_queued(client_dir: str, task_id: str) -> dict[str, Any]:
     )
 
 
-def mark_succeeded(client_dir: str, task_id: str, *, quality: dict | None = None,
-                   criteria_manifest: dict | None = None) -> dict[str, Any]:
+def mark_succeeded(
+    client_dir: str,
+    task_id: str,
+    *,
+    criteria: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    task = read_task(client_dir, task_id)
+    if task is None:
+        raise FileNotFoundError(task_id)
+    final_criteria = criteria if criteria is not None else list(task.get("criteria") or [])
+    quality = summarize_criteria(final_criteria)
+    incomplete_count = quality["incomplete_count"]
+    error_count = quality["error_count"]
+    if incomplete_count or error_count:
+        message = (
+            f"共{quality['total_count']}项：{quality['completed_count']}项完成，"
+            f"{incomplete_count}项未完整，{error_count}项失败。"
+        )
+    else:
+        message = f"合同审查完成，共{quality['total_count']}项审查项。"
     return update_task(
         client_dir,
         task_id,
         status="succeeded",
         finished_at=now_iso(),
-        message=("审查文件已生成，部分审查项未完成。" if quality and quality.get("status") == "pending_review"
-                 else "Contract review succeeded."),
-        quality=quality or {},
-        criteria_manifest=criteria_manifest or {},
+        message=message,
+        criteria=final_criteria,
+        quality=quality,
         error=None,
     )
 

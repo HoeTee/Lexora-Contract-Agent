@@ -68,12 +68,14 @@ async def verify(contract: Path, max_seconds: int) -> int:
             print("task_id", task_id, flush=True)
             deadline = time.monotonic() + max_seconds
             last_status = None
+            public_status: dict = {}
             while time.monotonic() < deadline:
                 status_response = await client.post(
                     "/api/review/jobs/status", headers={"Authorization": api_key},
                     json={"task_id": task_id},
                 )
                 status_response.raise_for_status()
+                public_status = status_response.json()
                 task = read_task("api", task_id)
                 if task is None:
                     raise RuntimeError("Submitted task is missing")
@@ -110,16 +112,28 @@ async def verify(contract: Path, max_seconds: int) -> int:
                 "H15_call_count": sum(call.get("criterion_id") == "H15" for call in calls),
                 "trace_runs": len(trace.get("runs") or []),
                 "route_events": len(list((task_dir / "logs" / "route_events").glob("*.json"))),
-                "criterion_errors": len(list((task_dir / "state" / "criteria").glob("*.error.json"))),
+                "criterion_error_history_files": len(
+                    list((task_dir / "state" / "criteria").glob("*.error.json"))
+                ),
+                "public_criteria_count": len(public_status.get("criteria") or []),
+                "public_quality": public_status.get("quality"),
+                "public_internal_fields": sorted(
+                    field for field in ("state", "logs", "criteria_manifest")
+                    if field in public_status
+                ),
                 "task_dir": str(task_dir),
                 "task_error": task.get("error"),
             }
             print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
+            public_quality = summary["public_quality"] or {}
             return 0 if (status == "succeeded" and summary["result_exists"]
                          and summary["result_comments"] and not summary["pending_calls"]
                          and summary["docxindex_call_count"] and summary["agent_call_count"]
                          and summary["H12_call_count"] and summary["H15_call_count"]
-                         and summary["trace_runs"] and summary["route_events"]) else 1
+                         and summary["trace_runs"] and summary["route_events"]
+                         and summary["public_criteria_count"] == 18
+                         and public_quality.get("total_count") == 18
+                         and not summary["public_internal_fields"]) else 1
 
 
 def main() -> int:
