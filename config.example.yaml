@@ -41,6 +41,10 @@ workflow:
 queue:
   enabled: true
   broker_url: "redis://localhost:6379/0"
+  worker_disable_prefetch: true
+  pending_timeout_seconds: 60
+  queued_timeout_seconds: 7200
+  watchdog_interval_seconds: 10
 
 model_semaphore:
   llm:

@@ -30,6 +30,7 @@ def present_review_task(
         "task_id": task["task_id"],
         "status": task["status"],
         "created_at": task["created_at"],
+        "queued_at": task.get("queued_at"),
         "started_at": task["started_at"],
         "finished_at": task["finished_at"],
         "message": task["message"],

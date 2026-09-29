@@ -22,5 +22,5 @@ llama-index-llms-openai-like
 llama-index-embeddings-openai-like
 llama-index-readers-file
 transformers
-celery>=5.3.0
+celery>=5.6.0,<6.0.0
 redis>=5.0.0

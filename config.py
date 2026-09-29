@@ -383,6 +383,22 @@ QUEUE_BROKER_URL = _as_str(
     cfg_optional("queue", "broker_url", "redis://localhost:6379/0"),
     "queue.broker_url",
 )
+QUEUE_WORKER_DISABLE_PREFETCH = _parse_bool(
+    cfg_optional("queue", "worker_disable_prefetch", True),
+    "queue.worker_disable_prefetch",
+)
+QUEUE_PENDING_TIMEOUT_SECONDS = _as_float(
+    cfg_optional("queue", "pending_timeout_seconds", 60),
+    "queue.pending_timeout_seconds",
+)
+QUEUE_QUEUED_TIMEOUT_SECONDS = _as_float(
+    cfg_optional("queue", "queued_timeout_seconds", 7200),
+    "queue.queued_timeout_seconds",
+)
+QUEUE_WATCHDOG_INTERVAL_SECONDS = _as_float(
+    cfg_optional("queue", "watchdog_interval_seconds", 10),
+    "queue.watchdog_interval_seconds",
+)
 
 RETRIEVAL_BACKEND = _as_str(cfg("retrieval", "backend"), "retrieval.backend").lower()
 if RETRIEVAL_BACKEND not in {"llamaindex", "docxindex"}:

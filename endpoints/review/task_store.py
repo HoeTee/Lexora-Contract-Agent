@@ -9,7 +9,7 @@ import time
 import uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
 import httpx
@@ -381,17 +381,21 @@ def ensure_task_dirs(client_dir: str, task_id: str) -> None:
             path.mkdir(parents=True, exist_ok=True)
 
 
+def _write_task_file(path: Path, task: dict[str, Any]) -> None:
+    temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp_path.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.replace(path)
+    finally:
+        with suppress(FileNotFoundError):
+            temp_path.unlink()
+
+
 def write_task(task: dict[str, Any]) -> dict[str, Any]:
     path = task_json_path(task["client_dir"], task["task_id"])
     path.parent.mkdir(parents=True, exist_ok=True)
     with task_write_lock(path):
-        temp_path = path.with_name(f"{path.name}.{uuid.uuid4().hex}.tmp")
-        try:
-            temp_path.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
-            temp_path.replace(path)
-        finally:
-            with suppress(FileNotFoundError):
-                temp_path.unlink()
+        _write_task_file(path, task)
     return task
 
 
@@ -453,6 +457,25 @@ def update_task(client_dir: str, task_id: str, **updates: Any) -> dict[str, Any]
         raise FileNotFoundError(task_id)
     task.update(updates)
     return write_task(task)
+
+
+def mutate_task_if_status(
+    client_dir: str,
+    task_id: str,
+    expected_statuses: set[str],
+    mutator: Callable[[dict[str, Any]], bool],
+) -> dict[str, Any] | None:
+    path = task_json_path(client_dir, task_id)
+    if not path.exists():
+        return None
+    with task_write_lock(path):
+        task = read_task_json_file(path)
+        if task is None or task.get("status") not in expected_statuses:
+            return None
+        if not mutator(task):
+            return None
+        _write_task_file(path, task)
+    return task
 
 
 def summarize_criteria(criteria: list[dict[str, Any]] | None) -> dict[str, Any]:
@@ -578,6 +601,7 @@ def create_task(
         "task_id": task_id,
         "status": "pending",
         "created_at": now_iso(),
+        "queued_at": None,
         "started_at": None,
         "finished_at": None,
         "message": "Review job submitted.",
@@ -607,6 +631,9 @@ def create_task(
             "heartbeat_at": None,
             "interrupted_at": None,
         },
+        "queue": {
+            "task_id": None,
+        },
         "model_config": model_config_meta or {
             "source": "env",
             "llm": False,
@@ -634,22 +661,23 @@ def create_task(
     return write_task(task)
 
 
-def mark_worker_started(client_dir: str, task_id: str, worker_id: str) -> dict[str, Any]:
+def mark_worker_started(client_dir: str, task_id: str, worker_id: str) -> dict[str, Any] | None:
     timestamp = now_iso()
-    task = read_task(client_dir, task_id)
-    if task is None:
-        raise FileNotFoundError(task_id)
-    worker = task.get("worker") if isinstance(task.get("worker"), dict) else {}
-    worker.update(
-        {
-            "worker_id": worker_id,
-            "worker_started_at": timestamp,
-            "heartbeat_at": timestamp,
-            "interrupted_at": None,
-        }
-    )
-    task["worker"] = worker
-    return write_task(task)
+
+    def apply(task: dict[str, Any]) -> bool:
+        worker = task.get("worker") if isinstance(task.get("worker"), dict) else {}
+        worker.update(
+            {
+                "worker_id": worker_id,
+                "worker_started_at": timestamp,
+                "heartbeat_at": timestamp,
+                "interrupted_at": None,
+            }
+        )
+        task["worker"] = worker
+        return True
+
+    return mutate_task_if_status(client_dir, task_id, {"pending", "queued"}, apply)
 
 
 def mark_worker_heartbeat(client_dir: str, task_id: str, worker_id: str) -> dict[str, Any] | None:
@@ -674,13 +702,97 @@ def mark_running(client_dir: str, task_id: str) -> dict[str, Any]:
     )
 
 
-def mark_queued(client_dir: str, task_id: str) -> dict[str, Any]:
-    return update_task(
-        client_dir,
-        task_id,
-        status="queued",
-        message="Review job is waiting for an execution slot.",
-    )
+def mark_queued(client_dir: str, task_id: str, queue_task_id: str | None = None) -> dict[str, Any] | None:
+    queued_at = now_iso()
+
+    def apply(task: dict[str, Any]) -> bool:
+        task.update(
+            status="queued",
+            queued_at=queued_at,
+            queue={"task_id": queue_task_id},
+            message="Review job is waiting for an execution slot.",
+        )
+        return True
+
+    return mutate_task_if_status(client_dir, task_id, {"pending"}, apply)
+
+
+def _parse_task_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=BEIJING_TZ)
+    return parsed
+
+
+def expire_stale_waiting_tasks(
+    *,
+    pending_timeout_seconds: float,
+    queued_timeout_seconds: float,
+    current_time: datetime | None = None,
+) -> list[dict[str, Any]]:
+    now = current_time or datetime.now(BEIJING_TZ)
+    expired: list[dict[str, Any]] = []
+
+    for task in iter_active_tasks():
+        status = str(task.get("status") or "")
+        timeout_seconds = pending_timeout_seconds if status == "pending" else queued_timeout_seconds
+        if status not in {"pending", "queued"} or timeout_seconds <= 0:
+            continue
+        worker = task.get("worker") if isinstance(task.get("worker"), dict) else {}
+        if worker.get("worker_id"):
+            continue
+        timestamp = _parse_task_timestamp(
+            task.get("created_at") if status == "pending" else task.get("queued_at") or task.get("created_at")
+        )
+        if timestamp is None or (now - timestamp).total_seconds() <= timeout_seconds:
+            continue
+
+        code = "QUEUE_DISPATCH_TIMEOUT" if status == "pending" else "QUEUE_WAIT_TIMEOUT"
+        message = (
+            "Review job was not dispatched before the pending timeout."
+            if status == "pending"
+            else "Review job did not start before the queue timeout."
+        )
+
+        def mark_timeout(current: dict[str, Any]) -> bool:
+            current_worker = current.get("worker") if isinstance(current.get("worker"), dict) else {}
+            if current_worker.get("worker_id"):
+                return False
+            current["status"] = "failed"
+            current["finished_at"] = now.isoformat(timespec="seconds")
+            current["message"] = "Contract review failed."
+            current["error"] = {
+                "code": code,
+                "message": message,
+                "component": "queue",
+                "timeout_seconds": timeout_seconds,
+            }
+            return True
+
+        updated = mutate_task_if_status(
+            task["client_dir"],
+            task["task_id"],
+            {status},
+            mark_timeout,
+        )
+        if updated is None:
+            continue
+        write_task_log_event(
+            task["client_dir"],
+            task["task_id"],
+            "review_queue_timeout",
+            previous_status=status,
+            timeout_seconds=timeout_seconds,
+            error=code,
+        )
+        expired.append(updated)
+
+    return expired
 
 
 def mark_succeeded(

@@ -78,7 +78,8 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
     worker_id = new_worker_id()
     heartbeat_task = None
     try:
-        mark_worker_started(client_dir, task_id, worker_id)
+        if mark_worker_started(client_dir, task_id, worker_id) is None:
+            return
         heartbeat_task = asyncio.create_task(heartbeat_worker(client_dir, task_id, worker_id))
         if is_cancel_requested(client_dir, task_id):
             mark_cancelled(client_dir, task_id)

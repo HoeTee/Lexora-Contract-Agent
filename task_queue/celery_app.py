@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from celery import Celery
 
-from config import QUEUE_BROKER_URL
+from config import QUEUE_BROKER_URL, QUEUE_WORKER_DISABLE_PREFETCH
 
 
 celery_app = Celery(
@@ -18,4 +18,6 @@ celery_app.conf.update(
     timezone="Asia/Shanghai",
     enable_utc=False,
     task_track_started=True,
+    worker_disable_prefetch=QUEUE_WORKER_DISABLE_PREFETCH,
+    worker_prefetch_multiplier=1,
 )

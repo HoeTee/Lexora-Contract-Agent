@@ -38,7 +38,7 @@ Celery task、Redis broker 和 worker 的部署边界见 [部署说明](DEPLOYME
 | 状态 | 含义 |
 | --- | --- |
 | `pending` | 任务已被系统接受并写入存储，worker 尚未进入执行资源判断。 |
-| `queued` | worker 已接手该任务，但并发已满，任务正在等待执行槽位。 |
+| `queued` | 任务已成功写入 Redis 队列，正在等待空闲 Worker 接手。 |
 | `running` | 已获得执行槽位，审查工作流正在运行。 |
 | `succeeded` | 审查输出已生成，可导出。 |
 | `failed` | 工作流失败，状态查询响应中包含 `error`。 |
@@ -188,8 +188,8 @@ HTTP `202`：
 ```json
 {
   "task_id": "20260714-143119-5ece",
-  "status": "pending",
-  "message": "Review job submitted."
+  "status": "queued",
+  "message": "Review job is waiting for an execution slot."
 }
 ```
 

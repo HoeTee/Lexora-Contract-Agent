@@ -37,6 +37,7 @@ from endpoints.review.task_store import (
     create_task,
     ensure_task_dirs,
     mark_failed,
+    mark_queued,
     new_task_id,
     output_dir,
     read_task,
@@ -637,7 +638,8 @@ async def _prepare_and_dispatch_submission(request: Request, client: ApiClient):
     dispatch_error = _dispatch_review_job(client.client_dir, task_id)
     if dispatch_error is not None:
         return dispatch_error
-    return pretty_json_response(present_submit_response(task), status_code=202)
+    dispatched_task = read_task(client.client_dir, task_id) or task
+    return pretty_json_response(present_submit_response(dispatched_task), status_code=202)
 
 
 def _create_submission_task(client: ApiClient, submission: PreparedReviewSubmission) -> dict:
@@ -710,6 +712,7 @@ def _dispatch_review_job(client_dir: str, task_id: str):
             code="QUEUE_SUBMIT_FAILED",
             message="Review job queue submission failed.",
         )
+    mark_queued(client_dir, task_id, queue_task_id)
     write_task_log_event(client_dir, task_id, "review_queued", queue_task_id=queue_task_id)
     return None
 
