@@ -1,0 +1,877 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contract Agent 内部 Code Review 材料</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --paper: #ffffff;
+      --ink: #172033;
+      --muted: #5d687c;
+      --line: #dfe4eb;
+      --navy: #183b66;
+      --blue: #2d6cdf;
+      --blue-soft: #eaf1ff;
+      --teal: #087f8c;
+      --teal-soft: #e7f7f7;
+      --amber: #a15c00;
+      --amber-soft: #fff4df;
+      --red: #b42318;
+      --red-soft: #fff0ee;
+      --green: #067647;
+      --green-soft: #e9f8ef;
+      --shadow: 0 12px 36px rgba(28, 44, 72, 0.08);
+      --radius: 14px;
+      --mono: Consolas, "SFMono-Regular", Menlo, monospace;
+      --sans: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-family: var(--sans);
+      line-height: 1.72;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre { font-family: var(--mono); }
+    code {
+      padding: .12rem .35rem;
+      border-radius: 5px;
+      background: #eef1f5;
+      font-size: .92em;
+    }
+    pre {
+      overflow-x: auto;
+      padding: 16px 18px;
+      border: 1px solid #26364c;
+      border-radius: 10px;
+      color: #e8edf5;
+      background: #172335;
+      line-height: 1.55;
+    }
+    h1, h2, h3, h4 { line-height: 1.3; color: #12233d; }
+    h1 { font-size: clamp(2rem, 5vw, 3.35rem); margin: 0 0 18px; }
+    h2 { margin: 0 0 20px; font-size: 1.85rem; }
+    h3 { margin-top: 30px; font-size: 1.28rem; }
+    h4 { margin-bottom: 8px; }
+    p { margin: 10px 0; }
+    ul, ol { padding-left: 1.35rem; }
+
+    .shell { display: grid; grid-template-columns: 272px minmax(0, 1fr); }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 22px 18px;
+      overflow: auto;
+      color: #e9f0f8;
+      background: #12233d;
+    }
+    .sidebar .brand { margin-bottom: 18px; font-weight: 700; letter-spacing: .04em; }
+    .sidebar .meta { color: #aebbd0; font-size: .82rem; }
+    .sidebar nav { margin-top: 22px; }
+    .sidebar nav a {
+      display: block;
+      margin: 3px 0;
+      padding: 7px 9px;
+      border-radius: 7px;
+      color: #cdd8e7;
+      font-size: .9rem;
+    }
+    .sidebar nav a:hover { color: #fff; background: rgba(255,255,255,.08); text-decoration: none; }
+    .main { min-width: 0; }
+    .hero {
+      position: relative;
+      overflow: hidden;
+      padding: 70px clamp(24px, 6vw, 90px) 58px;
+      color: #fff;
+      background: linear-gradient(130deg, #17375f 0%, #234f87 58%, #087f8c 100%);
+    }
+    .hero::after {
+      content: "";
+      position: absolute;
+      width: 430px;
+      height: 430px;
+      right: -160px;
+      top: -180px;
+      border: 70px solid rgba(255,255,255,.08);
+      border-radius: 50%;
+    }
+    .hero h1, .hero h2 { color: #fff; }
+    .hero .lead { max-width: 920px; color: #e6eef8; font-size: 1.12rem; }
+    .eyebrow { margin-bottom: 12px; font-size: .82rem; font-weight: 700; letter-spacing: .13em; text-transform: uppercase; opacity: .82; }
+    .badges { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+    .badge { padding: 7px 11px; border: 1px solid rgba(255,255,255,.24); border-radius: 999px; background: rgba(255,255,255,.1); font-size: .86rem; }
+
+    .content { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 34px 0 80px; }
+    .section {
+      margin: 28px 0;
+      padding: clamp(24px, 4vw, 46px);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper);
+      box-shadow: var(--shadow);
+    }
+    .section-number { color: var(--blue); font-family: var(--mono); font-size: .82rem; font-weight: 700; letter-spacing: .1em; }
+    .grid { display: grid; gap: 18px; }
+    .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .card { padding: 18px; border: 1px solid var(--line); border-radius: 11px; background: #fbfcfe; }
+    .card h3, .card h4 { margin-top: 0; }
+    .metric { font-size: 2rem; font-weight: 750; color: var(--navy); }
+    .metric-label { color: var(--muted); font-size: .88rem; }
+    .callout { margin: 18px 0; padding: 16px 18px; border-left: 5px solid var(--blue); border-radius: 8px; background: var(--blue-soft); }
+    .callout.warn { border-left-color: #d47a00; background: var(--amber-soft); }
+    .callout.danger { border-left-color: var(--red); background: var(--red-soft); }
+    .callout.ok { border-left-color: var(--green); background: var(--green-soft); }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .76rem; font-weight: 700; }
+    .tag.blocker { color: #fff; background: var(--red); }
+    .tag.risk { color: #7b4100; background: #ffdca4; }
+    .tag.review { color: #184c9a; background: #dce8ff; }
+    .tag.ok { color: #075f3a; background: #d6f2e1; }
+    .tag.info { color: #28506c; background: #e4edf3; }
+
+    .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; color: #213751; background: #eef3f8; white-space: nowrap; }
+    tr:last-child td { border-bottom: 0; }
+    .number { text-align: right; font-family: var(--mono); white-space: nowrap; }
+    .path { font-family: var(--mono); font-size: .82rem; color: #334b68; }
+
+    .figure { margin: 24px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #f9fbfd; }
+    .figure svg { display: block; width: 100%; height: auto; }
+    .caption { margin-top: 10px; color: var(--muted); font-size: .84rem; }
+
+    .calculator { padding: 22px; border: 1px solid #bfd0e7; border-radius: 12px; background: linear-gradient(145deg, #f7faff, #eef5ff); }
+    .calc-grid { display: grid; grid-template-columns: repeat(4, minmax(150px, 1fr)); gap: 12px; }
+    .field label { display: block; margin-bottom: 5px; color: var(--muted); font-size: .82rem; font-weight: 650; }
+    .field input {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid #bdc9d8;
+      border-radius: 7px;
+      background: #fff;
+      color: var(--ink);
+      font: inherit;
+    }
+    .outputs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+    .output { padding: 13px; border-radius: 9px; color: #fff; background: var(--navy); }
+    .output strong { display: block; font-size: 1.45rem; }
+    .output span { font-size: .8rem; opacity: .82; }
+    .output.accent { background: var(--teal); }
+    .output.warn { background: #9a5c0b; }
+
+    .formula { margin: 10px 0; padding: 13px 15px; border-radius: 8px; background: #172335; color: #edf4ff; font-family: var(--mono); overflow-x: auto; }
+    .checklist { list-style: none; padding: 0; }
+    .checklist li { position: relative; padding: 6px 0 6px 27px; }
+    .checklist li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 800; }
+    .evidence-list li { margin-bottom: 8px; }
+    .small { color: var(--muted); font-size: .85rem; }
+
+    @media (max-width: 980px) {
+      .shell { display: block; }
+      .sidebar { position: relative; width: 100%; height: auto; }
+      .sidebar nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .grid.two, .grid.three, .calc-grid, .outputs { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 640px) {
+      .content { width: min(100% - 22px, 1180px); }
+      .hero { padding: 44px 18px; }
+      .section { padding: 21px 16px; }
+      .grid.two, .grid.three, .calc-grid, .outputs, .sidebar nav { grid-template-columns: 1fr; }
+    }
+    @media print {
+      body { background: #fff; }
+      .shell { display: block; }
+      .sidebar, .calculator { display: none !important; }
+      .hero { color: #111; background: #fff; padding: 22px 0; }
+      .hero h1, .hero h2, .hero .lead { color: #111; }
+      .content { width: 100%; padding: 0; }
+      .section { break-inside: avoid; margin: 12px 0; box-shadow: none; }
+      .figure { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">CONTRACT AGENT · REVIEW</div>
+      <div class="meta">内部 Code Review 材料<br>代码基线：17c90af1b<br>生成日期：2026-10-05</div>
+      <nav aria-label="章节导航">
+        <a href="#executive">01 执行摘要</a>
+        <a href="#baseline">02 配置与部署基线</a>
+        <a href="#concurrency">03 并发控制架构</a>
+        <a href="#relations">04 数量关系与冲突</a>
+        <a href="#timing">05 时间与重试关系</a>
+        <a href="#agent">06 Agent 架构</a>
+        <a href="#retrieval">07 检索方法</a>
+        <a href="#state">08 状态与恢复</a>
+        <a href="#observability">09 可观测性</a>
+        <a href="#evaluation">10 评测与验证</a>
+        <a href="#deployment">11 部署与容量</a>
+        <a href="#questions">12 评审问题</a>
+        <a href="#evidence">13 代码证据索引</a>
+      </nav>
+    </aside>
+
+    <main class="main">
+      <header class="hero">
+        <div class="eyebrow">Internal code review pack</div>
+        <h1>Contract Agent<br>架构与检索评审</h1>
+        <p class="lead">围绕并发控制架构、Agent 架构和 DOCX 结构化检索方法，基于当前代码与有效配置说明真实行为、数量关系、失效边界和待决策风险。检索章节不运行现场模型测试，不把理论值包装成实测结果。</p>
+        <div class="badges">
+          <span class="badge">单文件离线 HTML</span>
+          <span class="badge">代码证据驱动</span>
+          <span class="badge">内嵌 SVG</span>
+          <span class="badge">配置关系计算器</span>
+          <span class="badge">不依赖外部资源</span>
+        </div>
+      </header>
+
+      <div class="content">
+        <section class="section" id="executive">
+          <div class="section-number">01 / EXECUTIVE SUMMARY</div>
+          <h2>执行摘要</h2>
+          <div class="grid three">
+            <div class="card"><div class="metric">3</div><div class="metric-label">当前部署可同时执行的合同数：3 个 worker 容器 × concurrency 1</div></div>
+            <div class="card"><div class="metric">15</div><div class="metric-label">criterion 潜在并发：3 份合同 × 每份 5 条</div></div>
+            <div class="card"><div class="metric">5</div><div class="metric-label">全局 LLM 在途请求上限：Redis semaphore</div></div>
+          </div>
+
+          <div class="callout warn">
+            <strong>核心判断：</strong>当前系统不是一个“单一并发值”控制全部资源的架构。合同、criterion、scan 线程、模型客户端、本地 limiter 和 Redis 全局 semaphore 分属不同作用域。有效容量必须沿调用链取乘积或最小值，不能直接读取某一个 YAML 数字。
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>编号</th><th>结论</th><th>等级</th><th>说明</th></tr></thead>
+              <tbody>
+                <tr><td>F-01</td><td>队列模式下合同并发由 Celery 3 个执行槽主导</td><td><span class="tag review">覆盖</span></td><td><code>max_api_concurrent_reviews=100</code> 当前不是实际瓶颈。</td></tr>
+                <tr><td>F-02</td><td>LLM 生产端可形成 15～30 个调用者，但全局在途请求限制为 5</td><td><span class="tag ok">受控</span></td><td>高生产并发会转化为 Redis 槽等待，而不是模型侧 30 并发。</td></tr>
+                <tr><td>F-03</td><td>DocxIndex rerank 实际复用 LLM 客户端</td><td><span class="tag risk">易误读</span></td><td><code>model_semaphore.reranker=10</code> 不控制当前 DocxIndex rerank；它实际受 LLM 全局值 5 控制。</td></tr>
+                <tr><td>F-04</td><td>部分函数内 limiter 不构成跨调用共享阀门</td><td><span class="tag risk">设计风险</span></td><td><code>llm_query</code>、<code>rerank_matches</code>、<code>vector_search</code> 内部新建 semaphore 且只包单次同步调用。</td></tr>
+                <tr><td>F-05</td><td>Agent 与 DocxIndex 使用不同模型调用超时</td><td><span class="tag review">需确认</span></td><td>Agent 为 30s；DocxIndex LLM/Embedding 默认 120s；两者不是同一配置源。</td></tr>
+                <tr><td>F-06</td><td>等待模型槽会占用 Celery worker</td><td><span class="tag risk">容量风险</span></td><td>3 个 worker 都等待 Redis 槽时，新合同无法开始，最长可等待 600s。</td></tr>
+                <tr><td>F-07</td><td>队列状态语义存在实现与严格定义差异</td><td><span class="tag review">需决策</span></td><td>API 投递 Celery 成功后立即写 <code>queued</code>，不是 worker 发现执行槽已满后才写。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="baseline">
+          <div class="section-number">02 / BASELINE</div>
+          <h2>配置与部署基线</h2>
+          <p>下表是本文公式使用的当前值。配置存在不等于生效；“消费路径”列标明谁真正读取该值。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>层级</th><th>配置</th><th>当前值</th><th>作用域</th><th>消费路径</th></tr></thead>
+              <tbody>
+                <tr><td>部署</td><td>Celery worker 容器</td><td class="number">3</td><td>全部署</td><td><code>docker-compose.yaml:38-99</code></td></tr>
+                <tr><td>部署</td><td><code>--concurrency</code></td><td class="number">1 / 容器</td><td>每个 Celery worker</td><td><code>docker-compose.yaml:45,66,87</code></td></tr>
+                <tr><td>任务</td><td><code>max_api_concurrent_reviews</code></td><td class="number">100</td><td>每个 Python 进程</td><td><code>review_runtime.py:8-11</code></td></tr>
+                <tr><td>工作流</td><td><code>max_orchestrator_concurrency</code></td><td class="number">5</td><td>每份合同</td><td><code>orchestrator.py:1317-1368</code></td></tr>
+                <tr><td>检索</td><td><code>concurrency.llm</code></td><td class="number">10</td><td>每个 DocxIndexRetriever</td><td>index/scan/client 本地线程与 limiter</td></tr>
+                <tr><td>检索</td><td><code>concurrency.embedding</code></td><td class="number">1</td><td>每份合同索引</td><td><code>retriever.py:207-214</code></td></tr>
+                <tr><td>检索</td><td><code>concurrency.reranker</code></td><td class="number">10</td><td>函数参数</td><td>DocxIndex 路径不形成共享 limiter</td></tr>
+                <tr><td>模型</td><td>Redis LLM semaphore</td><td class="number">5</td><td>跨进程 / 跨容器</td><td><code>llm_semaphore.py</code></td></tr>
+                <tr><td>模型</td><td>Redis embedding semaphore</td><td class="number">3</td><td>跨进程 / 跨容器</td><td><code>vector/client.py:120-125</code></td></tr>
+                <tr><td>模型</td><td>Redis reranker semaphore</td><td class="number">10</td><td>跨进程 / 跨容器</td><td>当前主要用于 LlamaIndex reranker</td></tr>
+                <tr><td>时间</td><td>Agent HTTP timeout</td><td class="number">30s</td><td>每次 Agent API 调用</td><td><code>base_agent.py:100-106</code></td></tr>
+                <tr><td>时间</td><td>DocxIndex LLM / embedding timeout</td><td class="number">120s</td><td>每次同步 HTTP 尝试</td><td><code>llm/client.py:53-98</code></td></tr>
+                <tr><td>时间</td><td>模型槽等待 / 租约</td><td class="number">600s / 600s</td><td>每次 Redis acquire</td><td><code>llm_semaphore.py:84-145</code></td></tr>
+                <tr><td>队列</td><td>pending / queued timeout</td><td class="number">60s / 7200s</td><td>未被 worker 领取的任务</td><td><code>task_store.py:732-780</code></td></tr>
+                <tr><td>队列</td><td>watchdog interval</td><td class="number">10s</td><td>API 进程</td><td><code>queue_watchdog.py</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="small">注意：请求级模型配置可覆盖模型名称、密钥和 endpoint，但当前并不会统一覆盖这里列出的所有超时与并发参数。</p>
+        </section>
+
+        <section class="section" id="concurrency">
+          <div class="section-number">03 / CONCURRENCY ARCHITECTURE</div>
+          <h2>并发控制架构</h2>
+          <div class="figure">
+            <svg viewBox="0 0 1120 520" role="img" aria-labelledby="concurrency-title concurrency-desc">
+              <title id="concurrency-title">五层并发阀门</title>
+              <desc id="concurrency-desc">请求从 API 进入 Redis 和 Celery，再进入合同工作流、criterion 并发、检索线程，最后由 Redis 模型 semaphore 限制。</desc>
+              <defs>
+                <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#54708f"/></marker>
+                <filter id="soft"><feDropShadow dx="0" dy="4" stdDeviation="5" flood-opacity=".12"/></filter>
+              </defs>
+              <rect x="20" y="28" width="190" height="112" rx="14" fill="#eaf1ff" stroke="#2d6cdf" filter="url(#soft)"/>
+              <text x="115" y="57" text-anchor="middle" font-size="17" font-weight="700" fill="#173b6b">API 接入</text>
+              <text x="115" y="84" text-anchor="middle" font-size="13" fill="#385475">queue.enabled=true</text>
+              <text x="115" y="107" text-anchor="middle" font-size="13" fill="#385475">写 task.json → 投递</text>
+              <text x="115" y="130" text-anchor="middle" font-size="12" fill="#5d687c">非队列：create_task</text>
+
+              <rect x="250" y="28" width="190" height="112" rx="14" fill="#fff4df" stroke="#c77700" filter="url(#soft)"/>
+              <text x="345" y="57" text-anchor="middle" font-size="17" font-weight="700" fill="#744600">Redis / Celery</text>
+              <text x="345" y="84" text-anchor="middle" font-size="13" fill="#6e542c">3 worker containers</text>
+              <text x="345" y="107" text-anchor="middle" font-size="13" fill="#6e542c">concurrency = 1 each</text>
+              <text x="345" y="130" text-anchor="middle" font-size="12" fill="#7a694d">合同并发 = 3</text>
+
+              <rect x="480" y="28" width="190" height="112" rx="14" fill="#e7f7f7" stroke="#087f8c" filter="url(#soft)"/>
+              <text x="575" y="57" text-anchor="middle" font-size="17" font-weight="700" fill="#075866">合同 Workflow</text>
+              <text x="575" y="84" text-anchor="middle" font-size="13" fill="#346269">单合同生命周期</text>
+              <text x="575" y="107" text-anchor="middle" font-size="13" fill="#346269">ingest → report</text>
+              <text x="575" y="130" text-anchor="middle" font-size="12" fill="#53777c">状态 / trace / 恢复</text>
+
+              <rect x="710" y="28" width="190" height="112" rx="14" fill="#f0ecff" stroke="#7257c5" filter="url(#soft)"/>
+              <text x="805" y="57" text-anchor="middle" font-size="17" font-weight="700" fill="#4c368e">Criterion 并发</text>
+              <text x="805" y="84" text-anchor="middle" font-size="13" fill="#5e4d8f">gather 调度全部</text>
+              <text x="805" y="107" text-anchor="middle" font-size="13" fill="#5e4d8f">Semaphore(5)</text>
+              <text x="805" y="130" text-anchor="middle" font-size="12" fill="#786a9c">全部署潜在 15</text>
+
+              <rect x="940" y="28" width="160" height="112" rx="14" fill="#fff0ee" stroke="#b42318" filter="url(#soft)"/>
+              <text x="1020" y="57" text-anchor="middle" font-size="17" font-weight="700" fill="#8d2119">检索子任务</text>
+              <text x="1020" y="84" text-anchor="middle" font-size="13" fill="#74433f">scan / index</text>
+              <text x="1020" y="107" text-anchor="middle" font-size="13" fill="#74433f">线程池最多 10/合同</text>
+              <text x="1020" y="130" text-anchor="middle" font-size="12" fill="#8b605c">生产端可到 30</text>
+
+              <path d="M210 84 H245" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+              <path d="M440 84 H475" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+              <path d="M670 84 H705" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+              <path d="M900 84 H935" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+
+              <path d="M575 145 V214" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+              <rect x="120" y="225" width="880" height="114" rx="16" fill="#172335" filter="url(#soft)"/>
+              <text x="560" y="254" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">跨进程、跨容器 Redis 模型租约</text>
+              <rect x="160" y="272" width="230" height="46" rx="9" fill="#2d6cdf"/>
+              <text x="275" y="301" text-anchor="middle" fill="#fff" font-size="14">LLM max = 5</text>
+              <rect x="445" y="272" width="230" height="46" rx="9" fill="#087f8c"/>
+              <text x="560" y="301" text-anchor="middle" fill="#fff" font-size="14">Embedding max = 3</text>
+              <rect x="730" y="272" width="230" height="46" rx="9" fill="#7257c5"/>
+              <text x="845" y="301" text-anchor="middle" fill="#fff" font-size="14">Reranker max = 10*</text>
+
+              <path d="M275 340 V400" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+              <path d="M560 340 V400" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+              <path d="M845 340 V400" stroke="#54708f" stroke-width="2" marker-end="url(#arrow)"/>
+              <rect x="145" y="410" width="260" height="70" rx="13" fill="#eaf1ff" stroke="#2d6cdf"/>
+              <text x="275" y="441" text-anchor="middle" font-size="16" font-weight="700" fill="#173b6b">Agent + DocxIndex LLM</text>
+              <text x="275" y="464" text-anchor="middle" font-size="12" fill="#385475">共享 LLM key</text>
+              <rect x="430" y="410" width="260" height="70" rx="13" fill="#e7f7f7" stroke="#087f8c"/>
+              <text x="560" y="441" text-anchor="middle" font-size="16" font-weight="700" fill="#075866">Embedding API</text>
+              <text x="560" y="464" text-anchor="middle" font-size="12" fill="#346269">建索引 + query embedding</text>
+              <rect x="715" y="410" width="260" height="70" rx="13" fill="#f0ecff" stroke="#7257c5"/>
+              <text x="845" y="441" text-anchor="middle" font-size="16" font-weight="700" fill="#4c368e">LlamaIndex Reranker</text>
+              <text x="845" y="464" text-anchor="middle" font-size="12" fill="#5e4d8f">*DocxIndex rerank 不走这里</text>
+            </svg>
+            <div class="caption">图 1：并发调度与并发限制分层。Celery、criterion semaphore、线程池和 Redis semaphore 不是同一个作用域。</div>
+          </div>
+
+          <h3>三类容易混淆的机制</h3>
+          <div class="grid three">
+            <div class="card"><h4>调度</h4><p><code>create_task</code>、<code>gather</code>、Celery 把工作变成可并发任务；它们不保证最终资源并发数。</p></div>
+            <div class="card"><h4>局部限制</h4><p>进程内 <code>asyncio.Semaphore</code> 或 <code>BoundedSemaphore</code> 只约束同一对象或同一进程内的调用。</p></div>
+            <div class="card"><h4>全局限制</h4><p>Redis sorted-set 租约跨进程共享，才是多个 worker/container 之间的模型在途请求上限。</p></div>
+          </div>
+        </section>
+
+        <section class="section" id="relations">
+          <div class="section-number">04 / CONFIG RELATIONSHIPS</div>
+          <h2>数量关系、有效上限与冲突</h2>
+          <div class="formula">合同有效并发 = min(worker 容器数 × Celery concurrency, 进程内合同 semaphore)</div>
+          <div class="formula">criterion 潜在并发 = 合同有效并发 × max_orchestrator_concurrency</div>
+          <div class="formula">模型有效在途并发 = min(所有生产端潜在并发, 本地共享 limiter, Redis 全局 semaphore)</div>
+
+          <div class="calculator" id="capacity-calculator">
+            <h3>配置关系计算器</h3>
+            <p class="small">默认值来自当前 <code>docker-compose.yaml</code> 和 <code>config.yaml</code>。计算的是配置模型，不是现场压测结果。</p>
+            <div class="calc-grid">
+              <div class="field"><label for="workers">Worker 容器数</label><input id="workers" type="number" min="1" value="3"></div>
+              <div class="field"><label for="celeryConcurrency">Celery concurrency / 容器</label><input id="celeryConcurrency" type="number" min="1" value="1"></div>
+              <div class="field"><label for="apiConcurrency">max_api_concurrent_reviews</label><input id="apiConcurrency" type="number" min="1" value="100"></div>
+              <div class="field"><label for="criteriaConcurrency">criterion 并发 / 合同</label><input id="criteriaConcurrency" type="number" min="1" value="5"></div>
+              <div class="field"><label for="scanConcurrency">scan 线程 / 合同</label><input id="scanConcurrency" type="number" min="1" value="10"></div>
+              <div class="field"><label for="globalLlm">全局 LLM semaphore</label><input id="globalLlm" type="number" min="1" value="5"></div>
+              <div class="field"><label for="localEmbedding">embedding 并发 / 合同</label><input id="localEmbedding" type="number" min="1" value="1"></div>
+              <div class="field"><label for="globalEmbedding">全局 embedding semaphore</label><input id="globalEmbedding" type="number" min="1" value="3"></div>
+            </div>
+            <div class="outputs" aria-live="polite">
+              <div class="output"><strong id="outContracts">3</strong><span>有效合同并发</span></div>
+              <div class="output"><strong id="outCriteria">15</strong><span>criterion 潜在并发</span></div>
+              <div class="output warn"><strong id="outScan">30 → 5</strong><span>scan 生产者 → LLM 在途</span></div>
+              <div class="output accent"><strong id="outEmbedding">3</strong><span>embedding 有效并发</span></div>
+            </div>
+            <p id="calcNote" class="small"></p>
+          </div>
+
+          <h3>当前有效关系</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>场景</th><th>上游数量</th><th>下游阀门</th><th>有效结果</th><th>判断</th></tr></thead>
+              <tbody>
+                <tr><td>合同执行</td><td><code>3 × 1 = 3</code></td><td>本地 review semaphore 100</td><td class="number">3</td><td><span class="tag review">100 被覆盖</span></td></tr>
+                <tr><td>criterion</td><td><code>3 × 5 = 15</code></td><td>无跨合同 criterion semaphore</td><td class="number">15</td><td>模型层继续收敛</td></tr>
+                <tr><td>scan LLM</td><td><code>3 × 10 = 30</code></td><td>Redis LLM 5</td><td class="number">5</td><td><span class="tag ok">全局受控</span></td></tr>
+                <tr><td>普通 SubAgent LLM</td><td>最多约 15 个活跃调用者</td><td>Redis LLM 5</td><td class="number">5</td><td>其余等待槽位</td></tr>
+                <tr><td>建索引 embedding</td><td><code>3 × 1 = 3</code></td><td>Redis embedding 3</td><td class="number">3</td><td><span class="tag ok">数量匹配</span></td></tr>
+                <tr><td>DocxIndex rerank</td><td>最多约 15 个 criterion</td><td>实际走 Redis LLM 5</td><td class="number">5</td><td><span class="tag risk">不是 reranker=10</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>配置冲突与无效限制清单</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>配置或机制</th><th>关系</th><th>当前结论</th><th>风险</th></tr></thead>
+              <tbody>
+                <tr><td><code>max_api_concurrent_reviews=100</code></td><td>被 Celery 总槽位 3 截断</td><td>队列模式下实际合同并发是 3</td><td>运维人员可能误以为系统能同时执行 100 份合同。</td></tr>
+                <tr><td><code>retrieval.concurrency.llm=10</code></td><td>被 Redis LLM 5 截断</td><td>只影响本地生产/排队能力</td><td>增大本地值不会提升全局吞吐，只会增加等待者。</td></tr>
+                <tr><td><code>retrieval.concurrency.reranker=10</code></td><td>DocxIndex 单次函数内新建 limiter</td><td>不形成跨 criterion 的共享限制</td><td>配置名看似全局，实际不是稳定控制面。</td></tr>
+                <tr><td><code>model_semaphore.reranker=10</code></td><td>当前 DocxIndex rerank 走 LLM key</td><td>对当前默认后端的 rerank 不生效</td><td>容量评估若按 10 计算会高估。</td></tr>
+                <tr><td>DocxIndex LLM 150ms 启动间隔</td><td>代码常量、每个 client 独立</td><td>不是跨 worker 的全局 QPS 限制</td><td>多个 MCP/client 可分别启动，不能据此承诺全局每秒次数。</td></tr>
+                <tr><td>函数内一次性 semaphore</td><td>无共享对象、无并发调度</td><td>不会凭空产生或统一限制并发</td><td>容易把“存在 semaphore”误认为“已经控制全局并发”。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="timing">
+          <div class="section-number">05 / TIME & RETRIES</div>
+          <h2>时间、租约、等待与重试关系</h2>
+          <div class="figure">
+            <svg viewBox="0 0 1120 420" role="img" aria-labelledby="timeline-title timeline-desc">
+              <title id="timeline-title">一次模型调用的时间分层</title>
+              <desc id="timeline-desc">从 Celery 排队到获得模型槽、HTTP 请求、结构校验与外层重试，每层具有独立时间配置。</desc>
+              <defs><marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#54708f"/></marker></defs>
+              <line x1="78" y1="90" x2="1045" y2="90" stroke="#9eb0c4" stroke-width="3" marker-end="url(#arrow2)"/>
+              <g font-size="13" text-anchor="middle">
+                <circle cx="120" cy="90" r="9" fill="#2d6cdf"/><text x="120" y="62" fill="#173b6b">任务提交</text>
+                <circle cx="310" cy="90" r="9" fill="#c77700"/><text x="310" y="62" fill="#744600">Celery 领取</text>
+                <circle cx="520" cy="90" r="9" fill="#7257c5"/><text x="520" y="62" fill="#4c368e">等待模型槽</text>
+                <circle cx="730" cy="90" r="9" fill="#087f8c"/><text x="730" y="62" fill="#075866">HTTP 请求</text>
+                <circle cx="930" cy="90" r="9" fill="#b42318"/><text x="930" y="62" fill="#8d2119">校验 / 重试</text>
+              </g>
+              <rect x="80" y="125" width="220" height="78" rx="10" fill="#eaf1ff" stroke="#2d6cdf"/>
+              <text x="190" y="153" text-anchor="middle" font-size="15" font-weight="700" fill="#173b6b">队列等待</text>
+              <text x="190" y="178" text-anchor="middle" font-size="13" fill="#385475">pending 60s / queued 7200s</text>
+              <text x="190" y="195" text-anchor="middle" font-size="11" fill="#5d687c">仅未被 worker 领取</text>
+              <rect x="330" y="125" width="220" height="78" rx="10" fill="#fff4df" stroke="#c77700"/>
+              <text x="440" y="153" text-anchor="middle" font-size="15" font-weight="700" fill="#744600">模型槽等待</text>
+              <text x="440" y="178" text-anchor="middle" font-size="13" fill="#6e542c">wait_timeout = 600s</text>
+              <text x="440" y="195" text-anchor="middle" font-size="11" fill="#7a694d">期间占用 Celery worker</text>
+              <rect x="580" y="125" width="220" height="78" rx="10" fill="#e7f7f7" stroke="#087f8c"/>
+              <text x="690" y="153" text-anchor="middle" font-size="15" font-weight="700" fill="#075866">受租约保护的请求</text>
+              <text x="690" y="178" text-anchor="middle" font-size="13" fill="#346269">Agent 30s / Docx 120s</text>
+              <text x="690" y="195" text-anchor="middle" font-size="11" fill="#53777c">lease = 600s</text>
+              <rect x="830" y="125" width="220" height="78" rx="10" fill="#fff0ee" stroke="#b42318"/>
+              <text x="940" y="153" text-anchor="middle" font-size="15" font-weight="700" fill="#8d2119">外层放大</text>
+              <text x="940" y="178" text-anchor="middle" font-size="13" fill="#74433f">429 / schema / criterion retry</text>
+              <text x="940" y="195" text-anchor="middle" font-size="11" fill="#8b605c">不等于单次 HTTP timeout</text>
+
+              <rect x="80" y="250" width="970" height="116" rx="12" fill="#172335"/>
+              <text x="105" y="281" fill="#fff" font-size="15" font-weight="700">当前可确定的关系</text>
+              <text x="105" y="309" fill="#dce7f5" font-family="Consolas, monospace" font-size="13">lease 600s &gt; Agent attempt 30s；lease 600s &gt; DocxIndex attempt 120s</text>
+              <text x="105" y="335" fill="#dce7f5" font-family="Consolas, monospace" font-size="13">timeout detection ∈ (configured_timeout, configured_timeout + watchdog_interval] + scheduling error</text>
+              <text x="105" y="357" fill="#f9c66a" font-size="12">注意：租约覆盖一次 acquire 所保护的 HTTP 尝试，不直接覆盖整个 criterion 或整份合同。</text>
+            </svg>
+            <div class="caption">图 2：时间参数必须按作用对象区分；队列超时、槽位等待、租约和 HTTP timeout 不能互相替代。</div>
+          </div>
+
+          <h3>重试放大</h3>
+          <p>DocxIndex LLM 的同步客户端对 429 最多执行 5 次尝试，并使用 1、2、4、8 秒退避；每次尝试都会重新等待全局模型槽。结构化输出校验默认还允许 3 轮完整调用。</p>
+          <div class="formula">DocxIndex complete() 理论配置包络 ≤ 5 × (600s 槽等待 + 120s HTTP) + 15s 退避 = 3615s</div>
+          <div class="formula">complete_model() 理论配置包络 ≤ 3 × 3615s = 10845s</div>
+          <div class="callout warn">这些是把所有上限同时取满的配置包络，不是实际延迟预测。429 通常会提前返回；缓存命中、有效输出和快速响应都会显著缩短时间。材料不把包络值冒充实测 SLA。</div>
+
+          <h3>其他乘法层</h3>
+          <ul>
+            <li><code>chat_until_valid_json(max_attempts=3)</code>：Agent 结构输出失败时最多 3 次逻辑聊天。</li>
+            <li><code>criterion_retry_max_attempts=2</code>：一条 criterion 的完整检索、审查和反思链可能整体重跑。</li>
+            <li><code>max_reflection_rounds=3</code>：非 compliant 结果可能进入多轮 Reflector。</li>
+            <li>Agent 的 OpenAI SDK <code>max_retries=1</code>：具体退避由已安装依赖实现决定；只从项目代码无法确定精确总时间。</li>
+          </ul>
+
+          <h3>时间关系评审表</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>关系</th><th>当前状态</th><th>结论</th></tr></thead>
+              <tbody>
+                <tr><td><code>lease 600s &gt; HTTP attempt 120s</code></td><td><span class="tag ok">满足</span></td><td>按当前单次 HTTP 尝试上限，租约覆盖时间充足。</td></tr>
+                <tr><td><code>wait 600s</code> 与 Celery worker 数 3</td><td><span class="tag risk">有风险</span></td><td>3 个 worker 可同时阻塞在模型槽等待，新合同无法开始。</td></tr>
+                <tr><td>Agent 30s 与 DocxIndex 120s</td><td><span class="tag review">不统一</span></td><td>同一模型服务出现不同失败阈值，需确认是否有业务依据。</td></tr>
+                <tr><td>pending 60s + watchdog 10s</td><td><span class="tag info">延迟检测</span></td><td>实际标记失败时间约为 60～70s 后，加事件循环调度误差。</td></tr>
+                <tr><td>queued 7200s 与 running 无硬时限</td><td><span class="tag review">边界不同</span></td><td>queued timeout 不会终止已经 running 的合同。</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" id="agent">
+          <div class="section-number">06 / AGENT ARCHITECTURE</div>
+          <h2>Agent 架构与输出契约</h2>
+          <div class="figure">
+            <svg viewBox="0 0 1120 540" role="img" aria-labelledby="agent-title agent-desc">
+              <title id="agent-title">Agent 工作流</title>
+              <desc id="agent-desc">固定标准和上传标准进入规划，逐 criterion 检索、审查、反思，然后汇总并生成 DOCX。</desc>
+              <defs><marker id="arrow3" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#54708f"/></marker></defs>
+              <rect x="40" y="35" width="210" height="80" rx="12" fill="#eaf1ff" stroke="#2d6cdf"/>
+              <text x="145" y="66" text-anchor="middle" font-size="16" font-weight="700" fill="#173b6b">固定审查标准</text>
+              <text x="145" y="92" text-anchor="middle" font-size="12" fill="#385475">criteria-routes.yaml</text>
+              <rect x="40" y="145" width="210" height="80" rx="12" fill="#fff4df" stroke="#c77700"/>
+              <text x="145" y="176" text-anchor="middle" font-size="16" font-weight="700" fill="#744600">上传审查标准</text>
+              <text x="145" y="202" text-anchor="middle" font-size="12" fill="#6e542c">deterministic split</text>
+              <rect x="325" y="130" width="200" height="100" rx="12" fill="#f0ecff" stroke="#7257c5"/>
+              <text x="425" y="162" text-anchor="middle" font-size="16" font-weight="700" fill="#4c368e">Planner</text>
+              <text x="425" y="187" text-anchor="middle" font-size="12" fill="#5e4d8f">RoutePlan + placement</text>
+              <text x="425" y="210" text-anchor="middle" font-size="11" fill="#786a9c">Pydantic 校验</text>
+              <path d="M250 185 H320" stroke="#54708f" stroke-width="2" marker-end="url(#arrow3)"/>
+              <path d="M250 75 C300 75 275 110 325 145" fill="none" stroke="#54708f" stroke-width="2" marker-end="url(#arrow3)"/>
+
+              <rect x="600" y="50" width="220" height="205" rx="14" fill="#e7f7f7" stroke="#087f8c"/>
+              <text x="710" y="82" text-anchor="middle" font-size="17" font-weight="700" fill="#075866">Orchestrator / criterion</text>
+              <rect x="625" y="100" width="170" height="35" rx="7" fill="#fff" stroke="#78b6bc"/>
+              <text x="710" y="123" text-anchor="middle" font-size="12" fill="#346269">1. contract_search</text>
+              <rect x="625" y="145" width="170" height="35" rx="7" fill="#fff" stroke="#78b6bc"/>
+              <text x="710" y="168" text-anchor="middle" font-size="12" fill="#346269">2. SubAgent 判断</text>
+              <rect x="625" y="190" width="170" height="35" rx="7" fill="#fff" stroke="#78b6bc"/>
+              <text x="710" y="213" text-anchor="middle" font-size="12" fill="#346269">3. anchor 校验</text>
+              <path d="M525 180 H595" stroke="#54708f" stroke-width="2" marker-end="url(#arrow3)"/>
+
+              <rect x="890" y="80" width="190" height="145" rx="14" fill="#fff0ee" stroke="#b42318"/>
+              <text x="985" y="112" text-anchor="middle" font-size="17" font-weight="700" fill="#8d2119">Reflector</text>
+              <text x="985" y="140" text-anchor="middle" font-size="12" fill="#74433f">confirm / revise / remove</text>
+              <text x="985" y="164" text-anchor="middle" font-size="12" fill="#74433f">coverage gaps</text>
+              <text x="985" y="190" text-anchor="middle" font-size="11" fill="#8b605c">最多 3 轮</text>
+              <path d="M820 155 H885" stroke="#54708f" stroke-width="2" marker-end="url(#arrow3)"/>
+              <path d="M985 230 C985 290 755 290 755 260" fill="none" stroke="#b42318" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arrow3)"/>
+
+              <rect x="220" y="350" width="230" height="100" rx="13" fill="#eaf1ff" stroke="#2d6cdf"/>
+              <text x="335" y="383" text-anchor="middle" font-size="16" font-weight="700" fill="#173b6b">确定性去重</text>
+              <text x="335" y="409" text-anchor="middle" font-size="12" fill="#385475">anchor range / priority</text>
+              <text x="335" y="432" text-anchor="middle" font-size="11" fill="#5d687c">只消费已确认 issue</text>
+              <rect x="500" y="350" width="230" height="100" rx="13" fill="#f0ecff" stroke="#7257c5"/>
+              <text x="615" y="383" text-anchor="middle" font-size="16" font-weight="700" fill="#4c368e">Summarizer</text>
+              <text x="615" y="409" text-anchor="middle" font-size="12" fill="#5e4d8f">总览 + 语义重复组</text>
+              <text x="615" y="432" text-anchor="middle" font-size="11" fill="#786a9c">程序再次校验合并条件</text>
+              <rect x="780" y="350" width="230" height="100" rx="13" fill="#e7f7f7" stroke="#087f8c"/>
+              <text x="895" y="383" text-anchor="middle" font-size="16" font-weight="700" fill="#075866">DOCX Reporter</text>
+              <text x="895" y="409" text-anchor="middle" font-size="12" fill="#346269">edit anchors → 批注</text>
+              <text x="895" y="432" text-anchor="middle" font-size="11" fill="#53777c">evidence anchors 不写批注</text>
+              <path d="M710 260 C710 315 335 315 335 345" fill="none" stroke="#54708f" stroke-width="2" marker-end="url(#arrow3)"/>
+              <path d="M450 400 H495" stroke="#54708f" stroke-width="2" marker-end="url(#arrow3)"/>
+              <path d="M730 400 H775" stroke="#54708f" stroke-width="2" marker-end="url(#arrow3)"/>
+            </svg>
+            <div class="caption">图 3：语义决策交给 Agent，路径、状态、schema、anchor 校验和持久化交给确定性代码。</div>
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>角色</th><th>输入</th><th>输出</th><th>程序校验</th><th>失败边界</th></tr></thead>
+              <tbody>
+                <tr><td>Planner</td><td>上传标准 skeleton</td><td>route、placement、instruction</td><td><code>StrategyExtractionOutput</code></td><td>结构修复重试耗尽则规划失败。</td></tr>
+                <tr><td>Router</td><td>criterion、标题目录、方法说明</td><td><code>RoutePlan</code></td><td><code>routing.schemas.RoutePlan</code></td><td>非法组合拒绝；坏结果不写 cache。</td></tr>
+                <tr><td>SubAgent</td><td>criterion、check_points、检索证据、白名单工具</td><td><code>SubAgentOutput</code></td><td>Pydantic + anchor 校验 + coverage 校验</td><td>进入 criterion 恢复；不把坏 JSON 交给报告层。</td></tr>
+                <tr><td>Reflector</td><td>完整 SubAgent 输出、finding 索引、补充证据</td><td>finding decisions、coverage gaps</td><td><code>ReflectorOutput</code> + finding 完整性</td><td>异常触发整条 criterion 重试。</td></tr>
+                <tr><td>Summarizer</td><td>稳定 issue_key 的已确认问题</td><td>summary、priority、duplicate groups</td><td>schema + anchor/placement 等价条件</td><td>不能改变证据锚点或吞并不同位置问题。</td></tr>
+                <tr><td>Reporter</td><td>edit anchors、summary、源 DOCX</td><td>批注版 DOCX</td><td>路径存在及生成器内部映射</td><td>当前 worker 最终只检查结果文件存在，完整可消费验证仍是评审点。</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>单条 criterion 的真实输入与输出</h3>
+          <div class="grid two">
+            <div class="card"><h4>输入</h4><ul><li><code>id / criterion / check_points</code></li><li>固定或 Planner 生成的 <code>route</code></li><li><code>placement</code> 与可选 review instruction</li><li>合同索引中展开的原文 anchor 上下文</li></ul></div>
+            <div class="card"><h4>输出</h4><ul><li><code>status / quality_status</code></li><li>已确认 <code>issues</code></li><li><code>finding_decisions</code> 与质量历史</li><li>失败时 <code>ERROR</code>、错误类型和消息</li></ul></div>
+          </div>
+          <p>工作流允许部分 criterion 失败后继续生成结果；只有全部 criterion 都失败时才中止整份任务。这是可用性优先的产品选择，必须在 API 状态和 DOCX 中披露未完成项。</p>
+        </section>
+
+        <section class="section" id="retrieval">
+          <div class="section-number">07 / RETRIEVAL</div>
+          <h2>DOCX 结构化索引与检索方法</h2>
+          <div class="callout"><strong>证据边界：</strong>本章只根据代码、配置、现有测试和仓库文档说明机制；没有现场调用模型、没有新跑真实合同召回、没有新增性能数据。</div>
+          <div class="figure">
+            <svg viewBox="0 0 1120 530" role="img" aria-labelledby="retrieval-title retrieval-desc">
+              <title id="retrieval-title">DOCX 索引和检索链路</title>
+              <desc id="retrieval-desc">DOCX XML 被解析为结构树、锚点和向量索引，RoutePlan 选择五种路线，最后展开原文锚点供审查。</desc>
+              <defs><marker id="arrow4" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#54708f"/></marker></defs>
+              <rect x="35" y="45" width="155" height="68" rx="11" fill="#172335"/>
+              <text x="112" y="75" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">DOCX XML</text>
+              <text x="112" y="97" text-anchor="middle" fill="#cbd8e8" font-size="11">document/styles/numbering</text>
+              <path d="M190 79 H230" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+              <rect x="240" y="35" width="210" height="88" rx="11" fill="#eaf1ff" stroke="#2d6cdf"/>
+              <text x="345" y="66" text-anchor="middle" fill="#173b6b" font-size="16" font-weight="700">确定性结构构建</text>
+              <text x="345" y="91" text-anchor="middle" fill="#385475" font-size="12">BodyItem / regions / hierarchy</text>
+              <text x="345" y="110" text-anchor="middle" fill="#5d687c" font-size="11">frontmatter · body · tail · attachments</text>
+              <path d="M450 79 H490" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+              <rect x="500" y="35" width="210" height="88" rx="11" fill="#e7f7f7" stroke="#087f8c"/>
+              <text x="605" y="66" text-anchor="middle" fill="#075866" font-size="16" font-weight="700">DocumentIndex</text>
+              <text x="605" y="91" text-anchor="middle" fill="#346269" font-size="12">nodes / structure_tree</text>
+              <text x="605" y="110" text-anchor="middle" fill="#53777c" font-size="11">anchor_map / table_map</text>
+              <path d="M710 79 H750" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+              <rect x="760" y="35" width="150" height="88" rx="11" fill="#fff4df" stroke="#c77700"/>
+              <text x="835" y="66" text-anchor="middle" fill="#744600" font-size="16" font-weight="700">向量补索引</text>
+              <text x="835" y="91" text-anchor="middle" fill="#6e542c" font-size="12">node_id + embedding</text>
+              <text x="835" y="110" text-anchor="middle" fill="#7a694d" font-size="11">不生成新 node</text>
+              <path d="M910 79 H950" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+              <rect x="960" y="35" width="130" height="88" rx="11" fill="#f0ecff" stroke="#7257c5"/>
+              <text x="1025" y="66" text-anchor="middle" fill="#4c368e" font-size="16" font-weight="700">任务快照</text>
+              <text x="1025" y="91" text-anchor="middle" fill="#5e4d8f" font-size="11">state/docxindex</text>
+
+              <rect x="35" y="190" width="200" height="82" rx="12" fill="#f0ecff" stroke="#7257c5"/>
+              <text x="135" y="221" text-anchor="middle" fill="#4c368e" font-size="16" font-weight="700">RoutePlan</text>
+              <text x="135" y="246" text-anchor="middle" fill="#5e4d8f" font-size="12">1～5 个受限 steps</text>
+              <text x="135" y="263" text-anchor="middle" fill="#786a9c" font-size="11">固定路线或 LLM 规划</text>
+              <g font-size="14" font-weight="700" text-anchor="middle">
+                <rect x="290" y="175" width="140" height="62" rx="10" fill="#eaf1ff" stroke="#2d6cdf"/><text x="360" y="213" fill="#173b6b">title</text>
+                <rect x="460" y="175" width="140" height="62" rx="10" fill="#fff4df" stroke="#c77700"/><text x="530" y="213" fill="#744600">rule</text>
+                <rect x="630" y="175" width="140" height="62" rx="10" fill="#e7f7f7" stroke="#087f8c"/><text x="700" y="213" fill="#075866">region</text>
+                <rect x="800" y="175" width="140" height="62" rx="10" fill="#fff0ee" stroke="#b42318"/><text x="870" y="213" fill="#8d2119">scan</text>
+                <rect x="970" y="175" width="120" height="62" rx="10" fill="#f0ecff" stroke="#7257c5"/><text x="1030" y="213" fill="#4c368e">hybrid</text>
+              </g>
+              <path d="M235 230 H285" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+              <path d="M235 230 C350 300 530 290 530 242" fill="none" stroke="#54708f" stroke-width="1.7" marker-end="url(#arrow4)"/>
+              <path d="M235 230 C390 325 700 290 700 242" fill="none" stroke="#54708f" stroke-width="1.7" marker-end="url(#arrow4)"/>
+              <path d="M235 230 C430 350 870 290 870 242" fill="none" stroke="#54708f" stroke-width="1.7" marker-end="url(#arrow4)"/>
+              <path d="M235 230 C470 375 1030 290 1030 242" fill="none" stroke="#54708f" stroke-width="1.7" marker-end="url(#arrow4)"/>
+
+              <rect x="190" y="345" width="740" height="95" rx="14" fill="#172335"/>
+              <text x="560" y="374" text-anchor="middle" fill="#fff" font-size="16" font-weight="700">Region / Hybrid 共用语义检索</text>
+              <text x="560" y="402" text-anchor="middle" fill="#dce7f5" font-size="13">结构树 LLM 召回 → 不足时向量补召回 → node_id 合并 → LLM rerank → max_selected_nodes</text>
+              <text x="560" y="425" text-anchor="middle" fill="#9fb5ce" font-size="11">region 额外使用 allowed_node_ids，禁止逃逸指定范围</text>
+              <path d="M700 242 V335" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+              <path d="M1030 242 C1030 320 930 320 930 365" fill="none" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+
+              <rect x="330" y="475" width="460" height="42" rx="9" fill="#e7f7f7" stroke="#087f8c"/>
+              <text x="560" y="501" text-anchor="middle" fill="#075866" font-size="14" font-weight="700">展开原文 anchor → SubAgent 证据上下文 → DOCX 精确批注</text>
+              <path d="M560 440 V468" stroke="#54708f" stroke-width="2" marker-end="url(#arrow4)"/>
+            </svg>
+            <div class="caption">图 4：主索引是 DocumentIndex；规则和向量只选择 node/anchor，最终判断仍使用结构树中展开的合同原文。</div>
+          </div>
+
+          <h3>五种路线</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>路线</th><th>输入</th><th>执行方式</th><th>输出</th><th>边界</th></tr></thead>
+              <tbody>
+                <tr><td><code>title</code></td><td>标题词或 <code>all_titles=true</code></td><td>确定性读取标题；可限定附件区域</td><td>标题 node/anchor</td><td>完整标题目录不受普通 top-k 截断。</td></tr>
+                <tr><td><code>rule</code></td><td>Planner 明确给出的精确 terms</td><td>全文精确短语/规则扫描</td><td>命中 anchor；全未命中时返回确定性说明</td><td>不是 BM25，不自行扩展近义词。</td></tr>
+                <tr><td><code>region</code></td><td>一个 region 或一个标题定位器</td><td>限定范围后完整读取或语义检索</td><td>范围内 node 和原文 anchor</td><td>不得自动退回全局检索。</td></tr>
+                <tr><td><code>scan</code></td><td>criterion、可选 region</td><td>所有非空 anchor 按 token 分批，由线程池调用 LLM</td><td>LLM 确认的 anchor finding</td><td>任一批失败不能声称全文扫描完成。</td></tr>
+                <tr><td><code>hybrid</code></td><td>无法预先限定范围的 query</td><td>全局结构语义 + 向量补充 + rerank</td><td>全局相关 node</td><td>本身是执行路线，不是 fallback 别名。</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Fallback 与反思重检</h3>
+          <div class="grid two">
+            <div class="card"><h4>检索 fallback</h4><p>只有配置启用、RoutePlan 明确请求且路线仅含可安全扩大的 <code>title/rule</code> 时，才补一次全局语义检索。<code>region/scan/hybrid</code> 不触发。</p></div>
+            <div class="card"><h4>反思重检</h4><p>第一轮证据不足后，审查 Agent 以新的缺口 query 再调用 <code>contract_search</code>。它属于新一轮取证，不等同于当前检索的 fallback。</p></div>
+          </div>
+
+          <h3>检索设计风险</h3>
+          <ul>
+            <li><code>llm_query()</code> 对结构分片仍按顺序循环；内部 <code>BoundedSemaphore</code> 不会让这些分片并发。</li>
+            <li><code>rerank_matches()</code> 每次调用只产生一个 LLM 请求，函数内新建 limiter 不形成跨 criterion 控制。</li>
+            <li>DocxIndex rerank 使用通用 LLM，不使用配置中的专用 reranker provider。</li>
+            <li>多 region 的交错合并至少保留每个非空步骤的一项，但最终证据质量仍依赖结构摘要和模型选择。</li>
+            <li>索引快照持久化用于复现和恢复；在线 retriever 的内存对象仍与单次 MCP 进程生命周期绑定。</li>
+          </ul>
+        </section>
+
+        <section class="section" id="state">
+          <div class="section-number">08 / STATE & RECOVERY</div>
+          <h2>任务状态、取消与恢复</h2>
+          <div class="figure">
+            <svg viewBox="0 0 1120 300" role="img" aria-labelledby="state-title state-desc">
+              <title id="state-title">任务状态机</title>
+              <desc id="state-desc">任务从 pending 到 queued 和 running，最终进入 succeeded、failed 或 cancelled。</desc>
+              <defs><marker id="arrow5" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#54708f"/></marker></defs>
+              <g font-size="15" font-weight="700" text-anchor="middle">
+                <rect x="45" y="55" width="160" height="64" rx="12" fill="#eaf1ff" stroke="#2d6cdf"/><text x="125" y="93" fill="#173b6b">pending</text>
+                <rect x="275" y="55" width="160" height="64" rx="12" fill="#fff4df" stroke="#c77700"/><text x="355" y="93" fill="#744600">queued</text>
+                <rect x="505" y="55" width="160" height="64" rx="12" fill="#e7f7f7" stroke="#087f8c"/><text x="585" y="93" fill="#075866">running</text>
+                <rect x="760" y="25" width="160" height="58" rx="12" fill="#e9f8ef" stroke="#067647"/><text x="840" y="60" fill="#075f3a">succeeded</text>
+                <rect x="760" y="105" width="160" height="58" rx="12" fill="#fff0ee" stroke="#b42318"/><text x="840" y="140" fill="#8d2119">failed</text>
+                <rect x="760" y="185" width="160" height="58" rx="12" fill="#eef1f5" stroke="#677487"/><text x="840" y="220" fill="#405169">cancelled</text>
+              </g>
+              <path d="M205 87 H270" stroke="#54708f" stroke-width="2" marker-end="url(#arrow5)"/>
+              <path d="M435 87 H500" stroke="#54708f" stroke-width="2" marker-end="url(#arrow5)"/>
+              <path d="M665 87 C710 87 715 54 755 54" fill="none" stroke="#54708f" stroke-width="2" marker-end="url(#arrow5)"/>
+              <path d="M665 87 C710 87 715 134 755 134" fill="none" stroke="#54708f" stroke-width="2" marker-end="url(#arrow5)"/>
+              <path d="M355 120 C355 215 680 215 755 215" fill="none" stroke="#677487" stroke-width="2" marker-end="url(#arrow5)"/>
+              <path d="M125 120 C125 265 680 265 755 225" fill="none" stroke="#677487" stroke-width="2" marker-end="url(#arrow5)"/>
+              <text x="237" y="76" font-size="11" fill="#5d687c">API 投递后</text>
+              <text x="470" y="76" font-size="11" fill="#5d687c">worker 开始</text>
+              <text x="465" y="285" text-anchor="middle" font-size="12" fill="#b42318">running 当前不支持可靠 cooperative cancellation</text>
+            </svg>
+            <div class="caption">图 5：当前队列模式在 API 投递成功后立即标记 queued；这是实现事实，但与“只有真正等待执行资源才 queued”的严格语义不同。</div>
+          </div>
+
+          <h3>持久化边界</h3>
+          <pre>data/
+  api/&lt;task_id&gt;/
+    task.json
+    input/
+    output/
+    logs/
+    state/
+      plan.json
+      criteria/&lt;criterion_id&gt;.input|output|error.json
+      docxindex/
+
+  web/&lt;tenant_id&gt;/&lt;task_id&gt;/...</pre>
+          <ul>
+            <li><code>task.json</code> 记录状态并通过锁文件和临时文件替换保护写入，但它不是任务队列。</li>
+            <li>成功 criterion 可以从 <code>state/criteria</code> 恢复；ingest、build_index、plan 的完整恢复不在当前边界内。</li>
+            <li>取消在 pending/queued 阶段可靠；running 任务没有贯穿 workflow 的协作式取消检查点。</li>
+            <li>worker heartbeat 写入 task 状态，watchdog 处理长期未领取的等待任务。</li>
+          </ul>
+        </section>
+
+        <section class="section" id="observability">
+          <div class="section-number">09 / OBSERVABILITY</div>
+          <h2>日志、Trace 与问题重放</h2>
+          <div class="grid three">
+            <div class="card"><h4>API events</h4><p>输入保存、队列提交、worker 开始、模型失败和结果输出等产品事件。禁止记录带签名 query 的 URL。</p></div>
+            <div class="card"><h4>Trace tree</h4><p><code>workflow.run → phase → criterion → llm/mcp</code> 的父子关系、状态和耗时；用于定位卡在哪一层。</p></div>
+            <div class="card"><h4>Call / route events</h4><p>模型 request/response 摘要、route plan、step、fallback、候选 node_id 和 semaphore 等待时间。</p></div>
+          </div>
+          <h3>并发排障建议路径</h3>
+          <ol>
+            <li>先看 task 状态与 worker heartbeat，区分未领取、等待资源和已运行。</li>
+            <li>再看 trace 外层阶段墙钟时间，不把并发 criterion 耗时直接求和。</li>
+            <li>查看 call log 的 <code>queue_wait_seconds</code> 与 <code>request_seconds</code>，区分槽等待和模型服务耗时。</li>
+            <li>查看 route event，确认是否因 scan 批次、结构分片或 fallback 放大调用数。</li>
+            <li>把有效配置摘要与日志关联；不能只记录 <code>config.yaml</code> 路径。</li>
+          </ol>
+          <div class="callout warn">当前 DocxIndex 调用已经记录 queue/request timing，但不同 Agent/工具的字段完整度仍需统一核查。评审时应要求每次模型调用都能回答：等待了多久、请求用了多久、占用哪个全局 key、是否重试。</div>
+        </section>
+
+        <section class="section" id="evaluation">
+          <div class="section-number">10 / EVALUATION</div>
+          <h2>质量评测与验证口径</h2>
+          <p>不能只用“最终报告看起来正确”评估整条 Agent 工作流。建议按故障归属拆分指标：</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>层级</th><th>指标</th><th>所需证据</th><th>避免的误判</th></tr></thead>
+              <tbody>
+                <tr><td>Planner</td><td>任务拆解与策略完整率</td><td>输入标准、strategy、schema validation</td><td>最终碰巧正确不代表拆解正确。</td></tr>
+                <tr><td>Router</td><td>路线选择准确率</td><td>RoutePlan、预期路线、标题目录</td><td>不能用最终命中倒推路线合理。</td></tr>
+                <tr><td>Retriever</td><td>证据召回率 / 精确率</td><td>目标 anchor、返回 node/anchor、region</td><td>负样本无命中不算召回失败。</td></tr>
+                <tr><td>Reflector</td><td>新增证据率、错误纠正率</td><td>前后 evidence fingerprint、decisions</td><td>重复同一 query 不算有效反思。</td></tr>
+                <tr><td>Reviewer</td><td>最终判断准确率</td><td>证据、issue、人工判断</td><td>不能只统计后端 issue 数量。</td></tr>
+                <tr><td>Reporter</td><td>最终可见批注准确率、产物有效率</td><td>DOCX 可见批注、anchor 映射、Office 打开结果</td><td>文件存在不代表产物可消费。</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="small">本 HTML 没有运行新的检索或模型评测。现有单元测试只能证明若干契约分支，不代表真实合同质量已经达到业务阈值。</p>
+        </section>
+
+        <section class="section" id="deployment">
+          <div class="section-number">11 / DEPLOYMENT & CAPACITY</div>
+          <h2>部署边界与容量推演</h2>
+          <div class="grid two">
+            <div class="card">
+              <h4>当前容器边界</h4>
+              <ul>
+                <li>API：1 个 uvicorn worker。</li>
+                <li>Celery：3 个独立 worker 容器，每个 concurrency 1。</li>
+                <li>Redis DB 0：Celery broker。</li>
+                <li>Redis DB 2：模型 semaphore。</li>
+                <li>共享 <code>./data</code>：任务状态、输入、输出、日志、索引快照。</li>
+              </ul>
+            </div>
+            <div class="card">
+              <h4>扩容时必须同步复算</h4>
+              <ul>
+                <li>增加 worker 会线性提高合同与 criterion 生产并发。</li>
+                <li>不提高 Redis 模型上限时，新增 worker 更容易停在模型槽等待。</li>
+                <li>提高全局模型上限前需确认上游服务配额、QPS 和显存容量。</li>
+                <li>共享数据目录必须支持多个容器一致读写和锁文件语义。</li>
+              </ul>
+            </div>
+          </div>
+          <div class="formula">吞吐瓶颈 ≠ max(worker)；吞吐瓶颈 = 各阶段有效服务率中的最小值</div>
+          <p>在当前配置下，仅增加 Celery worker 数量不会必然提高模型密集阶段吞吐，因为 LLM 全局在途上限仍为 5。反之，只增大 LLM 全局上限也不保证合同吞吐增加，因为合同执行槽仍为 3，且 DOCX 解析、索引和报告生成还会占用 CPU/内存。</p>
+        </section>
+
+        <section class="section" id="questions">
+          <div class="section-number">12 / REVIEW QUESTIONS</div>
+          <h2>建议在内部评审会上确认的问题</h2>
+          <ol>
+            <li><strong>容量目标：</strong>目标是限制全局在途请求、每秒启动次数，还是同时限制两者？当前只有全局在途限制，没有统一全局 QPS limiter。</li>
+            <li><strong>合同并发：</strong><code>max_api_concurrent_reviews=100</code> 是否应在队列模式下保留，还是应明确标注只对进程内模式生效？</li>
+            <li><strong>模型分类：</strong>DocxIndex rerank 应继续使用通用 LLM，还是改用专用 reranker 并消费 <code>reranker</code> semaphore？</li>
+            <li><strong>超时策略：</strong>Agent 30s 与 DocxIndex 120s 是否是有意区分？是否需要统一的“单次 HTTP、逻辑调用、criterion、任务”四级 deadline？</li>
+            <li><strong>等待策略：</strong>允许 Celery worker 最多等待模型槽 600s 是否合理？是否应把等待移到不占用合同 worker 的调度层？</li>
+            <li><strong>状态语义：</strong>queued 是“已进入 Celery broker”还是“正在等待执行资源”？API、前端和运维口径必须统一。</li>
+            <li><strong>部分成功：</strong>部分 criterion 失败时任务仍 succeeded 是否符合调用方预期？是否需要 <code>partial_success</code> 或稳定的 quality 字段判断。</li>
+            <li><strong>检索控制：</strong>函数内一次性 limiter 是否应该删除以避免误导，还是提升为 retriever 级共享 limiter？</li>
+            <li><strong>恢复范围：</strong>是否接受只恢复 criterion，不恢复 ingest/build_index/plan？</li>
+            <li><strong>质量门槛：</strong>发布前采用哪些真实合同召回率、准确率、可见批注有效率和耗时阈值？</li>
+          </ol>
+        </section>
+
+        <section class="section" id="evidence">
+          <div class="section-number">13 / CODE EVIDENCE</div>
+          <h2>代码证据索引</h2>
+          <ul class="evidence-list">
+            <li><span class="path">config.yaml:35-77, 79-158</span>：workflow、queue、模型 semaphore 与 DocxIndex 并发配置。</li>
+            <li><span class="path">docker-compose.yaml:9-99</span>：API worker、3 个 Celery 容器、每容器 concurrency 1、共享挂载。</li>
+            <li><span class="path">endpoints/api/review_jobs.py:645-716</span>：任务创建、非队列 create_task、Celery 投递与 queued 写入。</li>
+            <li><span class="path">endpoints/review/job_worker.py:73-194</span>：worker claim、heartbeat、进程内 review semaphore、running/succeeded。</li>
+            <li><span class="path">endpoints/review/task_store.py:83-117, 384-478, 576-717, 732-780</span>：文件锁、原子写、状态迁移与等待超时。</li>
+            <li><span class="path">endpoints/runtime/llm_semaphore.py:45-214</span>：Redis 租约的 acquire、wait、lease、release。</li>
+            <li><span class="path">agents/orchestrator.py:975-1235, 1260-1390</span>：单 criterion 审查、反思、恢复、gather 与 semaphore。</li>
+            <li><span class="path">agents/base_agent.py:100-106, 258-380</span>：异步模型客户端、全局 LLM 槽和工具循环。</li>
+            <li><span class="path">agents/json_utils.py:62-97</span>：JSON 提取、Pydantic 校验和定向修复重试。</li>
+            <li><span class="path">workflow/workflow.py:196-629</span>：六阶段工作流、Planner 分流和 Orchestrator 执行。</li>
+            <li><span class="path">routing/schemas.py:8-62</span>：RouteStep / RoutePlan 方法和跨字段约束。</li>
+            <li><span class="path">tools/docxindex/indexing/build_pipeline.py:70-220</span>：DOCX 解析、区域检测、结构树构建。</li>
+            <li><span class="path">tools/docxindex/retriever.py:35-252, 265-475</span>：客户端初始化、索引、五路线执行和语义检索。</li>
+            <li><span class="path">tools/docxindex/retrieval/scan.py:23-160</span>：全文 anchor 分批、线程池和批次重试。</li>
+            <li><span class="path">tools/docxindex/retrieval/llm_query.py:18-66</span>：结构树分片查询的顺序执行。</li>
+            <li><span class="path">tools/docxindex/retrieval/rerank.py:16-62</span>：DocxIndex 的 LLM rerank 与局部 limiter。</li>
+            <li><span class="path">tests/criteria_formal_recall/test_queue_control.py</span>：队列状态与等待超时契约测试。</li>
+            <li><span class="path">tests/criteria_formal_recall/test_route_prompt_contract.py</span>：RoutePlan schema、重试与 cache 契约。</li>
+            <li><span class="path">tests/criteria_formal_recall/test_scoped_retrieval.py</span>：region、scan、多区域合并和 route events。</li>
+            <li><span class="path">tests/criteria_formal_recall/test_semantic_supplement.py</span>：结构召回、向量补召回和 rerank 触发条件。</li>
+          </ul>
+          <div class="callout ok"><strong>文档边界：</strong>本文是当前代码和配置的静态 code review 材料。公式描述配置允许的生产能力和理论包络；真实吞吐、延迟与检索质量仍需在目标部署环境中以独立测试验证。</div>
+        </section>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (function () {
+      const ids = [
+        'workers', 'celeryConcurrency', 'apiConcurrency', 'criteriaConcurrency',
+        'scanConcurrency', 'globalLlm', 'localEmbedding', 'globalEmbedding'
+      ];
+      const read = (id) => Math.max(1, Number(document.getElementById(id).value) || 1);
+      function calculate() {
+        const workerSlots = read('workers') * read('celeryConcurrency');
+        const contracts = Math.min(workerSlots, read('apiConcurrency'));
+        const criteria = contracts * read('criteriaConcurrency');
+        const scanProducers = contracts * read('scanConcurrency');
+        const llmEffective = Math.min(scanProducers, read('globalLlm'));
+        const embeddingProducers = contracts * read('localEmbedding');
+        const embeddingEffective = Math.min(embeddingProducers, read('globalEmbedding'));
+        document.getElementById('outContracts').textContent = String(contracts);
+        document.getElementById('outCriteria').textContent = String(criteria);
+        document.getElementById('outScan').textContent = scanProducers + ' → ' + llmEffective;
+        document.getElementById('outEmbedding').textContent = String(embeddingEffective);
+        const notes = [];
+        if (read('apiConcurrency') > workerSlots) notes.push('API 合同 semaphore 被 Celery 总槽位覆盖');
+        if (scanProducers > read('globalLlm')) notes.push('scan 生产并发高于全局 LLM 槽，多余调用者会等待');
+        if (embeddingProducers > read('globalEmbedding')) notes.push('embedding 生产并发高于全局槽');
+        if (!notes.length) notes.push('当前输入下未出现上游并发高于下游阀门的情况');
+        document.getElementById('calcNote').textContent = '判断：' + notes.join('；') + '。';
+      }
+      ids.forEach((id) => document.getElementById(id).addEventListener('input', calculate));
+      calculate();
+    }());
+  </script>
+</body>
+</html>
