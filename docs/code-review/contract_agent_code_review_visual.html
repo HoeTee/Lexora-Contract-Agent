@@ -1,0 +1,1373 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="shadcn" data-mode="light" data-style="80">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Answer me with HTML 0.4.9">
+<title>Contract Agent 内部 Code Review 总览</title>
+<style>
+html[data-theme="blueprint"], html[data-theme="blueprint"][data-mode="light"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 0px;
+  --shadow: none;
+  --bw: 1.5px;
+  --head-font: var(--font-sans);
+  --bg: #f6f6f3;
+  --paper: #ffffff;
+  --ink: #16181d;
+  --ink-2: #4b5260;
+  --ink-3: #8b929e;
+  --line: #1d2026;
+  --line-2: #d6dae1;
+  --fill: #f3f5f8;
+  --accent: #1d5fbf;
+  --accent-bg: #e4ecf8;
+  --ok: #1d5fbf;
+  --ok-bg: #e4ecf8;
+  --err: #c62828;
+  --err-bg: #fbeaea;
+  --warn: #a8620a;
+  --warn-bg: #fdf3e2;
+  --head-bg: #16181d;
+  --head-fg: #ffffff;
+}
+html[data-theme="blueprint"][data-mode="dark"] {
+  --bg: #081322;
+  --paper: #0d1c31;
+  --ink: #e6edf7;
+  --ink-2: #a9b8cc;
+  --ink-3: #6b7f99;
+  --line: #c9d6e8;
+  --line-2: #23385a;
+  --fill: #12253f;
+  --accent: #6ea8ff;
+  --accent-bg: #16305a;
+  --ok: #6ea8ff;
+  --ok-bg: #16305a;
+  --err: #ff7070;
+  --err-bg: #3b1620;
+  --warn: #f0b14a;
+  --warn-bg: #3a2a10;
+  --head-bg: #e6edf7;
+  --head-fg: #081322;
+}
+@media (prefers-color-scheme: dark) {
+html[data-theme="blueprint"][data-mode="auto"] {
+  --bg: #081322;
+  --paper: #0d1c31;
+  --ink: #e6edf7;
+  --ink-2: #a9b8cc;
+  --ink-3: #6b7f99;
+  --line: #c9d6e8;
+  --line-2: #23385a;
+  --fill: #12253f;
+  --accent: #6ea8ff;
+  --accent-bg: #16305a;
+  --ok: #6ea8ff;
+  --ok-bg: #16305a;
+  --err: #ff7070;
+  --err-bg: #3b1620;
+  --warn: #f0b14a;
+  --warn-bg: #3a2a10;
+  --head-bg: #e6edf7;
+  --head-fg: #081322;
+}
+}
+
+html[data-theme="shadcn"], html[data-theme="shadcn"][data-mode="light"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 8px;
+  --shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+  --bw: 1px;
+  --head-font: var(--font-sans);
+  --bg: #fafafa;
+  --paper: #ffffff;
+  --ink: #09090b;
+  --ink-2: #71717a;
+  --ink-3: #a1a1aa;
+  --line: #e4e4e7;
+  --line-2: #f0f0f2;
+  --fill: #f4f4f5;
+  --accent: #2563eb;
+  --accent-bg: #eff6ff;
+  --ok: #16a34a;
+  --ok-bg: #f0fdf4;
+  --err: #dc2626;
+  --err-bg: #fef2f2;
+  --warn: #d97706;
+  --warn-bg: #fffbeb;
+  --head-bg: #18181b;
+  --head-fg: #fafafa;
+}
+html[data-theme="shadcn"][data-mode="dark"] {
+  --bg: #09090b;
+  --paper: #121215;
+  --ink: #fafafa;
+  --ink-2: #a1a1aa;
+  --ink-3: #71717a;
+  --line: #27272a;
+  --line-2: #1c1c1f;
+  --fill: #18181b;
+  --accent: #60a5fa;
+  --accent-bg: #172554;
+  --ok: #4ade80;
+  --ok-bg: #052e16;
+  --err: #f87171;
+  --err-bg: #450a0a;
+  --warn: #fbbf24;
+  --warn-bg: #451a03;
+  --head-bg: #fafafa;
+  --head-fg: #18181b;
+}
+@media (prefers-color-scheme: dark) {
+html[data-theme="shadcn"][data-mode="auto"] {
+  --bg: #09090b;
+  --paper: #121215;
+  --ink: #fafafa;
+  --ink-2: #a1a1aa;
+  --ink-3: #71717a;
+  --line: #27272a;
+  --line-2: #1c1c1f;
+  --fill: #18181b;
+  --accent: #60a5fa;
+  --accent-bg: #172554;
+  --ok: #4ade80;
+  --ok-bg: #052e16;
+  --err: #f87171;
+  --err-bg: #450a0a;
+  --warn: #fbbf24;
+  --warn-bg: #451a03;
+  --head-bg: #fafafa;
+  --head-fg: #18181b;
+}
+}
+
+html[lang="ja"][data-theme][data-mode] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans CJK JP", "Noto Sans JP", "PingFang SC", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+html[lang="ja"][data-theme="3b1b"][data-mode] {
+  --v-title-font: "CMU Serif", "Latin Modern Roman", "Iowan Old Style", "Palatino", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", "Noto Serif JP", "Songti SC", serif;
+}
+
+/* Answer me with HTML base — uses theme variables only, never hard-coded colors (theme tokens: themes/index.js). Exception: the var() fallbacks of diagrams (flow / sequence) equal the blueprint light tokens, guarded by a test. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+code, pre, kbd { font-family: var(--font-mono); }
+
+/* ── Toolbar ─────────────────────────────── */
+.am-toolbar {
+  position: fixed; top: 12px; right: 12px; z-index: 10; display: flex; gap: 6px;
+}
+.am-btn {
+  font: 12px/1 var(--font-sans); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line-2); border-radius: var(--radius); padding: 7px 10px; cursor: pointer;
+}
+.am-btn:hover { border-color: var(--ink-3); }
+.am-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Header ───────────────────────────────── */
+.am-head { margin: 0 0 20px; padding-right: 260px; }
+.am-head h1 { margin: 0; font-size: 24px; line-height: 1.25; letter-spacing: -0.01em; }
+.am-sub { margin: 4px 0 0; color: var(--ink-2); }
+.am-head-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 12px; color: var(--ink-2); }
+.am-head-meta b { font-family: var(--font-mono); font-weight: 400; color: var(--ink-3); margin-right: 6px; }
+.am-intro { margin-top: 12px; max-width: 80ch; }
+
+/* ── sheet template ────────────────────────── */
+.am-sheet { max-width: 1680px; margin: 0 auto; padding: 32px 28px 40px; }
+.am-frame { position: relative; }
+.am-grid {
+  display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  gap: 20px; align-items: start;
+}
+.am-ruler { display: none; }
+html[data-theme="blueprint"] .am-frame { border: 1px solid var(--line); padding: 30px; }
+html[data-theme="blueprint"] .am-frame::before {
+  content: ""; position: absolute; inset: 18px; border: 1px solid var(--line); pointer-events: none;
+}
+html[data-theme="blueprint"] .am-ruler {
+  display: flex; position: absolute; font: 10px/1 var(--font-mono); color: var(--ink-3);
+}
+.am-ruler span { flex: 1; display: flex; align-items: center; justify-content: center; }
+.am-ruler--top, .am-ruler--bottom { left: 18px; right: 18px; height: 18px; }
+.am-ruler--top { top: 0; }
+.am-ruler--bottom { bottom: 0; }
+.am-ruler--left, .am-ruler--right { top: 18px; bottom: 18px; width: 18px; flex-direction: column; }
+.am-ruler--left { left: 0; }
+.am-ruler--right { right: 0; }
+.am-ruler--top span + span, .am-ruler--bottom span + span { border-left: 1px solid var(--line); }
+.am-ruler--left span + span, .am-ruler--right span + span { border-top: 1px solid var(--line); }
+
+/* ── Panels ───────────────────────────────── */
+.am-panel {
+  background: var(--paper); border: var(--bw) solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); min-width: 0; overflow: hidden;
+}
+.am-panel-head {
+  display: flex; align-items: stretch; gap: 0; border-bottom: var(--bw) solid var(--line); min-height: 34px;
+}
+.am-panel-id {
+  display: flex; align-items: center; justify-content: center; min-width: 34px; padding: 0 8px;
+  background: var(--head-bg); color: var(--head-fg); font-weight: 600; font-size: 14px;
+}
+html[data-theme="shadcn"] .am-panel-id { border-radius: 6px; min-width: 24px; height: 24px; margin: 9px 0 9px 14px; font-size: 12px; }
+html[data-theme="shadcn"] .am-panel-head { border-bottom-width: 1px; }
+.am-panel-head h2 { margin: 0; padding: 7px 12px; font-size: 15px; font-weight: 600; flex: 1; display: flex; align-items: center; }
+.am-panel-meta { align-self: center; padding: 0 12px; font: 11px/1.3 var(--font-mono); color: var(--ink-2); text-align: right; }
+.am-panel-body { padding: 14px 16px 16px; }
+.am-panel-body > * + * { margin-top: 12px; }
+
+/* ── Markdown body ───────────────────────── */
+.am-md > :first-child { margin-top: 0; }
+.am-md > :last-child { margin-bottom: 0; }
+.am-md p { margin: 0 0 8px; }
+.am-md ul, .am-md ol { margin: 0 0 8px; padding-left: 20px; }
+.am-md li + li { margin-top: 3px; }
+.am-md h3, .am-md h4 { margin: 14px 0 6px; font-size: 13px; }
+.am-md a { color: var(--accent); }
+.am-md blockquote { margin: 0 0 8px; padding: 2px 12px; border-left: 3px solid var(--line-2); color: var(--ink-2); }
+.am-md :not(pre) > code { font-size: 0.9em; background: var(--fill); padding: 1px 5px; border-radius: 4px; }
+.am-md hr { border: 0; border-top: 1px solid var(--line-2); margin: 12px 0; }
+.am-md table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.am-md th {
+  text-align: left; font: 11px/1.3 var(--font-mono); color: var(--ink-2); font-weight: 400;
+  padding: 6px 10px; border-bottom: 1px solid var(--line-2);
+}
+/* th { text-align: left } outranks the align attribute from Markdown alignment, so restore right and center columns explicitly. */
+.am-md th[align="right"] { text-align: right; }
+.am-md th[align="center"] { text-align: center; }
+.am-md td { padding: 7px 10px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+.am-md tbody tr:nth-child(even) td { background: var(--fill); }
+.am-table-wrap { overflow-x: auto; }
+.am-code {
+  margin: 0; padding: 12px 14px; background: var(--fill); border: 1px solid var(--line-2);
+  border-radius: var(--radius); overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+}
+
+/* ── Status badges ok / no / warn ──────────────── */
+.am-status { white-space: nowrap; font-weight: 500; }
+.am-status--ok { color: var(--ok); }
+.am-status--no { color: var(--err); }
+.am-status--warn { color: var(--warn); }
+.am-status-icon { display: inline-block; width: 1.1em; font-weight: 700; }
+
+/* ── callout ─────────────────────────────── */
+.am-callout {
+  border: 1px solid var(--line-2); border-left: 3px solid var(--accent); background: var(--accent-bg);
+  padding: 10px 14px; border-radius: var(--radius);
+}
+.am-callout--ok { border-left-color: var(--ok); background: var(--ok-bg); }
+.am-callout--warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.am-callout--err { border-left-color: var(--err); background: var(--err-bg); }
+.am-callout-title { font-weight: 600; margin-bottom: 4px; }
+
+/* ── kv title block ─────────────────────────── */
+.am-kv {
+  display: grid; grid-template-columns: repeat(var(--kv-cols, 2), minmax(0, 1fr)); margin: 0;
+  border-top: var(--bw) solid var(--line); border-left: var(--bw) solid var(--line);
+}
+.am-kv-cell { border-right: var(--bw) solid var(--line); border-bottom: var(--bw) solid var(--line); padding: 6px 10px 8px; min-width: 0; }
+.am-kv-cell--wide { grid-column: 1 / -1; }
+.am-kv dt { font: 11px/1.4 var(--font-mono); color: var(--ink-2); }
+.am-kv dd { margin: 2px 0 0; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.am-kv-cell--wide dd { font-size: 17px; font-weight: 600; }
+html[data-theme="shadcn"] .am-kv { border-color: var(--line); border-radius: var(--radius); overflow: hidden; }
+
+/* ── timeline ────────────────────────────── */
+.am-timeline { list-style: none; margin: 0; padding: 0; }
+.am-timeline--h { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); padding-top: 4px; }
+.am-timeline--h li { position: relative; text-align: center; padding: 0 6px; }
+.am-timeline--h li::before {
+  content: ""; position: absolute; top: 31px; left: 0; right: 0; border-top: var(--bw) solid var(--line);
+}
+.am-timeline--h li:first-child::before { left: 50%; }
+.am-timeline--h li:last-child::before { right: 50%; }
+.am-tl-when { display: block; font-size: 15px; font-weight: 500; height: 24px; }
+.am-tl-dot {
+  position: relative; display: block; width: 11px; height: 11px; margin: 2px auto 8px;
+  border: var(--bw) solid var(--line); border-radius: 50%; background: var(--paper);
+}
+.am-tl-item--hi .am-tl-dot { background: var(--accent); border-color: var(--accent); }
+.am-tl-title { display: block; font-size: 12.5px; font-weight: 500; }
+.am-tl-text { display: block; font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+.am-timeline--v li { position: relative; padding: 0 0 14px 22px; }
+.am-timeline--v li::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: -6px; border-left: var(--bw) solid var(--line-2); }
+.am-timeline--v li:last-child::before { display: none; }
+.am-timeline--v .am-tl-dot { position: absolute; left: 0; top: 4px; margin: 0; }
+.am-timeline--v .am-tl-when { display: inline; height: auto; font: 12px var(--font-mono); color: var(--ink-2); margin-right: 8px; }
+.am-timeline--v .am-tl-title { display: inline; font-size: 14px; }
+.am-timeline--v .am-tl-text { margin-top: 2px; }
+
+/* ── annot sentence notes ──────────────────────── */
+.am-annot + .am-annot { border-top: 1px solid var(--line-2); padding-top: 12px; }
+.am-annot-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.am-annot-meta { font: 11px var(--font-mono); font-weight: 400; color: var(--ink-2); }
+.am-annot-scroll { overflow-x: auto; }
+.am-annot-line {
+  position: relative; display: inline-block; white-space: pre; font: 14px/1.6 var(--font-mono);
+  padding-bottom: calc(var(--rows, 0) * 17px + 14px);
+}
+.am-annot-line--wrap { display: block; white-space: normal; padding-bottom: 10px; }
+.am-annot-line--wrap .am-seg { white-space: nowrap; }
+.am-seg { position: relative; }
+.am-seg::after {
+  content: ""; position: absolute; left: 1px; right: 1px; top: calc(100% + 1px); height: 5px;
+  border: 1px solid var(--accent); border-top: 0;
+}
+.am-seg-n {
+  position: absolute; left: 0; top: calc(100% + 8px + var(--row, 0) * 17px);
+  font: 11px/16px var(--font-sans); color: var(--accent); white-space: nowrap;
+}
+.am-seg--err { color: var(--err); }
+.am-seg--err::after { border-color: var(--err); }
+.am-seg--err .am-seg-n { color: var(--err); }
+.am-annot-caption { font-size: 12px; color: var(--ink-2); }
+
+/* ── limits bars ───────────────────────── */
+.am-lim + .am-lim { margin-top: 14px; }
+.am-lim-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin-bottom: 4px; }
+.am-lim-val { font: 12px var(--font-mono); color: var(--accent); white-space: nowrap; }
+.am-lim-track { position: relative; height: 12px; border: 1px solid var(--line-2); background: var(--fill); border-radius: calc(var(--radius) / 2); }
+.am-lim-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-bg); border-right: 1px solid var(--accent); }
+.am-lim-mark { position: absolute; top: -4px; bottom: -4px; border-left: 2px solid var(--accent); }
+.am-lim.is-over .am-lim-fill { background: var(--err-bg); border-right-color: var(--err); }
+.am-lim.is-over .am-lim-val { color: var(--err); }
+.am-lim-ticks { position: relative; height: 16px; font: 10px/16px var(--font-mono); color: var(--ink-3); }
+.am-lim-ticks span { position: absolute; transform: translateX(-50%); }
+.am-lim-ticks span:first-child { transform: none; }
+.am-lim-note { font-size: 11px; color: var(--ink-2); margin-left: 6px; }
+
+/* ── tree ─────────────────────────── */
+.am-tree { font-size: 13px; }
+.am-tree-root { display: flex; justify-content: center; position: relative; padding-bottom: 18px; }
+.am-tree-root::after { content: ""; position: absolute; bottom: 0; left: 50%; height: 18px; border-left: var(--bw) solid var(--line); }
+.am-tree-root--solo { padding-bottom: 12px; }
+.am-tree-root--solo::after { display: none; }
+.am-tree-box {
+  border: var(--bw) solid var(--line); background: var(--paper); padding: 6px 14px; text-align: center;
+  border-radius: var(--radius); font-weight: 600;
+}
+.am-tree-box small { display: block; font-weight: 400; color: var(--ink-2); font-size: 12px; }
+.am-tree-box--root { background: var(--accent-bg); font-size: 15px; padding: 8px 28px; }
+.am-tree-cols { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); }
+.am-tree-col { position: relative; padding: 18px 8px 0; min-width: 0; }
+.am-tree-col::before { content: ""; position: absolute; top: 0; left: 0; right: 0; border-top: var(--bw) solid var(--line); }
+.am-tree-col:first-child::before { left: 50%; }
+.am-tree-col:last-child::before { right: 50%; }
+.am-tree-col::after { content: ""; position: absolute; top: 0; left: 50%; height: 18px; border-left: var(--bw) solid var(--line); }
+.am-tree-list, .am-tree-list ul { list-style: none; margin: 0; padding: 0; }
+.am-tree-col > .am-tree-list { margin: 8px 0 0 14px; }
+.am-tree-list ul { margin-left: 16px; }
+.am-tree-list li { position: relative; padding: 3px 0 3px 18px; }
+.am-tree-list li::before { content: ""; position: absolute; left: 0; top: 0.95em; width: 12px; border-top: 1px solid var(--ink-3); }
+.am-tree-list li::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; border-left: 1px solid var(--ink-3); }
+.am-tree-list li:last-child::after { bottom: auto; height: 0.95em; }
+.am-tree-tag { font: 11px var(--font-mono); color: var(--ink-3); margin-right: 4px; }
+.am-tree code { font: 12px var(--font-mono); }
+.am-tree-sub { display: block; font-size: 11.5px; color: var(--ink-2); }
+.am-tree-hi > .am-tree-label { color: var(--accent); font-weight: 600; }
+
+/* ── Diagrams (flow / sequence) ───────────────── */
+.am-diagram { margin: 0; overflow-x: auto; text-align: center; }
+/* Embedded previews can lose html[data-theme]; the fallbacks keep diagrams readable, and defined theme variables still win. */
+.am-diagram svg { max-width: 100%; height: auto; font-family: var(--font-sans, sans-serif); }
+.am-diagram text { fill: var(--ink, #16181d); font-size: 13px; }
+.am-node-shape { fill: var(--paper, #ffffff); stroke: var(--line, #1d2026); stroke-width: var(--bw, 1.5px); }
+.am-node--hi .am-node-shape { fill: var(--accent-bg, #e4ecf8); stroke: var(--accent, #1d5fbf); }
+.am-node--hi text { fill: var(--accent, #1d5fbf); font-weight: 600; }
+.am-edge { fill: none; stroke: var(--ink-2, #4b5260); stroke-width: 1.3; }
+.am-edge--dashed { stroke-dasharray: 5 4; }
+.am-arrow { fill: var(--ink-2, #4b5260); }
+.am-edge-label rect { fill: var(--paper, #ffffff); }
+.am-diagram .am-edge-label text { fill: var(--accent, #1d5fbf); font-size: 11.5px; }
+.am-cluster { fill: var(--fill, #f3f5f8); stroke: var(--line-2, #d6dae1); stroke-width: 1; stroke-dasharray: 4 3; }
+.am-diagram .am-cluster-label { fill: var(--ink-2, #4b5260); font: 11px var(--font-mono, monospace); }
+.am-lifeline { stroke: var(--ink-3, #8b929e); stroke-width: 1; stroke-dasharray: 4 4; }
+.am-actor { fill: var(--paper, #ffffff); stroke: var(--line, #1d2026); stroke-width: var(--bw, 1.5px); }
+.am-note { fill: var(--warn-bg, #fdf3e2); stroke: var(--warn, #a8620a); stroke-width: 1; }
+.am-diagram .am-step { fill: var(--ink-3, #8b929e); font: 10px var(--font-mono, monospace); }
+
+/* ── doc template ────────────────────────── */
+.am-doc { max-width: 1120px; margin: 0 auto; padding: 40px 28px 64px; }
+.am-doc-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; }
+.am-doc-layout--notoc { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
+.am-toc { position: sticky; top: 24px; font-size: 13px; }
+.am-toc a { display: block; color: var(--ink-2); text-decoration: none; padding: 4px 0 4px 10px; border-left: 2px solid var(--line-2); }
+.am-toc a:hover { color: var(--ink); border-left-color: var(--accent); }
+.am-doc-body > .am-panel + .am-panel { margin-top: 20px; }
+
+/* ── Responsive and print ─────────────────────────── */
+@media (max-width: 1100px) {
+  .am-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .am-grid > .am-panel { grid-column: auto !important; }
+  .am-grid > .am-panel.am-span-wide { grid-column: 1 / -1 !important; }
+}
+@media (max-width: 760px) {
+  .am-sheet, .am-doc { padding: 56px 12px 24px; }
+  .am-head { padding-right: 0; }
+  .am-grid { grid-template-columns: minmax(0, 1fr); }
+  .am-grid > .am-panel.am-span-wide { grid-column: auto !important; }
+  html[data-theme="blueprint"] .am-frame { padding: 0; border: 0; }
+  html[data-theme="blueprint"] .am-frame::before, html[data-theme="blueprint"] .am-ruler { display: none; }
+  .am-doc-layout { grid-template-columns: minmax(0, 1fr); }
+  .am-toc { position: static; }
+  .am-timeline--h { grid-template-columns: minmax(0, 1fr); }
+  .am-tree-cols { grid-template-columns: minmax(0, 1fr); }
+  /* Tables and diagrams keep their size: the wrapper scrolls horizontally when they overflow. */
+  .am-md th, .am-md td { min-width: 6em; }
+  .am-diagram svg { max-width: none; }
+}
+.am-colophon { text-align: center; padding: 0 0 28px; font: 11px var(--font-mono); color: var(--ink-3); }
+
+@media print {
+  .am-toolbar { display: none; }
+  body { background: var(--paper); }
+  .am-panel { break-inside: avoid; box-shadow: none; }
+}
+.am-panel--bare { border: 0; background: transparent; box-shadow: none; }
+.am-panel--bare > .am-panel-body { padding: 0; }
+.am-panel--bare .am-kv { background: var(--paper); }
+
+</style>
+</head>
+<body>
+<div class="am-toolbar">
+<button class="am-btn" type="button" data-am="theme" data-labels="{&quot;blueprint&quot;:&quot;主题：图纸&quot;,&quot;shadcn&quot;:&quot;主题：卡片&quot;}">主题：卡片</button>
+<button class="am-btn" type="button" data-am="mode" data-labels="{&quot;auto&quot;:&quot;明暗：跟随系统&quot;,&quot;light&quot;:&quot;明暗：亮&quot;,&quot;dark&quot;:&quot;明暗：暗&quot;}">明暗：亮</button>
+<button class="am-btn" type="button" data-am="copy" data-done="已复制 ✓">复制源稿</button>
+</div>
+<main class="am-doc">
+<header class="am-head"><h1>Contract Agent 内部 Code Review 总览</h1><p class="am-sub">并发优先关系、时间边界、Agent 工作流与 DOCX 检索</p><div class="am-head-meta"><span><b>source</b>当前代码与 config.yaml 静态审查 · 2026-10-05</span></div><div class="am-intro am-md"><div class="am-md"><p>Lead: 当前系统用 Celery 隔离长任务，用局部并发提高单合同处理速度，再用 Redis 租约限制全部署模型请求。并发限制取当前路径上的最小有效值；时间限制按执行阶段依次生效。</p>
+</div></div></header>
+<div class="am-doc-layout">
+<nav class="am-toc" aria-label="目录"><a href="#panel-A">A · 核心结论</a><a href="#panel-B">B · 当前请求链路</a><a href="#panel-C">C · 并发配置优先关系</a><a href="#panel-D">D · 时间配置执行顺序</a><a href="#panel-E">E · 配置是否真正生效</a><a href="#panel-F">F · Agent 工作流</a><a href="#panel-G">G · DOCX 检索方法</a><a href="#panel-H">H · 风险、决策与代码证据</a></nav><div class="am-doc-body">
+<section class="am-panel" id="panel-A">
+<header class="am-panel-head"><span class="am-panel-id">A</span><h2>核心结论</h2></header>
+<div class="am-panel-body"><div class="am-callout am-callout--warn" role="note"><div class="am-callout-title">评审结论</div><div class="am-callout-body am-md"><p>合同执行并发是 3。活跃 criterion 最多是 15，但全局 LLM 在途请求最多是 5。criterion 并发不等于模型请求并发。</p>
+</div></div>
+<dl class="am-kv" style="--kv-cols: 3"><div class="am-kv-cell"><dt>合同并发</dt><dd>3 份</dd></div><div class="am-kv-cell"><dt>criterion 调用者</dt><dd>最多 15 条</dd></div><div class="am-kv-cell"><dt>LLM 在途请求</dt><dd>最多 5 个</dd></div><div class="am-kv-cell"><dt>Embedding 在途请求</dt><dd>最多 3 个</dd></div><div class="am-kv-cell"><dt>队列模式</dt><dd>已启用</dd></div><div class="am-kv-cell"><dt>证据边界</dt><dd>未运行现场模型测试</dd></div></dl></div>
+</section>
+<section class="am-panel" id="panel-B">
+<header class="am-panel-head"><span class="am-panel-id">B</span><h2>当前请求链路</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 1165 134" width="1165" height="134" role="img" aria-label="流程图：API、Redis/Celery、Worker池、Criterion、LLM闸门、Embedding闸门、模型服务、向量服务" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M78,67 L112.6,67 Q147.3,67 181.9,67 L216.5,67" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="102" y="58" width="90.5" height="18" rx="3"/><text x="147.3" y="67" text-anchor="middle" dominant-baseline="central">保存任务并投递</text></g></g><g data-step="1"><path class="am-edge" d="M325.6,67 L354.1,67 Q382.6,67 411,67 L439.5,67" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="349.6" y="58" width="65.9" height="18" rx="3"/><text x="382.6" y="67" text-anchor="middle" dominant-baseline="central">3 个执行槽</text></g></g><g data-step="2"><path class="am-edge" d="M521.9,67 L556.9,67 Q592,67 627.1,67 L662.2,67" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="545.9" y="58" width="92.3" height="18" rx="3"/><text x="592" y="67" text-anchor="middle" dominant-baseline="central">每合同最多 5 条</text></g></g><g data-step="3"><path class="am-edge" d="M741.7,83.6 L764.4,93 Q787.1,102.5 819.6,102.5 L852.1,102.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="765.7" y="93.5" width="42.9" height="18" rx="3"/><text x="787.1" y="102.5" text-anchor="middle" dominant-baseline="central">全局 5</text></g></g><g data-step="4"><path class="am-edge" d="M741.7,50.4 L764.4,41 Q787.1,31.5 809.8,31.5 L832.6,31.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="765.7" y="22.5" width="42.9" height="18" rx="3"/><text x="787.1" y="31.5" text-anchor="middle" dominant-baseline="central">全局 3</text></g></g><g data-step="5"><path class="am-edge" d="M934.9,102.5 L973.6,102.5 Q1012.3,102.5 1041.2,102.5 L1070.2,102.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="978.4" y="93.5" width="67.7" height="18" rx="3"/><text x="1012.3" y="102.5" text-anchor="middle" dominant-baseline="central">HTTP 请求</text></g></g><g data-step="6"><path class="am-edge" d="M954.4,31.5 L983.4,31.5 Q1012.3,31.5 1041.2,31.5 L1070.2,31.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="978.4" y="22.5" width="67.7" height="18" rx="3"/><text x="1012.3" y="31.5" text-anchor="middle" dominant-baseline="central">HTTP 请求</text></g></g></g><g><g class="am-node am-node--rect" data-key="API" data-step="0"><rect class="am-node-shape" x="14" y="49.5" width="64" height="35" rx="3"/><text x="46" y="67" text-anchor="middle" dominant-baseline="central">API</text></g><g class="am-node am-node--rect" data-key="Redis/Celery" data-step="0"><rect class="am-node-shape" x="216.5" y="49.5" width="109.1" height="35" rx="3"/><text x="271.1" y="67" text-anchor="middle" dominant-baseline="central">Redis/Celery</text></g><g class="am-node am-node--rect" data-key="Worker池" data-step="1"><rect class="am-node-shape" x="439.5" y="49.5" width="82.3" height="35" rx="3"/><text x="480.7" y="67" text-anchor="middle" dominant-baseline="central">Worker池</text></g><g class="am-node am-node--rect" data-key="Criterion" data-step="2"><rect class="am-node-shape" x="662.2" y="49.5" width="79.5" height="35" rx="3"/><text x="701.9" y="67" text-anchor="middle" dominant-baseline="central">Criterion</text></g><g class="am-node am-node--rect" data-key="LLM闸门" data-step="3"><rect class="am-node-shape" x="852.1" y="85" width="82.9" height="35" rx="3"/><text x="893.5" y="102.5" text-anchor="middle" dominant-baseline="central">LLM闸门</text></g><g class="am-node am-node--rect" data-key="Embedding闸门" data-step="4"><rect class="am-node-shape" x="832.6" y="14" width="121.9" height="35" rx="3"/><text x="893.5" y="31.5" text-anchor="middle" dominant-baseline="central">Embedding闸门</text></g><g class="am-node am-node--rect" data-key="模型服务" data-step="5"><rect class="am-node-shape" x="1070.2" y="85" width="80" height="35" rx="3"/><text x="1110.2" y="102.5" text-anchor="middle" dominant-baseline="central">模型服务</text></g><g class="am-node am-node--rect" data-key="向量服务" data-step="6"><rect class="am-node-shape" x="1070.2" y="14" width="80" height="35" rx="3"/><text x="1110.2" y="31.5" text-anchor="middle" dominant-baseline="central">向量服务</text></g></g></svg></figure>
+<div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>层级</th>
+<th>控制对象</th>
+<th align="right">当前限制</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Celery</td>
+<td>同时运行的合同</td>
+<td align="right">3</td>
+</tr>
+<tr>
+<td>Orchestrator</td>
+<td>每份合同的 criterion</td>
+<td align="right">5</td>
+</tr>
+<tr>
+<td>Redis LLM</td>
+<td>全部署 LLM 在途请求</td>
+<td align="right">5</td>
+</tr>
+<tr>
+<td>Redis Embedding</td>
+<td>全部署向量请求</td>
+<td align="right">3</td>
+</tr>
+<tr>
+<td>Redis Reranker</td>
+<td>LlamaIndex reranker</td>
+<td align="right">10</td>
+</tr>
+</tbody></table></div>
+</div></div>
+</section>
+<section class="am-panel" id="panel-C">
+<header class="am-panel-head"><span class="am-panel-id">C</span><h2>并发配置优先关系</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>调用路径</th>
+<th>参与限制</th>
+<th align="right">实际结果</th>
+<th>最终主导配置</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>合同任务</td>
+<td>3 Worker × <code>concurrency=1</code>；进程内上限 100</td>
+<td align="right">3 份</td>
+<td>Worker 执行槽</td>
+</tr>
+<tr>
+<td>criterion</td>
+<td>3 份合同 × 每份 5 条</td>
+<td align="right">最多 15 条</td>
+<td><code>workflow.max_orchestrator_concurrency=5</code></td>
+</tr>
+<tr>
+<td>DocxIndex LLM</td>
+<td>本地 10；Redis 全局 5</td>
+<td align="right">最多 5 个</td>
+<td><code>model_semaphore.llm.max_concurrent_requests=5</code></td>
+</tr>
+<tr>
+<td>Embedding</td>
+<td>3 份合同 × 本地 1；Redis 全局 3</td>
+<td align="right">最多 3 个</td>
+<td>本地 1 与全局 3</td>
+</tr>
+<tr>
+<td>DocxIndex rerank</td>
+<td>reranker 参数 10；实际复用 LLM client</td>
+<td align="right">最多 5 个</td>
+<td>Redis LLM 5</td>
+</tr>
+<tr>
+<td>LlamaIndex rerank</td>
+<td>Redis reranker 10</td>
+<td align="right">最多 10 个</td>
+<td>Redis Reranker 10</td>
+</tr>
+</tbody></table></div>
+</div>
+<div class="am-callout am-callout--info" role="note"><div class="am-callout-title">判断方法</div><div class="am-callout-body am-md"><p>只比较当前调用路径上的有效限制。上游数值大于下游阀门时，多出的调用者只会等待。</p>
+</div></div></div>
+</section>
+<section class="am-panel" id="panel-D">
+<header class="am-panel-head"><span class="am-panel-id">D</span><h2>时间配置执行顺序</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-seq"><svg viewBox="0 0 719 358" width="719" height="358" role="img" aria-label="时序图：API、Celery、Worker、Redis槽、模型服务" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><line class="am-lifeline" x1="54" y1="42" x2="54" y2="354"/><g data-key="API"><rect class="am-actor" x="12" y="8" width="84" height="34" rx="2"/><text x="54" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">API</text></g><line class="am-lifeline" x1="166" y1="42" x2="166" y2="354"/><g data-key="Celery"><rect class="am-actor" x="124" y="8" width="84" height="34" rx="2"/><text x="166" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">Celery</text></g><line class="am-lifeline" x1="301.1" y1="42" x2="301.1" y2="354"/><g data-key="Worker"><rect class="am-actor" x="259.1" y="8" width="84" height="34" rx="2"/><text x="301.1" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">Worker</text></g><line class="am-lifeline" x1="513.1" y1="42" x2="513.1" y2="354"/><g data-key="Redis槽"><rect class="am-actor" x="471.1" y="8" width="84" height="34" rx="2"/><text x="513.1" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">Redis槽</text></g><line class="am-lifeline" x1="664.1" y1="42" x2="664.1" y2="354"/><g data-key="模型服务"><rect class="am-actor" x="622.1" y="8" width="84" height="34" rx="2"/><text x="664.1" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">模型服务</text></g><g data-step="0"><text x="110" y="70" text-anchor="middle">任务进入队列</text><path class="am-edge" d="M54,80 L164,80" marker-end="url(#am2-arrow)"/><text class="am-step" x="60" y="74" text-anchor="start">1</text></g><g data-step="1"><text x="233.6" y="110" text-anchor="middle">等待 Worker 领取</text><path class="am-edge" d="M166,120 L299.1,120" marker-end="url(#am2-arrow)"/><text class="am-step" x="172" y="114" text-anchor="start">2</text></g><g data-step="2"><text x="407.1" y="150" text-anchor="middle">最多等待 600s</text><path class="am-edge" d="M301.1,160 L511.1,160" marker-end="url(#am2-arrow)"/><text class="am-step" x="307.1" y="154" text-anchor="start">3</text></g><g data-step="3"><text x="588.6" y="190" text-anchor="middle">获得租约后发出请求</text><path class="am-edge" d="M513.1,200 L662.1,200" marker-end="url(#am2-arrow)"/><text class="am-step" x="519.1" y="194" text-anchor="start">4</text></g><g data-step="4"><text x="482.6" y="230" text-anchor="middle">Agent 最多等待 30s</text><path class="am-edge am-edge--dashed" d="M664.1,240 L303.1,240" marker-end="url(#am2-arrow)"/><text class="am-step" x="658.1" y="234" text-anchor="end">5</text></g><g data-step="5"><text x="482.6" y="270" text-anchor="middle">DocxIndex 最多等待 120s</text><path class="am-edge am-edge--dashed" d="M664.1,280 L303.1,280" marker-end="url(#am2-arrow)"/><text class="am-step" x="658.1" y="274" text-anchor="end">6</text></g><g data-step="6"><text x="341.1" y="308" dominant-baseline="central">失败后按对应策略重试</text><path class="am-edge" d="M301.1,304 H331.1 V324 H303.1" marker-end="url(#am2-arrow)"/><text class="am-step" x="307.1" y="314" text-anchor="start">7</text></g></svg></figure>
+<div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>时间配置</th>
+<th align="right">当前值</th>
+<th>只控制什么</th>
+<th>到期结果</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>pending / queued timeout</code></td>
+<td align="right">60s / 7200s</td>
+<td>未被领取的任务</td>
+<td>watchdog 收敛状态</td>
+</tr>
+<tr>
+<td><code>wait_timeout_seconds</code></td>
+<td align="right">600s</td>
+<td>等待 Redis 槽</td>
+<td>未发 HTTP 就失败</td>
+</tr>
+<tr>
+<td><code>lease_seconds</code></td>
+<td align="right">600s</td>
+<td>Redis 槽计数有效期</td>
+<td>不会自动取消 HTTP</td>
+</tr>
+<tr>
+<td>Agent HTTP timeout</td>
+<td align="right">30s</td>
+<td>一次 Agent 请求</td>
+<td>当前 attempt 超时</td>
+</tr>
+<tr>
+<td>DocxIndex HTTP timeout</td>
+<td align="right">120s</td>
+<td>一次检索模型请求</td>
+<td>当前 attempt 超时</td>
+</tr>
+<tr>
+<td>Celery task hard limit</td>
+<td align="right">未配置</td>
+<td>整份合同运行时间</td>
+<td>当前没有统一总时限</td>
+</tr>
+</tbody></table></div>
+</div>
+<div class="am-callout am-callout--err" role="note"><div class="am-callout-title">1000s 请求与 600s lease</div><div class="am-callout-body am-md"><p>600s 不会把请求截断。租约到期后，1000s 请求可能继续运行，但它已经不占 Redis 计数。新请求可取得该名额，真实并发可能突破 5。</p>
+</div></div>
+<div class="am-md"><p>安全关系：<code>lease &gt; 同一 Redis key 下最长的 HTTP timeout + 清理余量</code>。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-E">
+<header class="am-panel-head"><span class="am-panel-id">E</span><h2>配置是否真正生效</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>配置或机制</th>
+<th>当前分类</th>
+<th>原因</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>workflow.max_api_concurrent_reviews=100</code></td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>有效但不主导</span></td>
+<td>当前每个 Worker 只有 1 个执行槽</td>
+</tr>
+<tr>
+<td><code>retrieval.docxindex.concurrency.llm=10</code></td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>本地有效</span></td>
+<td>限制单个 DocxIndex LLMClient</td>
+</tr>
+<tr>
+<td><code>retrieval.docxindex.concurrency.embedding=1</code></td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>本地有效</span></td>
+<td>限制单个 embedding client</td>
+</tr>
+<tr>
+<td><code>retrieval.docxindex.concurrency.reranker=10</code></td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>当前基本无效</span></td>
+<td>临时 semaphore 只包一次同步调用</td>
+</tr>
+<tr>
+<td><code>model_semaphore.llm.max_concurrent_requests=5</code></td>
+<td><span class="am-status am-status--ok"><span class="am-status-icon" aria-hidden="true">✓</span>全局有效</span></td>
+<td>所有进程共享 Redis key</td>
+</tr>
+<tr>
+<td><code>model_semaphore.reranker.max_concurrent_requests=10</code></td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>路径专用</span></td>
+<td>只限制 LlamaIndex reranker</td>
+</tr>
+<tr>
+<td>DocxIndex 150ms 启动间隔</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>局部有效</span></td>
+<td>每个 LLMClient 独立计时</td>
+</tr>
+</tbody></table></div>
+</div></div>
+</section>
+<section class="am-panel" id="panel-F">
+<header class="am-panel-head"><span class="am-panel-id">F</span><h2>Agent 工作流</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 1769 84" width="1769" height="84" role="img" aria-label="流程图：合同与标准、Ingest、BuildIndex、Planner、Orchestrator、ReviewAgent、Reflector、Summarize" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M107,42 L133,42 Q159,42 185,42 L211,42" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="131" y="33" width="56" height="18" rx="3"/><text x="159" y="42" text-anchor="middle" dominant-baseline="central">解析输入</text></g></g><g data-step="1"><path class="am-edge" d="M276.4,42 L310.1,42 Q343.9,42 377.6,42 L411.3,42" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="300.4" y="33" width="86.8" height="18" rx="3"/><text x="343.9" y="42" text-anchor="middle" dominant-baseline="central">建 DOCX 索引</text></g></g><g data-step="2"><path class="am-edge" d="M504.3,42 L536,42 Q567.8,42 599.5,42 L631.3,42" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="528.3" y="33" width="79" height="18" rx="3"/><text x="567.8" y="42" text-anchor="middle" dominant-baseline="central">生成审查路线</text></g></g><g data-step="3"><path class="am-edge" d="M705.5,42 L737.7,42 Q769.8,42 802,42 L834.2,42" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="729.5" y="33" width="80.6" height="18" rx="3"/><text x="769.8" y="42" text-anchor="middle" dominant-baseline="central">调度 criterion</text></g></g><g data-step="4"><path class="am-edge" d="M937.8,42 L966.7,42 Q995.6,42 1024.4,42 L1053.3,42" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="961.8" y="33" width="67.5" height="18" rx="3"/><text x="995.6" y="42" text-anchor="middle" dominant-baseline="central">检索并判断</text></g></g><g data-step="5"><path class="am-edge" d="M1162.2,50.4 L1196.8,55.7 Q1231.4,61 1266,55 L1300.7,49.1" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="1203.4" y="52" width="56" height="18" rx="3"/><text x="1231.4" y="61" text-anchor="middle" dominant-baseline="central">复核问题</text></g></g><g data-step="6"><path class="am-edge am-edge--dashed" d="M1300.7,34.9 L1266,29 Q1231.4,23 1196.8,28.3 L1162.2,33.6" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="1186.2" y="14" width="90.5" height="18" rx="3"/><text x="1231.4" y="23" text-anchor="middle" dominant-baseline="central">证据不足时重检</text></g></g><g data-step="7"><path class="am-edge" d="M1383.3,42 L1409.3,42 Q1435.3,42 1461.3,42 L1487.3,42" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="1407.3" y="33" width="56" height="18" rx="3"/><text x="1435.3" y="42" text-anchor="middle" dominant-baseline="central">汇总结论</text></g></g><g data-step="8"><path class="am-edge" d="M1583.9,42 L1609.9,42 Q1635.9,42 1661.9,42 L1687.9,42" marker-end="url(#am3-arrow)"/><g class="am-edge-label"><rect x="1607.9" y="33" width="56" height="18" rx="3"/><text x="1635.9" y="42" text-anchor="middle" dominant-baseline="central">生成报告</text></g></g></g><g><g class="am-node am-node--rect" data-key="合同与标准" data-step="0"><rect class="am-node-shape" x="14" y="24.5" width="93" height="35" rx="3"/><text x="60.5" y="42" text-anchor="middle" dominant-baseline="central">合同与标准</text></g><g class="am-node am-node--rect" data-key="Ingest" data-step="0"><rect class="am-node-shape" x="211" y="24.5" width="65.4" height="35" rx="3"/><text x="243.7" y="42" text-anchor="middle" dominant-baseline="central">Ingest</text></g><g class="am-node am-node--rect" data-key="BuildIndex" data-step="1"><rect class="am-node-shape" x="411.3" y="24.5" width="93" height="35" rx="3"/><text x="457.8" y="42" text-anchor="middle" dominant-baseline="central">BuildIndex</text></g><g class="am-node am-node--rect" data-key="Planner" data-step="2"><rect class="am-node-shape" x="631.3" y="24.5" width="74.3" height="35" rx="3"/><text x="668.4" y="42" text-anchor="middle" dominant-baseline="central">Planner</text></g><g class="am-node am-node--rect" data-key="Orchestrator" data-step="3"><rect class="am-node-shape" x="834.2" y="24.5" width="103.7" height="35" rx="3"/><text x="886" y="42" text-anchor="middle" dominant-baseline="central">Orchestrator</text></g><g class="am-node am-node--rect" data-key="ReviewAgent" data-step="4"><rect class="am-node-shape" x="1053.3" y="24.5" width="108.9" height="35" rx="3"/><text x="1107.7" y="42" text-anchor="middle" dominant-baseline="central">ReviewAgent</text></g><g class="am-node am-node--rect" data-key="Reflector" data-step="5"><rect class="am-node-shape" x="1300.7" y="24.5" width="82.6" height="35" rx="3"/><text x="1342" y="42" text-anchor="middle" dominant-baseline="central">Reflector</text></g><g class="am-node am-node--rect" data-key="Summarize" data-step="7"><rect class="am-node-shape" x="1487.3" y="24.5" width="96.6" height="35" rx="3"/><text x="1535.6" y="42" text-anchor="middle" dominant-baseline="central">Summarize</text></g><g class="am-node am-node--rect" data-key="Report" data-step="8"><rect class="am-node-shape" x="1687.9" y="24.5" width="67" height="35" rx="3"/><text x="1721.4" y="42" text-anchor="middle" dominant-baseline="central">Report</text></g></g></svg></figure>
+<div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>角色</th>
+<th>输入</th>
+<th>输出</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Planner</td>
+<td>criterion、check points、索引能力</td>
+<td>RoutePlan</td>
+</tr>
+<tr>
+<td>Orchestrator</td>
+<td>RoutePlan、合同索引</td>
+<td>criterion 执行结果</td>
+</tr>
+<tr>
+<td>ReviewAgent</td>
+<td>证据、审查标准</td>
+<td>issues、status、reasoning</td>
+</tr>
+<tr>
+<td>Reflector</td>
+<td>初稿、证据、质量规则</td>
+<td>接受、修正或重新检索</td>
+</tr>
+<tr>
+<td>Workflow</td>
+<td>各 criterion 结果</td>
+<td>汇总 JSON 与 DOCX 报告</td>
+</tr>
+</tbody></table></div>
+</div></div>
+</section>
+<section class="am-panel" id="panel-G">
+<header class="am-panel-head"><span class="am-panel-id">G</span><h2>DOCX 检索方法</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 1301 347" width="1301" height="347" role="img" aria-label="流程图：DOCX、Anchor、StructureTree、Router、Title、Region、Rule、Scan" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M82,173.5 L128.2,173.5 Q174.3,173.5 220.4,173.5 L266.5,173.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="106" y="164.5" width="136.5" height="18" rx="3"/><text x="174.3" y="173.5" text-anchor="middle" dominant-baseline="central">段落、表格、标题、附件</text></g></g><g data-step="1"><path class="am-edge" d="M336.7,173.5 L377.8,173.5 Q419,173.5 460.2,173.5 L501.4,173.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="360.7" y="164.5" width="116.7" height="18" rx="3"/><text x="419" y="173.5" text-anchor="middle" dominant-baseline="central">保留 node_id 与层级</text></g></g><g data-step="2"><path class="am-edge" d="M611.5,173.5 L648.6,173.5 Q685.7,173.5 722.8,173.5 L759.9,173.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="635.5" y="164.5" width="100.4" height="18" rx="3"/><text x="685.7" y="173.5" text-anchor="middle" dominant-baseline="central">Planner 选择路线</text></g></g><g data-step="3"><path class="am-edge" d="M807.5,191 L857.6,253.3 Q907.7,315.5 949.6,315.5 L991.5,315.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="879.7" y="306.5" width="56" height="18" rx="3"/><text x="907.7" y="315.5" text-anchor="middle" dominant-baseline="central">标题定位</text></g></g><g data-step="4"><path class="am-edge" d="M821.6,191 L864.6,217.8 Q907.7,244.5 948.1,244.5 L988.4,244.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="879.7" y="235.5" width="56" height="18" rx="3"/><text x="907.7" y="244.5" text-anchor="middle" dominant-baseline="central">区域检索</text></g></g><g data-step="5"><path class="am-edge" d="M826.9,173.5 L867.3,173.5 Q907.7,173.5 949.6,173.5 L991.5,173.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="868.2" y="164.5" width="79" height="18" rx="3"/><text x="907.7" y="173.5" text-anchor="middle" dominant-baseline="central">精确规则定位</text></g></g><g data-step="6"><path class="am-edge" d="M821.6,156 L864.6,129.3 Q907.7,102.5 949.6,102.5 L991.5,102.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="868.2" y="93.5" width="79" height="18" rx="3"/><text x="907.7" y="102.5" text-anchor="middle" dominant-baseline="central">全文分批检查</text></g></g><g data-step="7"><path class="am-edge" d="M807.5,156 L857.6,93.8 Q907.7,31.5 948.8,31.5 L990,31.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="850.9" y="22.5" width="113.5" height="18" rx="3"/><text x="907.7" y="31.5" text-anchor="middle" dominant-baseline="central">结构语义加向量补充</text></g></g><g data-step="8"><path class="am-edge" d="M1055.5,315.5 L1092.9,315.5 Q1130.2,315.5 1180.2,253.3 L1230.2,191" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="1082.6" y="306.5" width="95.3" height="18" rx="3"/><text x="1130.2" y="315.5" text-anchor="middle" dominant-baseline="central">返回原文 anchor</text></g></g><g data-step="9"><path class="am-edge" d="M1058.6,244.5 L1094.4,244.5 Q1130.2,244.5 1173.2,217.8 L1216.1,191" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="1082.6" y="235.5" width="95.3" height="18" rx="3"/><text x="1130.2" y="244.5" text-anchor="middle" dominant-baseline="central">返回原文 anchor</text></g></g><g data-step="10"><path class="am-edge" d="M1055.5,173.5 L1092.9,173.5 Q1130.2,173.5 1166,173.5 L1201.9,173.5" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="1082.6" y="164.5" width="95.3" height="18" rx="3"/><text x="1130.2" y="173.5" text-anchor="middle" dominant-baseline="central">返回原文 anchor</text></g></g><g data-step="11"><path class="am-edge" d="M1055.5,102.5 L1092.9,102.5 Q1130.2,102.5 1173.2,129.3 L1216.1,156" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="1082.6" y="93.5" width="95.3" height="18" rx="3"/><text x="1130.2" y="102.5" text-anchor="middle" dominant-baseline="central">返回原文 anchor</text></g></g><g data-step="12"><path class="am-edge" d="M1057,31.5 L1093.6,31.5 Q1130.2,31.5 1180.2,93.8 L1230.2,156" marker-end="url(#am4-arrow)"/><g class="am-edge-label"><rect x="1096.5" y="22.5" width="67.5" height="18" rx="3"/><text x="1130.2" y="31.5" text-anchor="middle" dominant-baseline="central">去重并重排</text></g></g></g><g><g class="am-node am-node--rect" data-key="DOCX" data-step="0"><rect class="am-node-shape" x="14" y="156" width="68" height="35" rx="3"/><text x="48" y="173.5" text-anchor="middle" dominant-baseline="central">DOCX</text></g><g class="am-node am-node--rect" data-key="Anchor" data-step="0"><rect class="am-node-shape" x="266.5" y="156" width="70.1" height="35" rx="3"/><text x="301.6" y="173.5" text-anchor="middle" dominant-baseline="central">Anchor</text></g><g class="am-node am-node--rect" data-key="StructureTree" data-step="1"><rect class="am-node-shape" x="501.4" y="156" width="110.2" height="35" rx="3"/><text x="556.5" y="173.5" text-anchor="middle" dominant-baseline="central">StructureTree</text></g><g class="am-node am-node--rect" data-key="Router" data-step="2"><rect class="am-node-shape" x="759.9" y="156" width="67" height="35" rx="3"/><text x="793.4" y="173.5" text-anchor="middle" dominant-baseline="central">Router</text></g><g class="am-node am-node--rect" data-key="Title" data-step="3"><rect class="am-node-shape" x="991.5" y="298" width="64" height="35" rx="3"/><text x="1023.5" y="315.5" text-anchor="middle" dominant-baseline="central">Title</text></g><g class="am-node am-node--rect" data-key="Region" data-step="4"><rect class="am-node-shape" x="988.4" y="227" width="70.1" height="35" rx="3"/><text x="1023.5" y="244.5" text-anchor="middle" dominant-baseline="central">Region</text></g><g class="am-node am-node--rect" data-key="Rule" data-step="5"><rect class="am-node-shape" x="991.5" y="156" width="64" height="35" rx="3"/><text x="1023.5" y="173.5" text-anchor="middle" dominant-baseline="central">Rule</text></g><g class="am-node am-node--rect" data-key="Scan" data-step="6"><rect class="am-node-shape" x="991.5" y="85" width="64" height="35" rx="3"/><text x="1023.5" y="102.5" text-anchor="middle" dominant-baseline="central">Scan</text></g><g class="am-node am-node--rect" data-key="Hybrid" data-step="7"><rect class="am-node-shape" x="990" y="14" width="67" height="35" rx="3"/><text x="1023.5" y="31.5" text-anchor="middle" dominant-baseline="central">Hybrid</text></g><g class="am-node am-node--rect" data-key="Evidence" data-step="8"><rect class="am-node-shape" x="1201.9" y="156" width="84.7" height="35" rx="3"/><text x="1244.2" y="173.5" text-anchor="middle" dominant-baseline="central">Evidence</text></g></g></svg></figure>
+<div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>路线</th>
+<th>适用问题</th>
+<th>关键边界</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>title</td>
+<td>必备标题和目录结构</td>
+<td>依赖标题识别质量</td>
+</tr>
+<tr>
+<td>region</td>
+<td>首部、正文、尾部、附件</td>
+<td>先限定范围</td>
+</tr>
+<tr>
+<td>rule</td>
+<td>金额、短词、存在性</td>
+<td>只用明确原文词</td>
+</tr>
+<tr>
+<td>scan</td>
+<td>无法缩小范围的全文检查</td>
+<td>分批调用 LLM</td>
+</tr>
+<tr>
+<td>hybrid</td>
+<td>模糊语义问题</td>
+<td>结构检索不足时补向量</td>
+</tr>
+</tbody></table></div>
+<p>检索章节只描述代码机制。本文没有新增召回率或性能数据。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-H">
+<header class="am-panel-head"><span class="am-panel-id">H</span><h2>风险、决策与代码证据</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>评审项</th>
+<th>当前判断</th>
+<th>需要确认</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>并发目标</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>只限制在途数</span></td>
+<td>是否还要限制全局 QPS</td>
+</tr>
+<tr>
+<td>HTTP timeout</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>Agent 30s；DocxIndex 120s</span></td>
+<td>是否保留两套阈值</td>
+</tr>
+<tr>
+<td>Celery 总时限</td>
+<td><span class="am-status am-status--no"><span class="am-status-icon" aria-hidden="true">✗</span>未显式配置</span></td>
+<td>是否设置 hard/soft limit</td>
+</tr>
+<tr>
+<td>reranker 配置</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>两条后端使用不同闸门</span></td>
+<td>是否统一调用路径</td>
+</tr>
+<tr>
+<td>任务取消</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>running 阶段不可靠</span></td>
+<td>是否增加协作式取消</td>
+</tr>
+<tr>
+<td>状态语义</td>
+<td><span class="am-status am-status--warn"><span class="am-status-icon" aria-hidden="true">!</span>API 投递后即写 queued</span></td>
+<td>是否区分已投递与等待执行</td>
+</tr>
+</tbody></table></div>
+<p>关键代码证据：</p>
+<ul>
+<li><code>config.yaml:35-77, 79-158</code></li>
+<li><code>docker-compose.yaml:38-99</code></li>
+<li><code>task_queue/celery_app.py:8-23</code></li>
+<li><code>agents/orchestrator.py:1310-1368</code></li>
+<li><code>endpoints/runtime/llm_semaphore.py:45-214</code></li>
+<li><code>tools/docxindex/retriever.py:35-475</code></li>
+<li><code>tools/docxindex/llm/client.py:53-226</code></li>
+<li><code>workflow/workflow.py:196-629</code></li>
+</ul>
+</div></div>
+</section>
+</div>
+</div>
+</main>
+<footer class="am-colophon">Generated by Answer me with HTML 0.4.9 · 2026-10-05 19:57</footer>
+<textarea id="am-source" hidden readonly aria-hidden="true">---
+template: doc
+theme: shadcn
+mode: light
+lang: zh
+title: Contract Agent 内部 Code Review 总览
+subtitle: 并发优先关系、时间边界、Agent 工作流与 DOCX 检索
+source: 当前代码与 config.yaml 静态审查 · 2026-10-05
+---
+
+Lead: 当前系统用 Celery 隔离长任务，用局部并发提高单合同处理速度，再用 Redis 租约限制全部署模型请求。并发限制取当前路径上的最小有效值；时间限制按执行阶段依次生效。
+
+## A 核心结论
+
+```callout warn 评审结论
+合同执行并发是 3。活跃 criterion 最多是 15，但全局 LLM 在途请求最多是 5。criterion 并发不等于模型请求并发。
+```
+
+```kv cols=3
+合同并发: 3 份
+criterion 调用者: 最多 15 条
+LLM 在途请求: 最多 5 个
+Embedding 在途请求: 最多 3 个
+队列模式: 已启用
+证据边界: 未运行现场模型测试
+```
+
+## B 当前请求链路
+
+```flow LR
+API -&gt; Redis/Celery: 保存任务并投递
+Redis/Celery -&gt; Worker池: 3 个执行槽
+Worker池 -&gt; Criterion: 每合同最多 5 条
+Criterion -&gt; LLM闸门: 全局 5
+Criterion -&gt; Embedding闸门: 全局 3
+LLM闸门 -&gt; 模型服务: HTTP 请求
+Embedding闸门 -&gt; 向量服务: HTTP 请求
+```
+
+| 层级 | 控制对象 | 当前限制 |
+|---|---|---:|
+| Celery | 同时运行的合同 | 3 |
+| Orchestrator | 每份合同的 criterion | 5 |
+| Redis LLM | 全部署 LLM 在途请求 | 5 |
+| Redis Embedding | 全部署向量请求 | 3 |
+| Redis Reranker | LlamaIndex reranker | 10 |
+
+## C 并发配置优先关系
+
+| 调用路径 | 参与限制 | 实际结果 | 最终主导配置 |
+|---|---|---:|---|
+| 合同任务 | 3 Worker × `concurrency=1`；进程内上限 100 | 3 份 | Worker 执行槽 |
+| criterion | 3 份合同 × 每份 5 条 | 最多 15 条 | `workflow.max_orchestrator_concurrency=5` |
+| DocxIndex LLM | 本地 10；Redis 全局 5 | 最多 5 个 | `model_semaphore.llm.max_concurrent_requests=5` |
+| Embedding | 3 份合同 × 本地 1；Redis 全局 3 | 最多 3 个 | 本地 1 与全局 3 |
+| DocxIndex rerank | reranker 参数 10；实际复用 LLM client | 最多 5 个 | Redis LLM 5 |
+| LlamaIndex rerank | Redis reranker 10 | 最多 10 个 | Redis Reranker 10 |
+
+```callout info 判断方法
+只比较当前调用路径上的有效限制。上游数值大于下游阀门时，多出的调用者只会等待。
+```
+
+## D 时间配置执行顺序
+
+```sequence num
+API -&gt; Celery: 任务进入队列
+Celery -&gt; Worker: 等待 Worker 领取
+Worker -&gt; Redis槽: 最多等待 600s
+Redis槽 -&gt; 模型服务: 获得租约后发出请求
+模型服务 --&gt; Worker: Agent 最多等待 30s
+模型服务 --&gt; Worker: DocxIndex 最多等待 120s
+Worker -&gt; Worker: 失败后按对应策略重试
+```
+
+| 时间配置 | 当前值 | 只控制什么 | 到期结果 |
+|---|---:|---|---|
+| `pending / queued timeout` | 60s / 7200s | 未被领取的任务 | watchdog 收敛状态 |
+| `wait_timeout_seconds` | 600s | 等待 Redis 槽 | 未发 HTTP 就失败 |
+| `lease_seconds` | 600s | Redis 槽计数有效期 | 不会自动取消 HTTP |
+| Agent HTTP timeout | 30s | 一次 Agent 请求 | 当前 attempt 超时 |
+| DocxIndex HTTP timeout | 120s | 一次检索模型请求 | 当前 attempt 超时 |
+| Celery task hard limit | 未配置 | 整份合同运行时间 | 当前没有统一总时限 |
+
+```callout err 1000s 请求与 600s lease
+600s 不会把请求截断。租约到期后，1000s 请求可能继续运行，但它已经不占 Redis 计数。新请求可取得该名额，真实并发可能突破 5。
+```
+
+安全关系：`lease &gt; 同一 Redis key 下最长的 HTTP timeout + 清理余量`。
+
+## E 配置是否真正生效
+
+| 配置或机制 | 当前分类 | 原因 |
+|---|---|---|
+| `workflow.max_api_concurrent_reviews=100` | warn 有效但不主导 | 当前每个 Worker 只有 1 个执行槽 |
+| `retrieval.docxindex.concurrency.llm=10` | ok 本地有效 | 限制单个 DocxIndex LLMClient |
+| `retrieval.docxindex.concurrency.embedding=1` | ok 本地有效 | 限制单个 embedding client |
+| `retrieval.docxindex.concurrency.reranker=10` | no 当前基本无效 | 临时 semaphore 只包一次同步调用 |
+| `model_semaphore.llm.max_concurrent_requests=5` | ok 全局有效 | 所有进程共享 Redis key |
+| `model_semaphore.reranker.max_concurrent_requests=10` | warn 路径专用 | 只限制 LlamaIndex reranker |
+| DocxIndex 150ms 启动间隔 | warn 局部有效 | 每个 LLMClient 独立计时 |
+
+## F Agent 工作流
+
+```flow LR
+合同与标准 -&gt; Ingest: 解析输入
+Ingest -&gt; BuildIndex: 建 DOCX 索引
+BuildIndex -&gt; Planner: 生成审查路线
+Planner -&gt; Orchestrator: 调度 criterion
+Orchestrator -&gt; ReviewAgent: 检索并判断
+ReviewAgent -&gt; Reflector: 复核问题
+Reflector --&gt; ReviewAgent: 证据不足时重检
+Reflector -&gt; Summarize: 汇总结论
+Summarize -&gt; Report: 生成报告
+```
+
+| 角色 | 输入 | 输出 |
+|---|---|---|
+| Planner | criterion、check points、索引能力 | RoutePlan |
+| Orchestrator | RoutePlan、合同索引 | criterion 执行结果 |
+| ReviewAgent | 证据、审查标准 | issues、status、reasoning |
+| Reflector | 初稿、证据、质量规则 | 接受、修正或重新检索 |
+| Workflow | 各 criterion 结果 | 汇总 JSON 与 DOCX 报告 |
+
+## G DOCX 检索方法
+
+```flow LR
+DOCX -&gt; Anchor: 段落、表格、标题、附件
+Anchor -&gt; StructureTree: 保留 node_id 与层级
+StructureTree -&gt; Router: Planner 选择路线
+Router -&gt; Title: 标题定位
+Router -&gt; Region: 区域检索
+Router -&gt; Rule: 精确规则定位
+Router -&gt; Scan: 全文分批检查
+Router -&gt; Hybrid: 结构语义加向量补充
+Title -&gt; Evidence: 返回原文 anchor
+Region -&gt; Evidence: 返回原文 anchor
+Rule -&gt; Evidence: 返回原文 anchor
+Scan -&gt; Evidence: 返回原文 anchor
+Hybrid -&gt; Evidence: 去重并重排
+```
+
+| 路线 | 适用问题 | 关键边界 |
+|---|---|---|
+| title | 必备标题和目录结构 | 依赖标题识别质量 |
+| region | 首部、正文、尾部、附件 | 先限定范围 |
+| rule | 金额、短词、存在性 | 只用明确原文词 |
+| scan | 无法缩小范围的全文检查 | 分批调用 LLM |
+| hybrid | 模糊语义问题 | 结构检索不足时补向量 |
+
+检索章节只描述代码机制。本文没有新增召回率或性能数据。
+
+## H 风险、决策与代码证据
+
+| 评审项 | 当前判断 | 需要确认 |
+|---|---|---|
+| 并发目标 | warn 只限制在途数 | 是否还要限制全局 QPS |
+| HTTP timeout | warn Agent 30s；DocxIndex 120s | 是否保留两套阈值 |
+| Celery 总时限 | no 未显式配置 | 是否设置 hard/soft limit |
+| reranker 配置 | warn 两条后端使用不同闸门 | 是否统一调用路径 |
+| 任务取消 | warn running 阶段不可靠 | 是否增加协作式取消 |
+| 状态语义 | warn API 投递后即写 queued | 是否区分已投递与等待执行 |
+
+关键代码证据：
+
+- `config.yaml:35-77, 79-158`
+- `docker-compose.yaml:38-99`
+- `task_queue/celery_app.py:8-23`
+- `agents/orchestrator.py:1310-1368`
+- `endpoints/runtime/llm_semaphore.py:45-214`
+- `tools/docxindex/retriever.py:35-475`
+- `tools/docxindex/llm/client.py:53-226`
+- `workflow/workflow.py:196-629`
+</textarea>
+<script>
+(() => {
+  const root = document.documentElement;
+  const cycle = (list, cur) => list[(list.indexOf(cur) + 1) % list.length];
+  const label = (btn, value) => {
+    const map = JSON.parse(btn.dataset.labels || '{}');
+    btn.textContent = map[value] || value;
+  };
+  const bind = (name, attr, values) => {
+    const btn = document.querySelector(`[data-am="${name}"]`);
+    if (!btn) return;
+    label(btn, root.getAttribute(attr));
+    btn.addEventListener('click', () => {
+      const next = cycle(values, root.getAttribute(attr));
+      root.setAttribute(attr, next);
+      label(btn, next);
+    });
+  };
+  bind('theme', 'data-theme', ['blueprint', 'shadcn']);
+  bind('mode', 'data-mode', ['auto', 'light', 'dark']);
+
+  const copyBtn = document.querySelector('[data-am="copy"]');
+  copyBtn?.addEventListener('click', async () => {
+    const nodes = document.querySelectorAll('#am-source');
+    const text = nodes[nodes.length - 1]?.value ?? '';
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = Object.assign(document.createElement('textarea'), { value: text });
+      document.body.append(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    const original = copyBtn.textContent;
+    copyBtn.textContent = copyBtn.dataset.done;
+    setTimeout(() => { copyBtn.textContent = original; }, 1400);
+  });
+})();
+(() => {
+// Pure planner for justified ("photo wall") rows on sheet pages. No DOM access.
+//
+// This file must stay inlinable into the page script: top-level declarations only, no imports, and the exports are
+// `planLayout` and the constants the DOM adapter shares (STEP, MAX_SCALE, MIN_SCALE). The page build strips the `export ` keyword,
+// and test/layout-plan.test.js checks that this still works.
+//
+// planLayout({ width, gap, cols, panels }) -> { rows: [{ columns: [{ panels: [index, ...], width }], height }] }
+//
+// Input (all lengths in px):
+//   width   container width
+//   gap     space between columns, and between two panels stacked in one column
+//   cols    most columns in one row (the planner never uses more than MAX_COLUMNS, but spans stay shares of `cols`)
+//   panels  one entry per panel, in reading order:
+//     samples   [{ w, h }] panel height at sampled widths, ascending by w (heights between samples are interpolated)
+//     minWidth  narrowest feasible width (clamped to `width`)
+//     maxWidth  widest useful width; beyond it the panel only gains empty space (default: no limit)
+//     natural   natural diagram width for a diagram-only panel (default: none)
+//     pad       panel width not used by the diagram (padding and border; default 0)
+//     span      the author's width hint in grid columns (default 1); span >= cols keeps the panel alone in its row
+//
+// Output: { rows, maxScale }. Rows are in reading order; a row is a list of columns (at most `cols`); a column holds one panel or two
+// consecutive panels, stacked. For integer inputs the column widths plus the gaps between them equal `width`.
+// Rows are chosen by dynamic programming over break points; widths by a search in STEP px steps. Cost per row:
+//   H = tallest column; waste = sum((H - columnHeight) * columnWidth) + sum over diagrams wider than maxWidth of (w - maxWidth) * h
+//   dev = sum(((w - preferred) / oneColumn)^2) + SCALE_WEIGHT * sum over diagrams of (ln(scale) / ln(MAX_SCALE))^2
+//   cost = waste / 1000 + PREF_WEIGHT * dev * H
+// Scale band: diagrams on one page stay at similar sizes. With the result's `maxScale` as the diagram size limit, a diagram is
+// shown at scale min(maxScale, (width - pad) / natural). The planner tries a few bands [lo, lo * BAND_RATIO] (lo in BAND_LOS) and
+// keeps the cheapest plan in which no diagram is narrower than scale lo and none is shown above the band's top, so the largest and
+// smallest diagram scale on the page differ by at most BAND_RATIO. A panel wider than its diagram's top size keeps the diagram at
+// that size, and the page script must set the diagram's max-width to natural * maxScale. The band starts no higher than the
+// largest scale the page allows the least roomy diagram, so one wide diagram lowers the band for the others.
+// If no band is feasible the plan is made without a band (maxScale = MAX_SCALE); if no plan fits (or the input is unusable) the
+// result is a single column: one panel per row at the full width.
+
+const STEP = 10;
+const MAX_SCALE = 1.25;
+const MIN_SCALE = 0.75; // the narrowest a diagram is shown, as a share of its natural width
+const MAX_COLUMNS = 6; // rows with more columns are unreadable, and the search grows steeply with the column count
+const BAND_RATIO = 1.25; // the largest and smallest diagram scale on a page differ by at most this
+const BAND_LOS = [MIN_SCALE, 0.85, 0.95, 1]; // lower ends tried for the band; lo * BAND_RATIO is the upper end (1.25 means no upper limit)
+const SCALE_WEIGHT = 3;
+const PREF_WEIGHT = 0.15;
+
+function heightAt(samples, w) {
+  const i = samples.findIndex((s) => s.w >= w);
+  if (i === -1) return samples[samples.length - 1].h;
+  if (i === 0) return samples[0].h;
+  const a = samples[i - 1];
+  const b = samples[i];
+  return a.h + ((b.h - a.h) * (w - a.w)) / (b.w - a.w);
+}
+
+// Every way to split `len` consecutive panels into columns of 1 or 2 panels, as lists of column sizes.
+function splits(len) {
+  if (len === 0) return [[]];
+  return [1, 2].filter((k) => k <= len).flatMap((k) => splits(len - k).map((rest) => [k, ...rest]));
+}
+
+function singleColumn(width, panels) {
+  return { rows: panels.map((_, i) => ({ columns: [{ panels: [i], width }], height: 0 })) };
+}
+
+function planLayout({ width, gap = 0, cols = 3, panels }) {
+  const usable = Number.isFinite(width) && width > 0 && panels.every((p) => Array.isArray(p.samples) && p.samples.length > 0);
+  if (!usable) return singleColumn(width, panels);
+
+  // `cols` stays the unit of the author's spans; no row gets more than MAX_COLUMNS columns however large `cols` is.
+  const maxColumns = Math.min(cols, MAX_COLUMNS);
+  const oneColumn = Math.max(1, (width - gap * (cols - 1)) / cols);
+  // Per-panel limits. With a band [lo, lo * BAND_RATIO], a diagram is no narrower than scale lo and shown at most at the top of the
+  // band: a wider panel keeps it at that size and gains empty space, which the cost counts as waste.
+  const prepare = (lo) => panels.map((p) => {
+    const pad = p.pad ?? 0;
+    const diagram = lo > 0 && p.natural > 0;
+    const scaleCap = diagram ? Math.min(MAX_SCALE, lo * BAND_RATIO) : MAX_SCALE;
+    return {
+      ...p,
+      minWidth: Math.min(width, Math.max(Math.ceil(p.minWidth || 0), diagram ? Math.ceil(p.natural * lo + pad) : 0)),
+      maxWidth: Math.min(p.maxWidth ?? Infinity, diagram ? p.natural * scaleCap + pad : Infinity),
+      scaleCap,
+      pad,
+      preferred: Math.min(width, (p.span ?? 1) * oneColumn + ((p.span ?? 1) - 1) * gap),
+      alone: (p.span ?? 1) >= cols,
+    };
+  });
+  let info = prepare(0);
+  // Beyond its maxWidth a panel only gains empty space, so its height stops changing there (matters when a band lowers maxWidth).
+  const heightOf = (p, w) => heightAt(p.samples, Math.min(w, p.maxWidth));
+  const columnHeight = (col, w) => col.reduce((h, k) => h + heightOf(info[k], w), 0) + gap * (col.length - 1);
+
+  function bestColumns(columns) {
+    const avail = width - gap * (columns.length - 1);
+    const mins = columns.map((c) => Math.max(...c.map((k) => info[k].minWidth)));
+    const minsFrom = mins.map((_, n) => mins.slice(n).reduce((s, w) => s + w, 0));
+    if (minsFrom[0] > avail) return null;
+    let best = null;
+    const evaluate = (ws) => {
+      const hs = ws.map((w, n) => columnHeight(columns[n], w));
+      const H = Math.max(...hs);
+      let waste = 0;
+      let dev = 0;
+      ws.forEach((w, n) => {
+        waste += (H - hs[n]) * w;
+        for (const k of columns[n]) {
+          const p = info[k];
+          if (w > p.maxWidth) waste += (w - p.maxWidth) * heightOf(p, w);
+          dev += ((w - p.preferred) / oneColumn) ** 2;
+          if (p.natural > 0) {
+            const scale = Math.min(p.scaleCap, Math.max(w - p.pad, 1) / p.natural);
+            dev += SCALE_WEIGHT * (Math.log(scale) / Math.log(MAX_SCALE)) ** 2;
+          }
+        }
+      });
+      const cost = waste / 1000 + PREF_WEIGHT * dev * H;
+      if (!best || cost < best.cost) best = { cost, ws, height: H, columns };
+    };
+    const choose = (n, used, ws) => {
+      if (n === columns.length - 1) {
+        const w = avail - used;
+        if (w >= mins[n]) evaluate([...ws, w]);
+        return;
+      }
+      for (let w = mins[n]; used + w + minsFrom[n + 1] <= avail; w += STEP) choose(n + 1, used + w, [...ws, w]);
+    };
+    choose(0, 0, []);
+    return best;
+  }
+
+  // Best columns for one row of panels i..j.
+  function bestRow(i, j) {
+    if (j > i && info.slice(i, j + 1).some((p) => p.alone)) return null;
+    let best = null;
+    for (const split of splits(j - i + 1)) {
+      if (split.length > maxColumns) continue;
+      let next = i;
+      const columns = split.map((size) => Array.from({ length: size }, () => next++));
+      const r = bestColumns(columns);
+      if (r && (!best || r.cost < best.cost)) best = r;
+    }
+    return best;
+  }
+
+  // Row breaks in reading order, for the band set up in `info`. A row holds at most 2 * maxColumns panels. Null if nothing fits.
+  function solve() {
+    const n = panels.length;
+    const total = Array(n + 1).fill(Infinity);
+    const from = Array(n + 1).fill(-1);
+    const chosen = Array(n + 1).fill(null);
+    total[0] = 0;
+    for (let j = 1; j <= n; j++) {
+      for (let i = Math.max(0, j - 2 * maxColumns); i < j; i++) {
+        if (total[i] === Infinity) continue;
+        const r = bestRow(i, j - 1);
+        if (r && total[i] + r.cost < total[j]) {
+          total[j] = total[i] + r.cost;
+          from[j] = i;
+          chosen[j] = r;
+        }
+      }
+    }
+    if (total[n] === Infinity) return null;
+    const rows = [];
+    for (let j = n; j > 0; j = from[j]) {
+      const r = chosen[j];
+      rows.unshift({ columns: r.columns.map((panelsInColumn, c) => ({ panels: panelsInColumn, width: r.ws[c] })), height: r.height });
+    }
+    return { rows, cost: total[n] };
+  }
+
+  let best = null;
+  const diagrams = panels.filter((p) => p.natural > 0);
+  if (diagrams.length > 1) {
+    // No diagram can be shown larger than the page allows, so the band cannot start above the smallest of those limits.
+    const reach = Math.min(...diagrams.map((p) => Math.min(MAX_SCALE, Math.max(width - (p.pad ?? 0), 1) / p.natural)));
+    for (const lo of new Set([...BAND_LOS.filter((x) => x < reach), reach])) {
+      info = prepare(lo);
+      const r = solve();
+      if (r && (!best || r.cost < best.cost)) best = { ...r, maxScale: Math.min(MAX_SCALE, lo * BAND_RATIO) };
+    }
+    info = prepare(0);
+  }
+  best ??= solve();
+  return best ? { rows: best.rows, maxScale: best.maxScale ?? MAX_SCALE } : singleColumn(width, panels);
+}
+
+// DOM adapter for the sheet's justified ("photo wall") layout. Not a module: compose.js puts it after src/runtime/layout-plan.js
+// (which defines planLayout and the shared STEP, MAX_SCALE, MIN_SCALE) inside one function scope of the page script.
+//
+// It measures every panel at sampled widths, asks planLayout for rows and column widths, and applies them with flexbox.
+// The rendered HTML keeps the plain CSS grid: with JavaScript off, at the single-column breakpoint, or while printing, the grid is what
+// shows (the planned widths belong to the screen width, so print never gets a mix of the two); after printing the layout comes back.
+
+const grid = document.querySelector('.am-grid');
+const panels = grid ? [...grid.children].filter((el) => el.classList.contains('am-panel')) : [];
+
+if (panels.length > 1) {
+  const SINGLE_COLUMN = '(max-width: 760px)'; // the single-column breakpoint in src/themes/base.css
+  const TWO_COLUMNS = '(max-width: 1100px)'; // below this the CSS grid has two columns
+  const SAMPLE_STEP = 20; // width sampling step, px; the planner interpolates between samples
+  const TEXT_MIN = 260; // text keeps at least about 16 CJK characters per line
+  const TABLE_COL_MIN = 96; // per table column, px
+  const DIAGRAM_MIN = 160;
+  const RESIZE_DELAY = 150;
+  const OVERFLOWING = '.am-table-wrap, .am-diagram, .am-annot-scroll, pre';
+
+  const original = new Map([grid, ...panels, ...grid.querySelectorAll('.am-diagram > svg')].map((el) => [el, el.getAttribute('style')]));
+  const restoreStyle = (el) => (original.get(el) === null ? el.removeAttribute('style') : el.setAttribute('style', original.get(el)));
+
+  // Back to the plain grid markup and styles.
+  const restore = () => {
+    for (const box of grid.querySelectorAll(':scope > .am-col')) box.replaceWith(...box.children);
+    for (const el of original.keys()) restoreStyle(el);
+  };
+
+  // The author's width hint, rendered as data-span only when the author wrote one. The inline grid-column is the no-JavaScript fallback
+  // and may hold spans the server added, so it is never read here.
+  const spanHint = (el) => Number(el.dataset.span) || 1;
+  const diagramOnly = (el) => {
+    const body = el.querySelector(':scope > .am-panel-body');
+    return body && body.children.length === 1 ? body.querySelector(':scope > .am-diagram > svg') : null;
+  };
+  const naturalWidth = (svg) => Number(svg.getAttribute('width')) || 0;
+
+  // Height (and, for panels with tables or code, the narrowest width without sideways scrolling) at sampled widths.
+  // Only one panel is displayed while it is measured, so each width change lays out that panel alone.
+  function measure(width) {
+    grid.style.display = 'block';
+    for (const el of panels) {
+      el.style.display = 'none';
+      el.style.boxSizing = 'border-box';
+      for (const svg of el.querySelectorAll('.am-diagram > svg')) {
+        svg.style.width = '100%';
+        svg.style.maxWidth = `${naturalWidth(svg) * MAX_SCALE}px`;
+      }
+    }
+    const info = panels.map((el) => {
+      const svg = diagramOnly(el);
+      const svgs = [...el.querySelectorAll('.am-diagram > svg')];
+      const scrollers = el.querySelectorAll(OVERFLOWING);
+      const tableCols = Math.max(0, ...[...el.querySelectorAll('table tr:first-child')].map((tr) => tr.children.length));
+      el.style.display = '';
+      el.style.width = `${width}px`;
+      const pad = svg ? el.offsetWidth - svg.parentElement.clientWidth : 0;
+      const natural = svg ? naturalWidth(svg) : 0;
+      const shrunk = Math.max(0, ...svgs.map((s) => naturalWidth(s) * MIN_SCALE)) + (svg ? pad : 34);
+      const floor = svg ? Math.max(DIAGRAM_MIN, natural * MIN_SCALE + pad) : Math.max(TEXT_MIN, shrunk, tableCols * TABLE_COL_MIN + 34);
+      const from = Math.min(width, Math.floor(floor / STEP) * STEP);
+      const samples = [];
+      let fits = null;
+      for (let w = from; ; w += SAMPLE_STEP) {
+        w = Math.min(w, width);
+        el.style.width = `${w}px`;
+        if (fits === null && !svg && scrollers.length && ![...scrollers].some((s) => s.scrollWidth > s.clientWidth + 1)) fits = w;
+        samples.push({ w, h: el.offsetHeight });
+        if (w === width) break;
+      }
+      el.style.display = 'none';
+      return {
+        samples,
+        minWidth: svg ? floor : Math.max(floor, fits ?? (scrollers.length ? width : 0)),
+        maxWidth: svg ? natural * MAX_SCALE + pad : Infinity,
+        natural,
+        pad,
+        span: spanHint(el),
+      };
+    });
+    for (const el of panels) {
+      el.style.display = '';
+      el.style.width = '';
+    }
+    return info;
+  }
+
+  // Each column gets a fixed width. A row adds up to the full width, so flex-wrap breaks rows by itself.
+  // Stacked panels go into a column wrapper whose last panel absorbs the extra height.
+  function apply(plan, gap) {
+    grid.style.display = 'flex';
+    grid.style.flexWrap = 'wrap';
+    grid.style.alignItems = 'stretch';
+    grid.style.gap = `${gap}px`;
+    for (const el of panels) {
+      el.style.gridColumn = '';
+      el.style.gridRow = '';
+      el.style.flex = '0 0 auto';
+    }
+    for (const row of plan.rows) {
+      for (const col of row.columns) {
+        const width = `${col.width}px`;
+        if (col.panels.length === 1) {
+          panels[col.panels[0]].style.width = width;
+          continue;
+        }
+        const box = document.createElement('div');
+        box.className = 'am-col';
+        box.style.cssText = `width:${width};flex:0 0 auto;display:flex;flex-direction:column;gap:${gap}px`;
+        panels[col.panels[0]].before(box);
+        for (const k of col.panels) {
+          panels[k].style.width = '';
+          box.append(panels[k]);
+        }
+        panels[col.panels[col.panels.length - 1]].style.flex = '1 1 auto';
+      }
+    }
+  }
+
+  // Diagram-only panels show their diagram at most at the top of the page's scale band; a wider panel gains empty space instead.
+  function capDiagrams(maxScale) {
+    for (const el of panels) {
+      const svg = diagramOnly(el);
+      if (svg) svg.style.maxWidth = `${naturalWidth(svg) * maxScale}px`;
+    }
+  }
+
+  const containerWidth = () => Math.floor(grid.getBoundingClientRect().width);
+
+  function justify() {
+    if (printing || printQuery.matches) return;
+    try {
+      // A vertical scrollbar can appear or vanish once the rows change height; plan again if the width moved.
+      let planned = -1;
+      for (let pass = 0; pass < 3 && planned !== containerWidth(); pass++) {
+        restore();
+        if (matchMedia(SINGLE_COLUMN).matches) return;
+        planned = containerWidth();
+        const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+        const cols = Math.max(1, Number(getComputedStyle(grid).getPropertyValue('--cols')) || 3);
+        const plan = planLayout({ width: planned, gap, cols: matchMedia(TWO_COLUMNS).matches ? Math.min(cols, 2) : cols, panels: measure(planned) });
+        apply(plan, gap);
+        capDiagrams(plan.maxScale);
+      }
+      // The width never settled: columns planned for another width would overflow or leave gaps, so show the plain grid.
+      if (planned !== containerWidth()) restore();
+    } catch {
+      restore();
+    }
+  }
+
+  // Printing: back to the plain grid (spans and all), and the layout again afterwards. Browsers disagree on which of the
+  // `beforeprint` event and the print media query change fires first, or at all, so listen to both; both are idempotent.
+  // While `printing` is set (beforeprint to afterprint) justify() does nothing, so a late resize cannot bring flex widths into the print layout.
+  let printing = false;
+  const printQuery = matchMedia('print');
+  let timer = 0;
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(justify, RESIZE_DELAY);
+  };
+  const toPrint = () => {
+    clearTimeout(timer);
+    restore();
+  };
+  justify();
+  addEventListener('resize', later);
+  addEventListener('beforeprint', () => {
+    printing = true;
+    toPrint();
+  });
+  addEventListener('afterprint', () => {
+    printing = false;
+    later();
+  });
+  printQuery.addEventListener('change', (e) => (e.matches ? toPrint() : later()));
+  // Late changes to panel heights: web fonts arriving, and images inside the grid finishing their load (load does not bubble, so capture it).
+  document.fonts?.ready.then(later);
+  grid.addEventListener('load', later, true);
+  // Switching theme changes paddings and fonts, hence panel heights.
+  document.querySelector('[data-am="theme"]')?.addEventListener('click', later);
+}
+})();
+</script>
+</body>
+</html>
