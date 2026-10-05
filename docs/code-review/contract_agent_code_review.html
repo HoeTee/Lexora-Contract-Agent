@@ -130,7 +130,7 @@
     .callout.warn { border-left-color: #d47a00; background: var(--amber-soft); }
     .callout.danger { border-left-color: var(--red); background: var(--red-soft); }
     .callout.ok { border-left-color: var(--green); background: var(--green-soft); }
-    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .76rem; font-weight: 700; }
+    .tag { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .76rem; font-weight: 700; white-space: nowrap; }
     .tag.blocker { color: #fff; background: var(--red); }
     .tag.risk { color: #7b4100; background: #ffdca4; }
     .tag.review { color: #184c9a; background: #dce8ff; }
@@ -175,17 +175,69 @@
     .evidence-list li { margin-bottom: 8px; }
     .small { color: var(--muted); font-size: .85rem; }
 
+    .snapshot {
+      margin: 22px 0 28px;
+      padding: 22px;
+      border: 1px solid #c8d9e2;
+      border-radius: 14px;
+      background: linear-gradient(145deg, #f8fcfc, #eef6f7);
+    }
+    .snapshot-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+    .snapshot-head h3 { margin: 0; }
+    .mode-pill { padding: 6px 12px; border: 1px solid #8fc8c5; border-radius: 999px; color: #075f5a; background: #e4f5f3; font-size: .82rem; font-weight: 750; white-space: nowrap; }
+    .snapshot-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+    .snapshot-metric { padding: 14px; border: 1px solid #d8e3e7; border-radius: 10px; background: rgba(255,255,255,.9); }
+    .snapshot-metric strong { display: block; color: var(--navy); font-size: 1.45rem; line-height: 1.15; }
+    .snapshot-metric span { color: var(--muted); font-size: .78rem; }
+    .control-chain { display: grid; grid-template-columns: 1.05fr 36px 1fr 36px 1.65fr 36px 1.2fr; align-items: stretch; gap: 8px; margin-top: 16px; }
+    .chain-node { padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: #fff; }
+    .chain-node.api { background: #eaf1ff; border-color: #bdd0ec; }
+    .chain-node.queue { background: #fff4df; border-color: #ebcb8e; }
+    .chain-node.worker { background: #e7f7f7; border-color: #acd9d7; }
+    .chain-node.gate { background: #edf2f8; border-color: #c2d0df; }
+    .chain-node strong { display: block; margin-bottom: 7px; color: #153654; }
+    .chain-node small { display: block; color: var(--muted); line-height: 1.55; }
+    .chain-arrow { display: grid; place-items: center; color: #7790a7; font-size: 1.65rem; }
+    .gate-row { display: flex; justify-content: space-between; gap: 8px; margin-top: 7px; padding: 7px 9px; border-radius: 7px; background: #fff; font-size: .78rem; }
+    .gate-row b { color: var(--navy); }
+    .equation-strip { display: grid; grid-template-columns: 1fr auto 1fr auto 1.4fr; align-items: center; gap: 12px; margin-top: 14px; padding: 14px; border-radius: 10px; background: #fff; text-align: center; }
+    .equation-strip strong { display: block; color: var(--navy); font-size: 1.35rem; }
+    .equation-strip span { color: var(--muted); font-size: .78rem; }
+    .equation-strip .operator { color: #7890a3; font-size: 1.5rem; }
+    .equation-strip .result { padding: 9px; border-radius: 8px; background: var(--amber-soft); }
+    .insight-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+    .insight { padding: 12px 14px; border-radius: 9px; background: rgba(255,255,255,.75); color: #395267; font-size: .84rem; }
+    .insight strong { color: #0b6c67; }
+    .unit { display: inline-block; margin-top: 4px; padding: 2px 7px; border-radius: 999px; color: #34516b; background: #e8eef4; font-size: .72rem; font-weight: 700; }
+    .propagation { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
+    .propagation .step { position: relative; padding: 15px; border-top: 4px solid var(--blue); border-radius: 9px; background: #f5f8fc; }
+    .propagation .step.block { border-top-color: #d47a00; background: var(--amber-soft); }
+    .propagation .step.risk { border-top-color: var(--red); background: var(--red-soft); }
+    .propagation .step strong { display: block; margin-bottom: 5px; }
+    .propagation .step span { color: var(--muted); font-size: .82rem; }
+    .safety-rule { margin: 14px 0; padding: 16px 18px; border: 2px solid #cc574e; border-radius: 10px; background: #fff8f7; }
+    .safety-rule code { color: #8d2119; background: #ffe6e2; }
+    .lease-sequence { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; margin: 16px 0; }
+    .lease-sequence > div { min-height: 118px; padding: 14px; border-top: 5px solid var(--teal); background: #f0f8f8; }
+    .lease-sequence > div:nth-child(3), .lease-sequence > div:nth-child(4) { border-top-color: var(--red); background: var(--red-soft); }
+    .lease-sequence strong { display: block; margin-bottom: 6px; }
+    .lease-sequence span { color: var(--muted); font-size: .82rem; }
+
     @media (max-width: 980px) {
       .shell { display: block; }
       .sidebar { position: relative; width: 100%; height: auto; }
       .sidebar nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .grid.two, .grid.three, .calc-grid, .outputs { grid-template-columns: 1fr 1fr; }
+      .grid.two, .grid.three, .calc-grid, .outputs, .snapshot-metrics, .insight-list, .propagation { grid-template-columns: 1fr 1fr; }
+      .control-chain { grid-template-columns: 1fr; }
+      .chain-arrow { transform: rotate(90deg); }
     }
     @media (max-width: 640px) {
       .content { width: min(100% - 22px, 1180px); }
       .hero { padding: 44px 18px; }
       .section { padding: 21px 16px; }
-      .grid.two, .grid.three, .calc-grid, .outputs, .sidebar nav { grid-template-columns: 1fr; }
+      .grid.two, .grid.three, .calc-grid, .outputs, .sidebar nav, .snapshot-metrics, .insight-list, .propagation, .lease-sequence { grid-template-columns: 1fr; }
+      .snapshot-head { align-items: flex-start; flex-direction: column; }
+      .equation-strip { grid-template-columns: 1fr; }
     }
     @media print {
       body { background: #fff; }
@@ -260,6 +312,8 @@
                 <tr><td>F-05</td><td>Agent 与 DocxIndex 使用不同模型调用超时</td><td><span class="tag review">需确认</span></td><td>Agent 为 30s；DocxIndex LLM/Embedding 默认 120s；两者不是同一配置源。</td></tr>
                 <tr><td>F-06</td><td>等待模型槽会占用 Celery worker</td><td><span class="tag risk">容量风险</span></td><td>3 个 worker 都等待 Redis 槽时，新合同无法开始，最长可等待 600s。</td></tr>
                 <tr><td>F-07</td><td>队列状态语义存在实现与严格定义差异</td><td><span class="tag review">需决策</span></td><td>API 投递 Celery 成功后立即写 <code>queued</code>，不是 worker 发现执行槽已满后才写。</td></tr>
+                <tr><td>F-08</td><td>租约必须覆盖同一 key 下最长的单次 HTTP attempt</td><td><span class="tag blocker">安全不变量</span></td><td>若请求可运行 1000s 而 lease 仍为 600s，600s 后旧请求仍可能在途但已不再占用 Redis 计数。</td></tr>
+                <tr><td>F-09</td><td>Celery 运行任务时限依赖未显式声明的有效配置</td><td><span class="tag review">需补齐</span></td><td>当前未配置 task hard/soft time limit 和 broker visibility timeout，不能用 queued timeout 代替。</td></tr>
               </tbody>
             </table>
           </div>
@@ -297,6 +351,44 @@
         <section class="section" id="concurrency">
           <div class="section-number">03 / CONCURRENCY ARCHITECTURE</div>
           <h2>并发控制架构</h2>
+          <p>先按当前部署回答“任务在哪里排队、谁在执行、真正的外部请求上限是多少”，再展开各层实现。下列数字均标注数量单位，不能跨单位直接比较。</p>
+
+          <div class="snapshot" aria-label="当前并发部署快照">
+            <div class="snapshot-head">
+              <div><div class="section-number">CURRENT DEPLOYMENT SNAPSHOT</div><h3>当前并发控制链路与配置</h3></div>
+              <span class="mode-pill">队列模式：已启用</span>
+            </div>
+            <div class="snapshot-metrics">
+              <div class="snapshot-metric"><span>API 服务进程</span><strong>1</strong><span class="unit">process</span></div>
+              <div class="snapshot-metric"><span>审核 Worker</span><strong>3</strong><span class="unit">containers</span></div>
+              <div class="snapshot-metric"><span>单 Worker 执行槽</span><strong>1</strong><span class="unit">job / worker</span></div>
+              <div class="snapshot-metric"><span>合同有效并发</span><strong>3</strong><span class="unit">contract jobs</span></div>
+              <div class="snapshot-metric"><span>单合同 criterion 上限</span><strong>5</strong><span class="unit">coroutines / contract</span></div>
+            </div>
+
+            <div class="control-chain">
+              <div class="chain-node api"><strong>API 接入</strong><small>校验并持久化任务<br>投递 Celery 后快速返回<br><code>max_api=100</code> 在队列模式下不主导容量</small></div>
+              <div class="chain-arrow" aria-hidden="true">→</div>
+              <div class="chain-node queue"><strong>Redis 任务队列</strong><small>保存尚未被领取的合同任务<br>prefetch 已关闭且 multiplier=1<br>削平提交峰值</small></div>
+              <div class="chain-arrow" aria-hidden="true">→</div>
+              <div class="chain-node worker"><strong>Celery Worker 池</strong><small>3 个独立容器，每个 <code>concurrency=1</code><br>每份合同内部最多并发 5 条 criterion<br>等待模型槽时仍占用当前 Worker</small></div>
+              <div class="chain-arrow" aria-hidden="true">→</div>
+              <div class="chain-node gate"><strong>跨进程资源闸门</strong><div class="gate-row"><span>LLM 在途请求</span><b>5 leases</b></div><div class="gate-row"><span>Embedding 在途请求</span><b>3 leases</b></div><div class="gate-row"><span>Reranker key</span><b>10 leases*</b></div><small>* 当前 DocxIndex rerank 实际复用 LLM key，因此有效值不是 10。</small></div>
+            </div>
+
+            <div class="equation-strip" aria-label="当前并发数量关系">
+              <div><span>合同任务并发</span><strong>3</strong></div><div class="operator">×</div>
+              <div><span>criterion 调度上限</span><strong>5</strong></div><div class="operator">=</div>
+              <div class="result"><span>理论 criterion 调用者</span><strong>15</strong><span>继续被 LLM 5 / Embedding 3 等资源闸门收敛</span></div>
+            </div>
+            <div class="insight-list">
+              <div class="insight"><strong>真正的合同并发是 3。</strong>由 Worker 总执行槽决定，不是配置中的本地合同上限 100。</div>
+              <div class="insight"><strong>15 是调用者槽位。</strong>它不表示可以同时向同一种模型服务发出 15 个请求。</div>
+              <div class="insight"><strong>扩 Worker 必须联动复算。</strong>否则新增容量主要转化为 Redis 槽等待和 Worker 占用。</div>
+            </div>
+          </div>
+
+          <h3>从调度到资源的五层控制</h3>
           <div class="figure">
             <svg viewBox="0 0 1120 520" role="img" aria-labelledby="concurrency-title concurrency-desc">
               <title id="concurrency-title">五层并发阀门</title>
@@ -372,6 +464,30 @@
             <div class="card"><h4>局部限制</h4><p>进程内 <code>asyncio.Semaphore</code> 或 <code>BoundedSemaphore</code> 只约束同一对象或同一进程内的调用。</p></div>
             <div class="card"><h4>全局限制</h4><p>Redis sorted-set 租约跨进程共享，才是多个 worker/container 之间的模型在途请求上限。</p></div>
           </div>
+
+          <h3>数量单位与控制所有者</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>对象</th><th>数量单位</th><th>当前上限</th><th>控制者</th><th>等待发生在哪里</th><th>释放时机</th></tr></thead>
+              <tbody>
+                <tr><td>待执行合同</td><td><span class="unit">queue messages</span></td><td>队列容量未在项目中声明</td><td>Redis/Celery broker</td><td>Redis 队列</td><td>Worker 领取消息</td></tr>
+                <tr><td>运行中合同</td><td><span class="unit">contract jobs</span></td><td class="number">3</td><td>3 个 Worker × concurrency 1</td><td>无 Worker 时留在队列</td><td>合同任务返回或 Worker 中断</td></tr>
+                <tr><td>运行中 criterion</td><td><span class="unit">coroutines</span></td><td class="number">5 / 合同，15 / 部署</td><td>每个 Orchestrator 的 asyncio semaphore</td><td>同一 Worker 的事件循环</td><td>单条 criterion 完成</td></tr>
+                <tr><td>scan 调用者</td><td><span class="unit">thread jobs</span></td><td class="number">10 / 合同，理论 30</td><td>每个检索器线程池</td><td>Worker 内线程池队列</td><td>分片 scan 完成</td></tr>
+                <tr><td>LLM 在途请求</td><td><span class="unit">Redis leases / HTTP attempts</span></td><td class="number">5 / 部署</td><td>Redis sorted-set semaphore</td><td>已运行合同内部；Worker 仍被占用</td><td>主动 release 或 lease 过期</td></tr>
+                <tr><td>Embedding 在途请求</td><td><span class="unit">Redis leases / HTTP attempts</span></td><td class="number">3 / 部署</td><td>Redis sorted-set semaphore</td><td>已运行合同内部</td><td>主动 release 或 lease 过期</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>模型槽等待如何向合同队列传播</h3>
+          <div class="propagation" aria-label="模型槽等待造成的阻塞传播">
+            <div class="step"><strong>1. 合同被领取</strong><span>Celery 执行槽从空闲变为占用，任务进入 workflow。</span></div>
+            <div class="step block"><strong>2. criterion 等待资源</strong><span>调用者最多等待 Redis 模型槽 600s；这不是回到 Celery 队列等待。</span></div>
+            <div class="step block"><strong>3. Worker 仍为 busy</strong><span>即使没有发出 HTTP 请求，该合同仍占用一个 Worker 执行槽。</span></div>
+            <div class="step risk"><strong>4. 新合同无法开始</strong><span>若 3 个 Worker 都停在资源等待，后续合同只能继续滞留 broker。</span></div>
+          </div>
+          <div class="callout warn"><strong>容量含义：</strong>全局 LLM 上限保护了外部模型服务，但不会自动释放 Celery 合同执行槽。它把过载从“模型在途请求”转化成“运行中合同内的槽等待”。</div>
         </section>
 
         <section class="section" id="relations">
@@ -393,12 +509,16 @@
               <div class="field"><label for="globalLlm">全局 LLM semaphore</label><input id="globalLlm" type="number" min="1" value="5"></div>
               <div class="field"><label for="localEmbedding">embedding 并发 / 合同</label><input id="localEmbedding" type="number" min="1" value="1"></div>
               <div class="field"><label for="globalEmbedding">全局 embedding semaphore</label><input id="globalEmbedding" type="number" min="1" value="3"></div>
+              <div class="field"><label for="maxHttpAttempt">同一 LLM key 最长 HTTP attempt（秒）</label><input id="maxHttpAttempt" type="number" min="1" value="120"></div>
+              <div class="field"><label for="leaseSeconds">Redis LLM lease（秒）</label><input id="leaseSeconds" type="number" min="1" value="600"></div>
+              <div class="field"><label for="waitSeconds">Redis 槽等待上限（秒）</label><input id="waitSeconds" type="number" min="1" value="600"></div>
             </div>
             <div class="outputs" aria-live="polite">
               <div class="output"><strong id="outContracts">3</strong><span>有效合同并发</span></div>
               <div class="output"><strong id="outCriteria">15</strong><span>criterion 潜在并发</span></div>
               <div class="output warn"><strong id="outScan">30 → 5</strong><span>scan 生产者 → LLM 在途</span></div>
               <div class="output accent"><strong id="outEmbedding">3</strong><span>embedding 有效并发</span></div>
+              <div class="output accent" id="leaseOutput"><strong id="outLease">+480s</strong><span>lease 相对最长 attempt 余量</span></div>
             </div>
             <p id="calcNote" class="small"></p>
           </div>
@@ -432,11 +552,45 @@
               </tbody>
             </table>
           </div>
+
+          <h3>配置变更联动矩阵</h3>
+          <p>评审配置时不能只问“这个值能不能调大”，还要检查它改变的是生产端、等待区还是外部在途请求。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>修改项</th><th>直接变化</th><th>不会自动变化</th><th>必须联动检查</th><th>典型错误判断</th></tr></thead>
+              <tbody>
+                <tr><td>增加 Worker 容器</td><td>合同执行槽、criterion/scan 生产端近似线性增加</td><td>LLM 5、Embedding 3 等全局槽</td><td>模型配额、Redis 等待、CPU/内存、共享目录</td><td>“合同吞吐会按 Worker 数线性增长”</td></tr>
+                <tr><td>提高 Celery concurrency</td><td>单容器同时运行更多合同</td><td>容器 CPU/内存和外部服务容量</td><td>事件循环/进程模型、DOCX 解析资源、日志写入竞争</td><td>“只改一个启动参数即可安全扩容”</td></tr>
+                <tr><td>提高 criterion concurrency</td><td>单合同生成更多并发调用者</td><td>合同数和全局模型在途上限</td><td>内存、槽等待、公平性、单合同对其他合同的挤占</td><td>“5 改成 10 就会让合同快一倍”</td></tr>
+                <tr><td>提高本地 scan/LLM concurrency</td><td>线程或本地调用者增多</td><td>Redis LLM 在途上限 5</td><td>排队者数量、线程开销、wait timeout</td><td>“本地 10 就等于模型并发 10”</td></tr>
+                <tr><td>提高 Redis LLM max</td><td>允许更多有效租约和 HTTP attempt</td><td>Worker 数、上游模型额度、QPS</td><td>服务端限额、429、显存、连接池、成本</td><td>“全局槽提高一定提升合同吞吐”</td></tr>
+                <tr><td>提高 HTTP timeout</td><td>单次请求可占用连接更久</td><td>lease、任务 deadline、Celery broker 默认值</td><td><code>lease ≥ attempt + margin</code>、重试包络、取消后服务端残留</td><td>“timeout 改大只影响用户等待时间”</td></tr>
+                <tr><td>提高 lease</td><td>Redis 槽更久不被回收</td><td>客户端 HTTP timeout</td><td>崩溃后的脏租约占用、恢复速度、容量告警</td><td>“lease 越长越安全，没有代价”</td></tr>
+                <tr><td>提高 wait timeout</td><td>调用者更久等待槽位</td><td>外部模型实际并发</td><td>Worker 占用、合同总耗时、队列积压</td><td>“等待更久能够提高系统吞吐”</td></tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section class="section" id="timing">
           <div class="section-number">05 / TIME & RETRIES</div>
           <h2>时间、租约、等待与重试关系</h2>
+          <p>时间配置必须先按作用对象分类。“等待 600s”“租约 600s”和“请求运行 120s”虽然单位相同，但控制的是不同生命周期。</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>时间层</th><th>当前值</th><th>开始计时</th><th>到期效果</th><th>不代表什么</th></tr></thead>
+              <tbody>
+                <tr><td>pending 状态检查</td><td class="number">60s</td><td>任务记录建立后</td><td>watchdog 可把长期未投递/未领取任务标为失败</td><td>不是 Celery broker 消息 TTL</td></tr>
+                <tr><td>queued 状态检查</td><td class="number">7200s</td><td>API 标记 queued 后</td><td>仅对尚未被 Worker claim 的任务进行超时收敛</td><td>不是 running 合同的总 deadline</td></tr>
+                <tr><td>模型槽等待</td><td class="number">600s</td><td>调用 Redis acquire 后</td><td>拿不到槽则抛出 semaphore timeout</td><td>不是 HTTP 请求最长运行时间</td></tr>
+                <tr><td>模型槽租约</td><td class="number">600s</td><td>取得 Redis 槽后</td><td>到期记录可被清理，其他调用者可取得槽</td><td>不会自动终止仍在运行的 HTTP 请求</td></tr>
+                <tr><td>Agent HTTP attempt</td><td class="number">30s</td><td>SDK 发起一次模型调用后</td><td>客户端 attempt 超时，随后可能进入 SDK/外层重试</td><td>不是 criterion 或合同总耗时</td></tr>
+                <tr><td>DocxIndex HTTP attempt</td><td class="number">120s</td><td>同步客户端发起一次 LLM/embedding 请求后</td><td>本次 attempt 超时；下一次重试会重新等槽</td><td>不是整个 complete()/检索调用耗时</td></tr>
+                <tr><td>Celery task hard/soft limit</td><td><span class="tag review">未显式配置</span></td><td>—</td><td>项目代码没有声明统一的 running task 强制终止时间</td><td>不能用 queued_timeout 代替</td></tr>
+                <tr><td>Broker visibility timeout</td><td><span class="tag review">未显式配置</span></td><td>Worker 领取消息后</td><td>实际行为依赖当前 Celery/Redis transport 的有效默认值</td><td>静态材料不能假定它必然覆盖最长合同任务</td></tr>
+              </tbody>
+            </table>
+          </div>
           <div class="figure">
             <svg viewBox="0 0 1120 420" role="img" aria-labelledby="timeline-title timeline-desc">
               <title id="timeline-title">一次模型调用的时间分层</title>
@@ -475,6 +629,26 @@
             </svg>
             <div class="caption">图 2：时间参数必须按作用对象区分；队列超时、槽位等待、租约和 HTTP timeout 不能互相替代。</div>
           </div>
+
+          <h3>租约必须覆盖单次请求，而不是反过来截断请求</h3>
+          <div class="safety-rule">
+            <strong>并发安全不变量：</strong>
+            <code>T_lease ≥ T_http_attempt_max + T_cancel_cleanup + safety_margin</code>
+            <p class="small">当前项目可静态确认 <code>600s &gt; 120s</code>。取消后上游服务端实际还会运行多久，不确定；项目代码无法证明服务端已经停止，因此需要保留清理余量并通过服务端指标验证。</p>
+          </div>
+          <div class="lease-sequence" aria-label="请求运行时间大于租约时的并发失效过程">
+            <div><strong>t = 0s</strong><span>调用者取得一个 Redis 槽，开始单次 HTTP 请求。假设请求上限被改为 1000s。</span></div>
+            <div><strong>t = 0～600s</strong><span>请求仍在运行，Redis 租约有效；该请求正确计入全局并发上限。</span></div>
+            <div><strong>t = 600s</strong><span>租约过期，但 HTTP 请求不会因此被自动取消；Redis 认为这个槽已经可回收。</span></div>
+            <div><strong>t &gt; 600s</strong><span>新调用者可取得同一容量名额，旧请求仍在途，真实并发可能突破配置上限。</span></div>
+          </div>
+          <div class="callout danger"><strong>冲突结论：</strong>如果将单次模型请求上限设置为 1000s，而租约仍为 600s，问题不是“请求最多只能运行 600s”，而是“600s 后请求可能继续运行但不再被全局计数”。这会破坏并发上限的真实性。</div>
+
+          <h3>时间配置联动检查</h3>
+          <div class="formula">单次请求安全：lease ≥ max(Agent attempt, DocxIndex attempt, 其他复用同一 key 的 attempt) + 清理余量</div>
+          <div class="formula">逻辑调用包络：Σ(每次槽等待 + 每次 HTTP attempt + retry backoff)</div>
+          <div class="formula">合同任务包络：索引构建 + Planner + 并发 criterion 墙钟时间 + 汇总/报告；不能把并发 criterion 耗时直接相加</div>
+          <div class="callout warn"><strong>仍需补齐的部署声明：</strong><code>task_queue/celery_app.py</code> 当前只显式配置序列化、时区、started 状态和 prefetch；没有显式声明 task hard/soft time limit 或 Redis broker visibility timeout。若合同允许运行数小时，应把这些有效值纳入部署配置和启动日志，而不能依赖未记录的依赖默认值。</div>
 
           <h3>重试放大</h3>
           <p>DocxIndex LLM 的同步客户端对 429 最多执行 5 次尝试，并使用 1、2、4、8 秒退避；每次尝试都会重新等待全局模型槽。结构化输出校验默认还允许 3 轮完整调用。</p>
@@ -726,6 +900,21 @@
             <li>取消在 pending/queued 阶段可靠；running 任务没有贯穿 workflow 的协作式取消检查点。</li>
             <li>worker heartbeat 写入 task 状态，watchdog 处理长期未领取的等待任务。</li>
           </ul>
+
+          <h3>并发故障与恢复边界</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>故障</th><th>对执行槽的影响</th><th>对 Redis 模型槽的影响</th><th>当前恢复证据</th><th>评审结论</th></tr></thead>
+              <tbody>
+                <tr><td>模型调用超时</td><td>异常向上返回后合同可继续重试或失败</td><td>上下文退出时主动 release；服务端是否立即停止不确定</td><td>调用日志、异常类型、重试记录</td><td>需要同时观察客户端与服务端在途数</td></tr>
+                <tr><td>Worker 进程崩溃</td><td>当前合同执行槽消失</td><td>无法主动 release 的租约最多残留到 lease 到期</td><td>heartbeat 停止、任务状态、Celery 事件</td><td>租约避免永久泄漏，但恢复期间容量会暂时减少</td></tr>
+                <tr><td>Redis semaphore 不可用</td><td>合同可能在资源获取阶段失败</td><td>无法获得统一计数</td><td>semaphore acquire 错误日志</td><td>不应静默降级成无限制调用</td></tr>
+                <tr><td>租约先于请求过期</td><td>Worker 继续等待旧请求</td><td>旧请求不再计数，新请求可复用容量</td><td>租约年龄、HTTP request timing、服务端并发</td><td><span class="tag blocker">并发上限失真</span></td></tr>
+                <tr><td>同一任务被重复领取</td><td>可能同时占用多个合同执行槽</td><td>模型请求分别正常计数，但业务工作重复</td><td>task_id、claim/worker 标识、幂等日志</td><td>文件状态检查不是可靠分布式执行锁</td></tr>
+                <tr><td>多个执行单元写同一状态</td><td>不直接改变槽位</td><td>不直接改变模型计数</td><td>文件锁、原子替换和 criterion 独立文件</td><td>只能保护写入一致性，不能证明任务只执行一次</td></tr>
+              </tbody>
+            </table>
+          </div>
         </section>
 
         <section class="section" id="observability">
@@ -744,6 +933,20 @@
             <li>查看 route event，确认是否因 scan 批次、结构分片或 fallback 放大调用数。</li>
             <li>把有效配置摘要与日志关联；不能只记录 <code>config.yaml</code> 路径。</li>
           </ol>
+          <h3>最低可观测指标</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>层级</th><th>指标</th><th>主要回答的问题</th><th>推荐维度</th></tr></thead>
+              <tbody>
+                <tr><td>队列</td><td>待领取消息数、最老消息年龄</td><td>提交压力是否已经超过合同处理能力</td><td>queue、任务类型</td></tr>
+                <tr><td>Worker</td><td>busy/idle 数、合同运行时长、heartbeat age</td><td>Worker 是在工作、等待还是已经失联</td><td>worker_id、task_id、phase</td></tr>
+                <tr><td>criterion</td><td>active/waiting 数、单条墙钟耗时</td><td>单合同内部是否产生过多调用者</td><td>task_id、criterion_id、route</td></tr>
+                <tr><td>Redis 资源槽</td><td>active lease、等待者、等待分位数、最大租约年龄</td><td>外部资源闸门是否成为瓶颈或存在脏租约</td><td>semaphore key、worker_id</td></tr>
+                <tr><td>HTTP 模型调用</td><td>真实在途数、request latency、timeout/429</td><td>Redis 计数是否与服务端实际压力一致</td><td>provider、model、operation</td></tr>
+                <tr><td>配置</td><td>启动时有效配置摘要</td><td>运行中的容器究竟使用了哪组上限和 timeout</td><td>release、container、config hash</td></tr>
+              </tbody>
+            </table>
+          </div>
           <div class="callout warn">当前 DocxIndex 调用已经记录 queue/request timing，但不同 Agent/工具的字段完整度仍需统一核查。评审时应要求每次模型调用都能回答：等待了多久、请求用了多久、占用哪个全局 key、是否重试。</div>
         </section>
 
@@ -818,12 +1021,14 @@
           <ul class="evidence-list">
             <li><span class="path">config.yaml:35-77, 79-158</span>：workflow、queue、模型 semaphore 与 DocxIndex 并发配置。</li>
             <li><span class="path">docker-compose.yaml:9-99</span>：API worker、3 个 Celery 容器、每容器 concurrency 1、共享挂载。</li>
+            <li><span class="path">task_queue/celery_app.py:8-23</span>：Celery broker、started 状态与 prefetch 配置；未声明 task hard/soft limit 和 broker visibility timeout。</li>
             <li><span class="path">endpoints/api/review_jobs.py:645-716</span>：任务创建、非队列 create_task、Celery 投递与 queued 写入。</li>
             <li><span class="path">endpoints/review/job_worker.py:73-194</span>：worker claim、heartbeat、进程内 review semaphore、running/succeeded。</li>
             <li><span class="path">endpoints/review/task_store.py:83-117, 384-478, 576-717, 732-780</span>：文件锁、原子写、状态迁移与等待超时。</li>
             <li><span class="path">endpoints/runtime/llm_semaphore.py:45-214</span>：Redis 租约的 acquire、wait、lease、release。</li>
             <li><span class="path">agents/orchestrator.py:975-1235, 1260-1390</span>：单 criterion 审查、反思、恢复、gather 与 semaphore。</li>
             <li><span class="path">agents/base_agent.py:100-106, 258-380</span>：异步模型客户端、全局 LLM 槽和工具循环。</li>
+            <li><span class="path">tools/docxindex/llm/client.py:53-98; tools/docxindex/vector/client.py:20-66</span>：DocxIndex 120s HTTP timeout 与同步客户端。</li>
             <li><span class="path">agents/json_utils.py:62-97</span>：JSON 提取、Pydantic 校验和定向修复重试。</li>
             <li><span class="path">workflow/workflow.py:196-629</span>：六阶段工作流、Planner 分流和 Orchestrator 执行。</li>
             <li><span class="path">routing/schemas.py:8-62</span>：RouteStep / RoutePlan 方法和跨字段约束。</li>
@@ -847,7 +1052,8 @@
     (function () {
       const ids = [
         'workers', 'celeryConcurrency', 'apiConcurrency', 'criteriaConcurrency',
-        'scanConcurrency', 'globalLlm', 'localEmbedding', 'globalEmbedding'
+        'scanConcurrency', 'globalLlm', 'localEmbedding', 'globalEmbedding',
+        'maxHttpAttempt', 'leaseSeconds', 'waitSeconds'
       ];
       const read = (id) => Math.max(1, Number(document.getElementById(id).value) || 1);
       function calculate() {
@@ -858,14 +1064,20 @@
         const llmEffective = Math.min(scanProducers, read('globalLlm'));
         const embeddingProducers = contracts * read('localEmbedding');
         const embeddingEffective = Math.min(embeddingProducers, read('globalEmbedding'));
+        const leaseMargin = read('leaseSeconds') - read('maxHttpAttempt');
         document.getElementById('outContracts').textContent = String(contracts);
         document.getElementById('outCriteria').textContent = String(criteria);
         document.getElementById('outScan').textContent = scanProducers + ' → ' + llmEffective;
         document.getElementById('outEmbedding').textContent = String(embeddingEffective);
+        document.getElementById('outLease').textContent = (leaseMargin >= 0 ? '+' : '') + leaseMargin + 's';
+        document.getElementById('leaseOutput').className = 'output ' + (leaseMargin > 0 ? 'accent' : 'warn');
         const notes = [];
         if (read('apiConcurrency') > workerSlots) notes.push('API 合同 semaphore 被 Celery 总槽位覆盖');
         if (scanProducers > read('globalLlm')) notes.push('scan 生产并发高于全局 LLM 槽，多余调用者会等待');
         if (embeddingProducers > read('globalEmbedding')) notes.push('embedding 生产并发高于全局槽');
+        if (leaseMargin <= 0) notes.push('lease 未覆盖最长 HTTP attempt，全局在途计数可能提前失真');
+        else notes.push('lease 名义上比最长 HTTP attempt 多 ' + leaseMargin + ' 秒，仍需预留取消和清理余量');
+        if (read('waitSeconds') > 0 && contracts >= workerSlots) notes.push('模型槽等待会占用全部可用合同执行槽');
         if (!notes.length) notes.push('当前输入下未出现上游并发高于下游阀门的情况');
         document.getElementById('calcNote').textContent = '判断：' + notes.join('；') + '。';
       }
