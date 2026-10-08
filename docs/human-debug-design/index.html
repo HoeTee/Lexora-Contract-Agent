@@ -1,0 +1,2067 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="shadcn" data-mode="light" data-style="off">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="Answer me with HTML 0.4.9">
+<title>人体 Debug 互动系统设计文档</title>
+<style>
+html[data-theme="blueprint"], html[data-theme="blueprint"][data-mode="light"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 0px;
+  --shadow: none;
+  --bw: 1.5px;
+  --head-font: var(--font-sans);
+  --bg: #f6f6f3;
+  --paper: #ffffff;
+  --ink: #16181d;
+  --ink-2: #4b5260;
+  --ink-3: #8b929e;
+  --line: #1d2026;
+  --line-2: #d6dae1;
+  --fill: #f3f5f8;
+  --accent: #1d5fbf;
+  --accent-bg: #e4ecf8;
+  --ok: #1d5fbf;
+  --ok-bg: #e4ecf8;
+  --err: #c62828;
+  --err-bg: #fbeaea;
+  --warn: #a8620a;
+  --warn-bg: #fdf3e2;
+  --head-bg: #16181d;
+  --head-fg: #ffffff;
+}
+html[data-theme="blueprint"][data-mode="dark"] {
+  --bg: #081322;
+  --paper: #0d1c31;
+  --ink: #e6edf7;
+  --ink-2: #a9b8cc;
+  --ink-3: #6b7f99;
+  --line: #c9d6e8;
+  --line-2: #23385a;
+  --fill: #12253f;
+  --accent: #6ea8ff;
+  --accent-bg: #16305a;
+  --ok: #6ea8ff;
+  --ok-bg: #16305a;
+  --err: #ff7070;
+  --err-bg: #3b1620;
+  --warn: #f0b14a;
+  --warn-bg: #3a2a10;
+  --head-bg: #e6edf7;
+  --head-fg: #081322;
+}
+@media (prefers-color-scheme: dark) {
+html[data-theme="blueprint"][data-mode="auto"] {
+  --bg: #081322;
+  --paper: #0d1c31;
+  --ink: #e6edf7;
+  --ink-2: #a9b8cc;
+  --ink-3: #6b7f99;
+  --line: #c9d6e8;
+  --line-2: #23385a;
+  --fill: #12253f;
+  --accent: #6ea8ff;
+  --accent-bg: #16305a;
+  --ok: #6ea8ff;
+  --ok-bg: #16305a;
+  --err: #ff7070;
+  --err-bg: #3b1620;
+  --warn: #f0b14a;
+  --warn-bg: #3a2a10;
+  --head-bg: #e6edf7;
+  --head-fg: #081322;
+}
+}
+
+html[data-theme="shadcn"], html[data-theme="shadcn"][data-mode="light"] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --radius: 8px;
+  --shadow: 0 1px 2px 0 rgba(0,0,0,0.05);
+  --bw: 1px;
+  --head-font: var(--font-sans);
+  --bg: #fafafa;
+  --paper: #ffffff;
+  --ink: #09090b;
+  --ink-2: #71717a;
+  --ink-3: #a1a1aa;
+  --line: #e4e4e7;
+  --line-2: #f0f0f2;
+  --fill: #f4f4f5;
+  --accent: #2563eb;
+  --accent-bg: #eff6ff;
+  --ok: #16a34a;
+  --ok-bg: #f0fdf4;
+  --err: #dc2626;
+  --err-bg: #fef2f2;
+  --warn: #d97706;
+  --warn-bg: #fffbeb;
+  --head-bg: #18181b;
+  --head-fg: #fafafa;
+}
+html[data-theme="shadcn"][data-mode="dark"] {
+  --bg: #09090b;
+  --paper: #121215;
+  --ink: #fafafa;
+  --ink-2: #a1a1aa;
+  --ink-3: #71717a;
+  --line: #27272a;
+  --line-2: #1c1c1f;
+  --fill: #18181b;
+  --accent: #60a5fa;
+  --accent-bg: #172554;
+  --ok: #4ade80;
+  --ok-bg: #052e16;
+  --err: #f87171;
+  --err-bg: #450a0a;
+  --warn: #fbbf24;
+  --warn-bg: #451a03;
+  --head-bg: #fafafa;
+  --head-fg: #18181b;
+}
+@media (prefers-color-scheme: dark) {
+html[data-theme="shadcn"][data-mode="auto"] {
+  --bg: #09090b;
+  --paper: #121215;
+  --ink: #fafafa;
+  --ink-2: #a1a1aa;
+  --ink-3: #71717a;
+  --line: #27272a;
+  --line-2: #1c1c1f;
+  --fill: #18181b;
+  --accent: #60a5fa;
+  --accent-bg: #172554;
+  --ok: #4ade80;
+  --ok-bg: #052e16;
+  --err: #f87171;
+  --err-bg: #450a0a;
+  --warn: #fbbf24;
+  --warn-bg: #451a03;
+  --head-bg: #fafafa;
+  --head-fg: #18181b;
+}
+}
+
+html[lang="ja"][data-theme][data-mode] {
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans CJK JP", "Noto Sans JP", "PingFang SC", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+html[lang="ja"][data-theme="3b1b"][data-mode] {
+  --v-title-font: "CMU Serif", "Latin Modern Roman", "Iowan Old Style", "Palatino", "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif CJK JP", "Noto Serif JP", "Songti SC", serif;
+}
+
+/* Answer me with HTML base — uses theme variables only, never hard-coded colors (theme tokens: themes/index.js). Exception: the var() fallbacks of diagrams (flow / sequence) equal the blueprint light tokens, guarded by a test. */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--font-sans); font-size: 14px; line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+code, pre, kbd { font-family: var(--font-mono); }
+
+/* ── Toolbar ─────────────────────────────── */
+.am-toolbar {
+  position: fixed; top: 12px; right: 12px; z-index: 10; display: flex; gap: 6px;
+}
+.am-btn {
+  font: 12px/1 var(--font-sans); color: var(--ink); background: var(--paper);
+  border: 1px solid var(--line-2); border-radius: var(--radius); padding: 7px 10px; cursor: pointer;
+}
+.am-btn:hover { border-color: var(--ink-3); }
+.am-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Header ───────────────────────────────── */
+.am-head { margin: 0 0 20px; padding-right: 260px; }
+.am-head h1 { margin: 0; font-size: 24px; line-height: 1.25; letter-spacing: -0.01em; }
+.am-sub { margin: 4px 0 0; color: var(--ink-2); }
+.am-head-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px; font-size: 12px; color: var(--ink-2); }
+.am-head-meta b { font-family: var(--font-mono); font-weight: 400; color: var(--ink-3); margin-right: 6px; }
+.am-intro { margin-top: 12px; max-width: 80ch; }
+
+/* ── sheet template ────────────────────────── */
+.am-sheet { max-width: 1680px; margin: 0 auto; padding: 32px 28px 40px; }
+.am-frame { position: relative; }
+.am-grid {
+  display: grid; grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  gap: 20px; align-items: start;
+}
+.am-ruler { display: none; }
+html[data-theme="blueprint"] .am-frame { border: 1px solid var(--line); padding: 30px; }
+html[data-theme="blueprint"] .am-frame::before {
+  content: ""; position: absolute; inset: 18px; border: 1px solid var(--line); pointer-events: none;
+}
+html[data-theme="blueprint"] .am-ruler {
+  display: flex; position: absolute; font: 10px/1 var(--font-mono); color: var(--ink-3);
+}
+.am-ruler span { flex: 1; display: flex; align-items: center; justify-content: center; }
+.am-ruler--top, .am-ruler--bottom { left: 18px; right: 18px; height: 18px; }
+.am-ruler--top { top: 0; }
+.am-ruler--bottom { bottom: 0; }
+.am-ruler--left, .am-ruler--right { top: 18px; bottom: 18px; width: 18px; flex-direction: column; }
+.am-ruler--left { left: 0; }
+.am-ruler--right { right: 0; }
+.am-ruler--top span + span, .am-ruler--bottom span + span { border-left: 1px solid var(--line); }
+.am-ruler--left span + span, .am-ruler--right span + span { border-top: 1px solid var(--line); }
+
+/* ── Panels ───────────────────────────────── */
+.am-panel {
+  background: var(--paper); border: var(--bw) solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow); min-width: 0; overflow: hidden;
+}
+.am-panel-head {
+  display: flex; align-items: stretch; gap: 0; border-bottom: var(--bw) solid var(--line); min-height: 34px;
+}
+.am-panel-id {
+  display: flex; align-items: center; justify-content: center; min-width: 34px; padding: 0 8px;
+  background: var(--head-bg); color: var(--head-fg); font-weight: 600; font-size: 14px;
+}
+html[data-theme="shadcn"] .am-panel-id { border-radius: 6px; min-width: 24px; height: 24px; margin: 9px 0 9px 14px; font-size: 12px; }
+html[data-theme="shadcn"] .am-panel-head { border-bottom-width: 1px; }
+.am-panel-head h2 { margin: 0; padding: 7px 12px; font-size: 15px; font-weight: 600; flex: 1; display: flex; align-items: center; }
+.am-panel-meta { align-self: center; padding: 0 12px; font: 11px/1.3 var(--font-mono); color: var(--ink-2); text-align: right; }
+.am-panel-body { padding: 14px 16px 16px; }
+.am-panel-body > * + * { margin-top: 12px; }
+
+/* ── Markdown body ───────────────────────── */
+.am-md > :first-child { margin-top: 0; }
+.am-md > :last-child { margin-bottom: 0; }
+.am-md p { margin: 0 0 8px; }
+.am-md ul, .am-md ol { margin: 0 0 8px; padding-left: 20px; }
+.am-md li + li { margin-top: 3px; }
+.am-md h3, .am-md h4 { margin: 14px 0 6px; font-size: 13px; }
+.am-md a { color: var(--accent); }
+.am-md blockquote { margin: 0 0 8px; padding: 2px 12px; border-left: 3px solid var(--line-2); color: var(--ink-2); }
+.am-md :not(pre) > code { font-size: 0.9em; background: var(--fill); padding: 1px 5px; border-radius: 4px; }
+.am-md hr { border: 0; border-top: 1px solid var(--line-2); margin: 12px 0; }
+.am-md table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.am-md th {
+  text-align: left; font: 11px/1.3 var(--font-mono); color: var(--ink-2); font-weight: 400;
+  padding: 6px 10px; border-bottom: 1px solid var(--line-2);
+}
+/* th { text-align: left } outranks the align attribute from Markdown alignment, so restore right and center columns explicitly. */
+.am-md th[align="right"] { text-align: right; }
+.am-md th[align="center"] { text-align: center; }
+.am-md td { padding: 7px 10px; border-bottom: 1px solid var(--line-2); vertical-align: top; }
+.am-md tbody tr:nth-child(even) td { background: var(--fill); }
+.am-table-wrap { overflow-x: auto; }
+.am-code {
+  margin: 0; padding: 12px 14px; background: var(--fill); border: 1px solid var(--line-2);
+  border-radius: var(--radius); overflow-x: auto; font-size: 12.5px; line-height: 1.5;
+}
+
+/* ── Status badges ok / no / warn ──────────────── */
+.am-status { white-space: nowrap; font-weight: 500; }
+.am-status--ok { color: var(--ok); }
+.am-status--no { color: var(--err); }
+.am-status--warn { color: var(--warn); }
+.am-status-icon { display: inline-block; width: 1.1em; font-weight: 700; }
+
+/* ── callout ─────────────────────────────── */
+.am-callout {
+  border: 1px solid var(--line-2); border-left: 3px solid var(--accent); background: var(--accent-bg);
+  padding: 10px 14px; border-radius: var(--radius);
+}
+.am-callout--ok { border-left-color: var(--ok); background: var(--ok-bg); }
+.am-callout--warn { border-left-color: var(--warn); background: var(--warn-bg); }
+.am-callout--err { border-left-color: var(--err); background: var(--err-bg); }
+.am-callout-title { font-weight: 600; margin-bottom: 4px; }
+
+/* ── kv title block ─────────────────────────── */
+.am-kv {
+  display: grid; grid-template-columns: repeat(var(--kv-cols, 2), minmax(0, 1fr)); margin: 0;
+  border-top: var(--bw) solid var(--line); border-left: var(--bw) solid var(--line);
+}
+.am-kv-cell { border-right: var(--bw) solid var(--line); border-bottom: var(--bw) solid var(--line); padding: 6px 10px 8px; min-width: 0; }
+.am-kv-cell--wide { grid-column: 1 / -1; }
+.am-kv dt { font: 11px/1.4 var(--font-mono); color: var(--ink-2); }
+.am-kv dd { margin: 2px 0 0; font-size: 14px; font-weight: 500; overflow-wrap: anywhere; }
+.am-kv-cell--wide dd { font-size: 17px; font-weight: 600; }
+html[data-theme="shadcn"] .am-kv { border-color: var(--line); border-radius: var(--radius); overflow: hidden; }
+
+/* ── timeline ────────────────────────────── */
+.am-timeline { list-style: none; margin: 0; padding: 0; }
+.am-timeline--h { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); padding-top: 4px; }
+.am-timeline--h li { position: relative; text-align: center; padding: 0 6px; }
+.am-timeline--h li::before {
+  content: ""; position: absolute; top: 31px; left: 0; right: 0; border-top: var(--bw) solid var(--line);
+}
+.am-timeline--h li:first-child::before { left: 50%; }
+.am-timeline--h li:last-child::before { right: 50%; }
+.am-tl-when { display: block; font-size: 15px; font-weight: 500; height: 24px; }
+.am-tl-dot {
+  position: relative; display: block; width: 11px; height: 11px; margin: 2px auto 8px;
+  border: var(--bw) solid var(--line); border-radius: 50%; background: var(--paper);
+}
+.am-tl-item--hi .am-tl-dot { background: var(--accent); border-color: var(--accent); }
+.am-tl-title { display: block; font-size: 12.5px; font-weight: 500; }
+.am-tl-text { display: block; font-size: 12px; color: var(--ink-2); line-height: 1.45; }
+.am-timeline--v li { position: relative; padding: 0 0 14px 22px; }
+.am-timeline--v li::before { content: ""; position: absolute; left: 5px; top: 6px; bottom: -6px; border-left: var(--bw) solid var(--line-2); }
+.am-timeline--v li:last-child::before { display: none; }
+.am-timeline--v .am-tl-dot { position: absolute; left: 0; top: 4px; margin: 0; }
+.am-timeline--v .am-tl-when { display: inline; height: auto; font: 12px var(--font-mono); color: var(--ink-2); margin-right: 8px; }
+.am-timeline--v .am-tl-title { display: inline; font-size: 14px; }
+.am-timeline--v .am-tl-text { margin-top: 2px; }
+
+/* ── annot sentence notes ──────────────────────── */
+.am-annot + .am-annot { border-top: 1px solid var(--line-2); padding-top: 12px; }
+.am-annot-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.am-annot-meta { font: 11px var(--font-mono); font-weight: 400; color: var(--ink-2); }
+.am-annot-scroll { overflow-x: auto; }
+.am-annot-line {
+  position: relative; display: inline-block; white-space: pre; font: 14px/1.6 var(--font-mono);
+  padding-bottom: calc(var(--rows, 0) * 17px + 14px);
+}
+.am-annot-line--wrap { display: block; white-space: normal; padding-bottom: 10px; }
+.am-annot-line--wrap .am-seg { white-space: nowrap; }
+.am-seg { position: relative; }
+.am-seg::after {
+  content: ""; position: absolute; left: 1px; right: 1px; top: calc(100% + 1px); height: 5px;
+  border: 1px solid var(--accent); border-top: 0;
+}
+.am-seg-n {
+  position: absolute; left: 0; top: calc(100% + 8px + var(--row, 0) * 17px);
+  font: 11px/16px var(--font-sans); color: var(--accent); white-space: nowrap;
+}
+.am-seg--err { color: var(--err); }
+.am-seg--err::after { border-color: var(--err); }
+.am-seg--err .am-seg-n { color: var(--err); }
+.am-annot-caption { font-size: 12px; color: var(--ink-2); }
+
+/* ── limits bars ───────────────────────── */
+.am-lim + .am-lim { margin-top: 14px; }
+.am-lim-head { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; margin-bottom: 4px; }
+.am-lim-val { font: 12px var(--font-mono); color: var(--accent); white-space: nowrap; }
+.am-lim-track { position: relative; height: 12px; border: 1px solid var(--line-2); background: var(--fill); border-radius: calc(var(--radius) / 2); }
+.am-lim-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-bg); border-right: 1px solid var(--accent); }
+.am-lim-mark { position: absolute; top: -4px; bottom: -4px; border-left: 2px solid var(--accent); }
+.am-lim.is-over .am-lim-fill { background: var(--err-bg); border-right-color: var(--err); }
+.am-lim.is-over .am-lim-val { color: var(--err); }
+.am-lim-ticks { position: relative; height: 16px; font: 10px/16px var(--font-mono); color: var(--ink-3); }
+.am-lim-ticks span { position: absolute; transform: translateX(-50%); }
+.am-lim-ticks span:first-child { transform: none; }
+.am-lim-note { font-size: 11px; color: var(--ink-2); margin-left: 6px; }
+
+/* ── tree ─────────────────────────── */
+.am-tree { font-size: 13px; }
+.am-tree-root { display: flex; justify-content: center; position: relative; padding-bottom: 18px; }
+.am-tree-root::after { content: ""; position: absolute; bottom: 0; left: 50%; height: 18px; border-left: var(--bw) solid var(--line); }
+.am-tree-root--solo { padding-bottom: 12px; }
+.am-tree-root--solo::after { display: none; }
+.am-tree-box {
+  border: var(--bw) solid var(--line); background: var(--paper); padding: 6px 14px; text-align: center;
+  border-radius: var(--radius); font-weight: 600;
+}
+.am-tree-box small { display: block; font-weight: 400; color: var(--ink-2); font-size: 12px; }
+.am-tree-box--root { background: var(--accent-bg); font-size: 15px; padding: 8px 28px; }
+.am-tree-cols { display: grid; grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr)); }
+.am-tree-col { position: relative; padding: 18px 8px 0; min-width: 0; }
+.am-tree-col::before { content: ""; position: absolute; top: 0; left: 0; right: 0; border-top: var(--bw) solid var(--line); }
+.am-tree-col:first-child::before { left: 50%; }
+.am-tree-col:last-child::before { right: 50%; }
+.am-tree-col::after { content: ""; position: absolute; top: 0; left: 50%; height: 18px; border-left: var(--bw) solid var(--line); }
+.am-tree-list, .am-tree-list ul { list-style: none; margin: 0; padding: 0; }
+.am-tree-col > .am-tree-list { margin: 8px 0 0 14px; }
+.am-tree-list ul { margin-left: 16px; }
+.am-tree-list li { position: relative; padding: 3px 0 3px 18px; }
+.am-tree-list li::before { content: ""; position: absolute; left: 0; top: 0.95em; width: 12px; border-top: 1px solid var(--ink-3); }
+.am-tree-list li::after { content: ""; position: absolute; left: 0; top: 0; bottom: 0; border-left: 1px solid var(--ink-3); }
+.am-tree-list li:last-child::after { bottom: auto; height: 0.95em; }
+.am-tree-tag { font: 11px var(--font-mono); color: var(--ink-3); margin-right: 4px; }
+.am-tree code { font: 12px var(--font-mono); }
+.am-tree-sub { display: block; font-size: 11.5px; color: var(--ink-2); }
+.am-tree-hi > .am-tree-label { color: var(--accent); font-weight: 600; }
+
+/* ── Diagrams (flow / sequence) ───────────────── */
+.am-diagram { margin: 0; overflow-x: auto; text-align: center; }
+/* Embedded previews can lose html[data-theme]; the fallbacks keep diagrams readable, and defined theme variables still win. */
+.am-diagram svg { max-width: 100%; height: auto; font-family: var(--font-sans, sans-serif); }
+.am-diagram text { fill: var(--ink, #16181d); font-size: 13px; }
+.am-node-shape { fill: var(--paper, #ffffff); stroke: var(--line, #1d2026); stroke-width: var(--bw, 1.5px); }
+.am-node--hi .am-node-shape { fill: var(--accent-bg, #e4ecf8); stroke: var(--accent, #1d5fbf); }
+.am-node--hi text { fill: var(--accent, #1d5fbf); font-weight: 600; }
+.am-edge { fill: none; stroke: var(--ink-2, #4b5260); stroke-width: 1.3; }
+.am-edge--dashed { stroke-dasharray: 5 4; }
+.am-arrow { fill: var(--ink-2, #4b5260); }
+.am-edge-label rect { fill: var(--paper, #ffffff); }
+.am-diagram .am-edge-label text { fill: var(--accent, #1d5fbf); font-size: 11.5px; }
+.am-cluster { fill: var(--fill, #f3f5f8); stroke: var(--line-2, #d6dae1); stroke-width: 1; stroke-dasharray: 4 3; }
+.am-diagram .am-cluster-label { fill: var(--ink-2, #4b5260); font: 11px var(--font-mono, monospace); }
+.am-lifeline { stroke: var(--ink-3, #8b929e); stroke-width: 1; stroke-dasharray: 4 4; }
+.am-actor { fill: var(--paper, #ffffff); stroke: var(--line, #1d2026); stroke-width: var(--bw, 1.5px); }
+.am-note { fill: var(--warn-bg, #fdf3e2); stroke: var(--warn, #a8620a); stroke-width: 1; }
+.am-diagram .am-step { fill: var(--ink-3, #8b929e); font: 10px var(--font-mono, monospace); }
+
+/* ── doc template ────────────────────────── */
+.am-doc { max-width: 1120px; margin: 0 auto; padding: 40px 28px 64px; }
+.am-doc-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; }
+.am-doc-layout--notoc { grid-template-columns: minmax(0, 1fr); max-width: 860px; }
+.am-toc { position: sticky; top: 24px; font-size: 13px; }
+.am-toc a { display: block; color: var(--ink-2); text-decoration: none; padding: 4px 0 4px 10px; border-left: 2px solid var(--line-2); }
+.am-toc a:hover { color: var(--ink); border-left-color: var(--accent); }
+.am-doc-body > .am-panel + .am-panel { margin-top: 20px; }
+
+/* ── Responsive and print ─────────────────────────── */
+@media (max-width: 1100px) {
+  .am-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .am-grid > .am-panel { grid-column: auto !important; }
+  .am-grid > .am-panel.am-span-wide { grid-column: 1 / -1 !important; }
+}
+@media (max-width: 760px) {
+  .am-sheet, .am-doc { padding: 56px 12px 24px; }
+  .am-head { padding-right: 0; }
+  .am-grid { grid-template-columns: minmax(0, 1fr); }
+  .am-grid > .am-panel.am-span-wide { grid-column: auto !important; }
+  html[data-theme="blueprint"] .am-frame { padding: 0; border: 0; }
+  html[data-theme="blueprint"] .am-frame::before, html[data-theme="blueprint"] .am-ruler { display: none; }
+  .am-doc-layout { grid-template-columns: minmax(0, 1fr); }
+  .am-toc { position: static; }
+  .am-timeline--h { grid-template-columns: minmax(0, 1fr); }
+  .am-tree-cols { grid-template-columns: minmax(0, 1fr); }
+  /* Tables and diagrams keep their size: the wrapper scrolls horizontally when they overflow. */
+  .am-md th, .am-md td { min-width: 6em; }
+  .am-diagram svg { max-width: none; }
+}
+.am-colophon { text-align: center; padding: 0 0 28px; font: 11px var(--font-mono); color: var(--ink-3); }
+
+@media print {
+  .am-toolbar { display: none; }
+  body { background: var(--paper); }
+  .am-panel { break-inside: avoid; box-shadow: none; }
+}
+.am-panel--bare { border: 0; background: transparent; box-shadow: none; }
+.am-panel--bare > .am-panel-body { padding: 0; }
+.am-panel--bare .am-kv { background: var(--paper); }
+
+</style>
+</head>
+<body>
+<div class="am-toolbar">
+<button class="am-btn" type="button" data-am="theme" data-labels="{&quot;blueprint&quot;:&quot;主题：图纸&quot;,&quot;shadcn&quot;:&quot;主题：卡片&quot;}">主题：卡片</button>
+<button class="am-btn" type="button" data-am="mode" data-labels="{&quot;auto&quot;:&quot;明暗：跟随系统&quot;,&quot;light&quot;:&quot;明暗：亮&quot;,&quot;dark&quot;:&quot;明暗：暗&quot;}">明暗：亮</button>
+<button class="am-btn" type="button" data-am="copy" data-done="已复制 ✓">复制源稿</button>
+</div>
+<main class="am-doc">
+<header class="am-head"><h1>人体 Debug 互动系统设计文档</h1><p class="am-sub">版本 1.1 · 需求确认与开发实施</p><div class="am-head-meta"><span><b>source</b>原始 Word 设计文档</span></div><div class="am-intro am-md"><div class="am-md"><p>本页面完整保留原设计文档的产品规则、架构约束、接口定义、验收条件和原型图，并按阅读任务重新组织导航。</p>
+</div>
+<figure class="am-diagram am-flow"><svg viewBox="0 0 1274 170" width="1274" height="170" role="img" aria-label="流程图：开始、部位选择、感受选择、生活习惯问答、情况确认、AI分析、健康报告、现场任务" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M90,67 L101.5,67 Q113,67 124.5,67 L136,67" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M216,80.7 L247.8,91.6 Q279.5,102.5 311.3,102.5 L343,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M423,102.5 L434.5,102.5 Q446,102.5 457.5,102.5 L469,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M575,102.5 L586.5,102.5 Q598,102.5 609.5,102.5 L621,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M701,102.5 L712.5,102.5 Q724,102.5 735.5,102.5 L747,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="1"><path class="am-edge" d="M814,115.5 L842.9,126.8 Q871.8,138 900.6,138 L929.5,138" marker-end="url(#am1-arrow)"/></g><g data-step="1"><path class="am-edge" d="M1009.5,138 L1021,138 Q1032.5,138 1044,138 L1055.5,138" marker-end="url(#am1-arrow)"/></g><g data-step="1"><path class="am-edge" d="M1135.5,138 L1147,138 Q1158.5,138 1170,138 L1181.5,138" marker-end="url(#am1-arrow)"/></g><g data-step="2"><path class="am-edge am-edge--dashed" d="M814,89.5 L842.9,78.2 Q871.8,67 900.6,67 L929.5,67" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="838" y="58" width="67.5" height="18" rx="3"/><text x="871.8" y="67" text-anchor="middle" dominant-baseline="central">超时或失败</text></g></g><g data-step="3"><path class="am-edge am-edge--dashed" d="M216,53.3 L247.8,42.4 Q279.5,31.5 311.3,31.5 L343,31.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="240" y="22.5" width="79" height="18" rx="3"/><text x="279.5" y="31.5" text-anchor="middle" dominant-baseline="central">识别危险信号</text></g></g></g><g><g class="am-node am-node--round" data-key="开始" data-step="0"><rect class="am-node-shape" x="14" y="49.5" width="76" height="35" rx="17.5"/><text x="52" y="67" text-anchor="middle" dominant-baseline="central">开始</text></g><g class="am-node am-node--rect" data-key="部位选择" data-step="0"><rect class="am-node-shape" x="136" y="49.5" width="80" height="35" rx="3"/><text x="176" y="67" text-anchor="middle" dominant-baseline="central">部位选择</text></g><g class="am-node am-node--rect" data-key="感受选择" data-step="0"><rect class="am-node-shape" x="343" y="85" width="80" height="35" rx="3"/><text x="383" y="102.5" text-anchor="middle" dominant-baseline="central">感受选择</text></g><g class="am-node am-node--rect" data-key="生活习惯问答" data-step="0"><rect class="am-node-shape" x="469" y="85" width="106" height="35" rx="3"/><text x="522" y="102.5" text-anchor="middle" dominant-baseline="central">生活习惯问答</text></g><g class="am-node am-node--rect" data-key="情况确认" data-step="0"><rect class="am-node-shape" x="621" y="85" width="80" height="35" rx="3"/><text x="661" y="102.5" text-anchor="middle" dominant-baseline="central">情况确认</text></g><g class="am-node am-node--rect" data-key="AI分析" data-step="0"><rect class="am-node-shape" x="747" y="85" width="67" height="35" rx="3"/><text x="780.5" y="102.5" text-anchor="middle" dominant-baseline="central">AI分析</text></g><g class="am-node am-node--rect" data-key="健康报告" data-step="1"><rect class="am-node-shape" x="929.5" y="120.5" width="80" height="35" rx="3"/><text x="969.5" y="138" text-anchor="middle" dominant-baseline="central">健康报告</text></g><g class="am-node am-node--rect" data-key="现场任务" data-step="1"><rect class="am-node-shape" x="1055.5" y="120.5" width="80" height="35" rx="3"/><text x="1095.5" y="138" text-anchor="middle" dominant-baseline="central">现场任务</text></g><g class="am-node am-node--rect" data-key="Buff通关" data-step="1"><rect class="am-node-shape" x="1181.5" y="120.5" width="78.4" height="35" rx="3"/><text x="1220.7" y="138" text-anchor="middle" dominant-baseline="central">Buff通关</text></g><g class="am-node am-node--rect" data-key="超时兜底" data-step="2"><rect class="am-node-shape" x="929.5" y="49.5" width="80" height="35" rx="3"/><text x="969.5" y="67" text-anchor="middle" dominant-baseline="central">超时兜底</text></g><g class="am-node am-node--rect" data-key="安全拦截" data-step="3"><rect class="am-node-shape" x="343" y="14" width="80" height="35" rx="3"/><text x="383" y="31.5" text-anchor="middle" dominant-baseline="central">安全拦截</text></g></g></svg></figure>
+<div class="am-md"><p>版本 1.1 日期 2026年10月8日 用途 需求确认与开发实施</p>
+<p>本系统面向现场大屏互动。用户选择身体部位和感受，完成选择题，检查情况总结，再查看健康习惯建议。用户完成倒计时任务后领取健康 Buff。本文件确定体验流程、管理后台、数据契约、并发控制、日志和验收要求。初版采用单进程 FastAPI 与 asyncio。系统提供健康知识和生活习惯建议，不生成疾病诊断。</p>
+</div></div></header>
+<div class="am-doc-layout">
+<nav class="am-toc" aria-label="目录"><a href="#panel-A">A · 范围与核心规则</a><a href="#panel-B">B · 用户流程 文案与安全</a><a href="#panel-C">C · 架构 并发与状态机</a><a href="#panel-D">D · 数据契约与后台配置</a><a href="#panel-E">E · 管理日志 接口与存储</a><a href="#panel-F">F · 现场运行 部署与验收</a><a href="#panel-G">G · 产品与组件原型</a></nav><div class="am-doc-body">
+<section class="am-panel" id="panel-A">
+<header class="am-panel-head"><span class="am-panel-id">A</span><h2>范围与核心规则</h2></header>
+<div class="am-panel-body"><div class="am-md"><h3>1 设计范围与确定规则</h3>
+<p>用户端包含首页、身体部位、感受、问答、确认、扫描、报告、任务和通关页面。后台包含配置、题库、任务库、兜底库、日志、监控和重置功能。管理员账号只通过命令行和 MySQL 管理。</p>
+<p>已确定规则：部位和感受确认后锁定。每题点击选项后自动推进。最后一题完成后自动生成情况总结。确认页保留一次最终确认操作。AI 分析从最终确认后开始。AI 超时使用基于身体部位的预置建议。全部时间配置使用滑条。完整输入和模型输出默认记录。</p>
+<p>下文默认值、范围和技术选型属于初版实施建议，可以在开发前调整。实际并发容量以模型服务能力和压力测试为准。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-B">
+<header class="am-panel-head"><span class="am-panel-id">B</span><h2>用户流程 文案与安全</h2></header>
+<div class="am-panel-body"><div class="am-md"><h3>2 用户体验流程</h3>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>环节</th>
+<th>页面与行为</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1 开始</td>
+<td>点击开始人体 Debug。创建独立会话。显示健康知识与日志保存说明。</td>
+</tr>
+<tr>
+<td>2 部位</td>
+<td>同一区域显示一张人体图。支持正面、背面、侧面切换。点击部位后显示确认。确认后锁定。</td>
+</tr>
+<tr>
+<td>3 感受</td>
+<td>点击酸、痛、僵硬、麻、容易疲劳或只是想了解一下。确认后锁定。选项根据部位配置。</td>
+</tr>
+<tr>
+<td>4 问答</td>
+<td>默认五题。全部使用点击选项。点击即保存并进入下一题。显示第几题和总题数。</td>
+</tr>
+<tr>
+<td>5 确认</td>
+<td>最后一题完成后自动生成初步情况总结。显示全部答案。允许逐题修改。修改后自动更新总结。点击确认并分析。</td>
+</tr>
+<tr>
+<td>6 扫描</td>
+<td>立即开始总等待计时并提交 AI。扫描动画循环播放。有效报告返回后进入报告页。到达等待上限则展示兜底报告。</td>
+</tr>
+<tr>
+<td>7 报告</td>
+<td>显示身体分析、改善建议和现场任务。说明建议来自 AI 或预置内容。点击开始健康任务。</td>
+</tr>
+<tr>
+<td>8 任务</td>
+<td>显示动作说明及醒目倒计时。默认25秒。计时结束自动进入通关页。</td>
+</tr>
+<tr>
+<td>9 通关</td>
+<td>显示健康 Buff、通关提示和奖励说明。供工作人员现场确认。</td>
+</tr>
+<tr>
+<td>10 结束</td>
+<td>点击结束体验或默认停留15秒后自动退出。清除现场会话和页面数据，返回首页。</td>
+</tr>
+</tbody></table></div>
+<p>身体部位覆盖眼睛、头部、颈肩、手腕、胸腹、腰背、膝盖和腿脚。每个视角的点击区域映射到同一 part_id。同一部位不会因为视角不同而改变问答或报告。</p>
+<p>确认页修改题目时，点击新选项后直接返回确认页。不得要求用户重答全部题目。若修改答案使后续分支题失效，系统只要求补答受影响题目，再自动更新总结。已确认的部位和感受不能修改。用户需要重新选择时退出并开始新会话。</p>
+<h3>3 报告与文案规则</h3>
+<p>初步情况总结由程序模板生成，不调用 AI。它复述已选部位、感受和答案，不添加疾病判断或因果结论。健康 Debug 报告由 AI 生成，并由后端校验。两份报告均使用短句、明确主语和统一术语。每句话说明一个事实或一个动作。保留可能性，不能把相关习惯写成已确认病因。</p>
+<p>ASD-STE100 是英文受控语言标准。本项目中文文案采用其写作原则，不宣称通过正式 STE 合规认证。英文文案按指定技能控制句长和表达。中文建议采用一句一个动作、明确对象、减少专业术语的项目规则。</p>
+<p>情况总结示例：你选择了颈肩。你感到僵硬。你每天使用电脑超过8小时。你很少活动。你选择的睡眠时间是6至7小时。请检查这些信息。</p>
+<p>身体分析应引用具体答案。改善建议应直接说明可执行动作。现场任务只能来自审核后的固定任务库。任务时长和 Buff 由后端配置。AI 仅选择允许的 task_id，不自行编写运动方案。倒计时结束代表游戏计时完成，不能宣称系统验证了动作或改善了健康。</p>
+<p>建议数量采用三层控制：Prompt 明确要求 N 条；动态 JSON Schema 将 suggestions 的 minItems 和 maxItems 同时设为 N；后端再次校验长度、重复内容和安全性。N 默认3，允许3至5。校验失败且重试预算不足时使用相同数量的预置建议。不得用重复建议补足数量。</p>
+<h3>4 安全与特殊流程</h3>
+<p>安全规则在感受确认、每次答案保存、最终确认和报告校验阶段执行。危险信号规则优先于模型和兜底。规则可关联部位、感受及题目选项。识别到规则命中时进入安全提示页，停止普通报告、健康任务和 Buff 流程。安全提示及规则内容上线前需由合适的健康内容审核人员确认。</p>
+<p>选择题应提供能触发安全规则的必要选项。系统只能识别问卷覆盖的风险，不能声称排除了危险。报告禁止疾病诊断、用药、治疗承诺和已改善健康等表述。</p>
+<p>AI 超时、网络失败、无效 JSON、字段缺失或不安全输出均可触发预置建议。兜底首先按 part_id 匹配，再可按 feeling_id 和答案标签细化。部位通用模板必须存在。无匹配时采用审核后的最低风险通用模板。危险信号不得被兜底绕过。</p>
+<p>用户随时退出。后端标记会话已结束，取消可取消的任务，删除临时状态。模型晚返回的内容只记录调用结果，不写回页面。刷新页面返回首页。长时间不操作先提示，再按配置退出。分析和任务阶段使用各自的期限，避免闲置计时与任务计时冲突。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-C">
+<header class="am-panel-head"><span class="am-panel-id">C</span><h2>架构 并发与状态机</h2></header>
+<div class="am-panel-body"><div class="am-md"><h3>5 架构与并发控制</h3>
+<p>建议架构：大屏浏览器 → 反向代理 → 单 Worker FastAPI → 异步模型客户端与 MySQL。前端建议 TypeScript，后端建议 Pydantic 校验，模型调用使用异步 HTTP 客户端，MySQL 使用异步驱动或隔离到线程执行同步调用。技术选型不改变数据契约。</p>
+<p>asyncio 默认在一个线程中运行事件循环。多个设备的请求在等待网络或数据库时交替推进。它不是多线程，也不保证上游模型同时推理。async def 内不得直接使用 requests.post、time.sleep 或阻塞数据库调用。CPU 密集任务需要移出事件循环。</p>
+<p>模型并发默认5。使用有界等待队列和进程内并发控制器。队列满时立即提供部位兜底，不无限堆积请求。等待队列中的请求同样消耗用户总等待预算。开始扫描时启动总截止时间；排队、请求、重试、校验均受该截止时间约束。</p>
+<p>初版仅一个 Worker。增加 Worker 或服务器后，需要共享会话存储和全局并发限制。单进程 Semaphore 不能控制多个进程的总并发。并发配置热更新采用可调整容量的控制器，不替换正在使用的 Semaphore，也不访问其私有属性。降低容量时允许已有请求结束，再停止发放超额许可。</p>
+</div>
+<pre class="am-code"><code data-lang="python">async def analyze(payload, limiter, client, timeout_s):
+async with asyncio.timeout(timeout_s): # 覆盖排队和模型调用的总等待时间
+async with limiter: # 获取并发许可，退出时释放
+return await client.generate(payload) # 使用真正的异步客户端</code></pre>
+<div class="am-md"><p>示例需导入 asyncio。payload 是确认后的输入，limiter 是并发控制器，client 是异步模型客户端，timeout_s 是总预算。调用方必须捕获 TimeoutError 并返回兜底，并在保存结果前校验会话状态。取消客户端请求不一定能停止上游已开始的推理。</p>
+<h3>6 会话与状态机</h3>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>状态</th>
+<th>进入条件与允许操作</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PART_SELECTION</td>
+<td>创建会话后选择并确认部位</td>
+</tr>
+<tr>
+<td>FEELING_SELECTION</td>
+<td>部位锁定后确认感受</td>
+</tr>
+<tr>
+<td>QUESTIONNAIRE</td>
+<td>感受锁定后逐题作答</td>
+</tr>
+<tr>
+<td>SUMMARY_REVIEW</td>
+<td>全部题目完成，可修改答案并最终确认</td>
+</tr>
+<tr>
+<td>ANALYZING</td>
+<td>最终确认后等待 AI 或兜底</td>
+</tr>
+<tr>
+<td>REPORT_READY</td>
+<td>只接收一次有效报告，可开始任务</td>
+</tr>
+<tr>
+<td>TASK_RUNNING</td>
+<td>显示倒计时，结束进入通关</td>
+</tr>
+<tr>
+<td>COMPLETED</td>
+<td>显示 Buff，结束或停留超时后清理</td>
+</tr>
+<tr>
+<td>SAFETY_STOP</td>
+<td>规则拦截，显示审核后的安全提示</td>
+</tr>
+<tr>
+<td>CLOSED</td>
+<td>退出、清理或闲置结束，不接受新结果</td>
+</tr>
+</tbody></table></div>
+<p>每次体验使用随机 session_id 和私有会话凭证。session_id 不能单独作为授权依据。每次模型调用使用 request_id，每次答案变更递增 answer_revision。确认时生成 input_revision，并保存 config_version。结果写入必须同时匹配会话、输入版本、请求和当前状态。</p>
+<p>最终确认接口支持 Idempotency-Key。相同输入和相同键只创建一个分析任务。报告、倒计时启动和通关迁移使用原子状态转换。任务倒计时以服务端记录的结束时间为依据，前端仅展示剩余时间，避免重复点击重启计时。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-D">
+<header class="am-panel-head"><span class="am-panel-id">D</span><h2>数据契约与后台配置</h2></header>
+<div class="am-panel-body"><div class="am-md"><h3>7 Schema 数据契约</h3>
+<p>统一采用 JSON Schema 2020-12。顶层对象禁止未知字段。时间戳采用带时区的 ISO 8601。ID 为字符串。枚举、必填字段、长度和范围由后端校验。输入使用稳定 ID，显示文案由固定版本题库解析。不得仅把不可理解的 option_id 交给模型。</p>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>Schema</th>
+<th>必填字段及约束</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>SessionSchema</td>
+<td>session_id、status、answer_revision、config_version、created_at、expires_at。会话凭证只在创建响应交付，不写普通日志。</td>
+</tr>
+<tr>
+<td>BodySelectionSchema</td>
+<td>part_id、view、feeling_id、part_locked、feeling_locked。view 为 front、back、side。后端验证部位与感受关系。</td>
+</tr>
+<tr>
+<td>QuestionSchema</td>
+<td>question_id、text、options、order、conditions。options 包含 option_id、label、tags。题目与选项 ID 不重复。</td>
+</tr>
+<tr>
+<td>AnswerSchema</td>
+<td>question_id、option_id。单题单选。选项必须属于当前题目。答案数与实际题集一致。</td>
+</tr>
+<tr>
+<td>SummarySchema</td>
+<td>session_id、answer_revision、facts、summary_text。facts 引用 question_id 和 option_id。生成来源固定为 template。</td>
+</tr>
+<tr>
+<td>AIInputSchema</td>
+<td>session_id、request_id、input_revision、config_version、body_selection、answers、report_rules、allowed_task_ids。answers 包含题目和答案显示文字。</td>
+</tr>
+<tr>
+<td>AIReportSchema</td>
+<td>body_analysis、suggestions、task_id。suggestions 恰好 N 条。task_id 必须来自当前允许任务集合。</td>
+</tr>
+<tr>
+<td>ReportEnvelopeSchema</td>
+<td>report_id、session_id、source、fallback_reason、body_analysis、suggestions、task、buff、config_version。source 为 ai 或 preset。</td>
+</tr>
+<tr>
+<td>SystemConfigSchema</td>
+<td>schema_version、config_version、model、runtime、questions、report、safety、ui、logging。密钥读取时只返回是否已设置。</td>
+</tr>
+<tr>
+<td>AIInvocationLogSchema</td>
+<td>request_id、session_id、attempt、input_snapshot、request_body、raw_output、validated_output、status、queue_ms、model_ms、total_ms、error_code、created_at。</td>
+</tr>
+<tr>
+<td>SafetyResultSchema</td>
+<td>blocked、rule_ids、message、allowed_next_action。命中时不得返回普通任务。</td>
+</tr>
+<tr>
+<td>TaskSchema</td>
+<td>task_id、title、instructions、allowed_parts、excluded_tags、duration_seconds、buff_id。由审核任务库生成。</td>
+</tr>
+</tbody></table></div>
+<p>输入示例。每个 answer 对象说明一道题和用户选择。report_rules 控制建议数量。allowed_task_ids 限制模型可选任务。示例为单条答案节选，生产接口必须校验全部题目。</p>
+</div>
+<pre class="am-code"><code data-lang="json">{
+&quot;session_id&quot;: &quot;example-session&quot;,
+&quot;request_id&quot;: &quot;example-request&quot;,
+&quot;input_revision&quot;: 1,
+&quot;config_version&quot;: 1,
+&quot;body_selection&quot;: {
+&quot;part_id&quot;: &quot;neck_shoulder&quot;,
+&quot;part_label&quot;: &quot;颈肩&quot;,
+&quot;feeling_id&quot;: &quot;stiffness&quot;,
+&quot;feeling_label&quot;: &quot;僵硬&quot;
+},
+&quot;answers&quot;: [
+{
+&quot;question_id&quot;: &quot;screen_time&quot;,
+&quot;question_text&quot;: &quot;你每天使用电脑多久&quot;,
+&quot;option_id&quot;: &quot;over_8_hours&quot;,
+&quot;option_text&quot;: &quot;超过8小时&quot;
+}
+],
+&quot;report_rules&quot;: {
+&quot;suggestion_count&quot;: 3,
+&quot;language&quot;: &quot;zh-CN&quot;
+},
+&quot;allowed_task_ids&quot;: [
+&quot;rest_gaze&quot;
+]
+}</code></pre>
+<div class="am-md"><p>AI 输出结构示例。task_id 由后端解析为任务说明和 Buff。下面的动态 Schema 将 N 固定为3，部署时按会话配置生成。</p>
+</div>
+<pre class="am-code"><code data-lang="json">{
+&quot;$schema&quot;: &quot;https://json-schema.org/draft/2020-12/schema&quot;,
+&quot;type&quot;: &quot;object&quot;,
+&quot;additionalProperties&quot;: false,
+&quot;required&quot;: [
+&quot;body_analysis&quot;,
+&quot;suggestions&quot;,
+&quot;task_id&quot;
+],
+&quot;properties&quot;: {
+&quot;body_analysis&quot;: {
+&quot;type&quot;: &quot;string&quot;,
+&quot;minLength&quot;: 1,
+&quot;maxLength&quot;: 500
+},
+&quot;suggestions&quot;: {
+&quot;type&quot;: &quot;array&quot;,
+&quot;minItems&quot;: 3,
+&quot;maxItems&quot;: 3,
+&quot;uniqueItems&quot;: true,
+&quot;items&quot;: {
+&quot;type&quot;: &quot;string&quot;,
+&quot;minLength&quot;: 1,
+&quot;maxLength&quot;: 120
+}
+},
+&quot;task_id&quot;: {
+&quot;type&quot;: &quot;string&quot;,
+&quot;enum&quot;: [
+&quot;rest_gaze&quot;
+]
+}
+}
+}</code></pre>
+<div class="am-md"><p>Schema 只能验证结构和部分内容约束。它不能证明医学安全、语义正确或 STE 合规。后端还需要规则检查、事实引用检查和人工审核的模板。模型服务不支持结构化输出时，仍要求纯 JSON，并执行相同本地校验。</p>
+<h3>8 后台配置与控件</h3>
+<p>后台必须登录。时间参数统一使用滑条，显示数值、单位、最小值、最大值和步长。非时间数值参数统一使用两个预设值与自定义三个下拉选项，选自定义后出现输入框。布尔使用开关，枚举使用下拉框，字符串使用输入框，Prompt 使用多行编辑框，密钥使用密码框。</p>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>时间配置</th>
+<th>默认值</th>
+<th>建议范围与步长</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>ai_total_wait_seconds 总等待</td>
+<td>15秒</td>
+<td>5至60秒，1秒</td>
+</tr>
+<tr>
+<td>queue_timeout_seconds 排队</td>
+<td>5秒</td>
+<td>0至30秒，1秒</td>
+</tr>
+<tr>
+<td>model_timeout_seconds 单次调用</td>
+<td>15秒</td>
+<td>1至60秒，1秒</td>
+</tr>
+<tr>
+<td>scan_cycle_seconds 动画周期</td>
+<td>5秒</td>
+<td>1至10秒，1秒</td>
+</tr>
+<tr>
+<td>task_duration_seconds 任务</td>
+<td>25秒</td>
+<td>20至30秒，1秒</td>
+</tr>
+<tr>
+<td>completion_timeout_seconds 通关</td>
+<td>15秒</td>
+<td>5至60秒，1秒</td>
+</tr>
+<tr>
+<td>session_idle_timeout_seconds 闲置</td>
+<td>60秒</td>
+<td>30至300秒，5秒</td>
+</tr>
+<tr>
+<td>idle_warning_seconds 退出提示</td>
+<td>10秒</td>
+<td>5至30秒，1秒</td>
+</tr>
+<tr>
+<td>retry_backoff_seconds 重试间隔</td>
+<td>1秒</td>
+<td>0至5秒，1秒</td>
+</tr>
+<tr>
+<td>admin_session_timeout_minutes 后台</td>
+<td>30分钟</td>
+<td>5至120分钟，5分钟</td>
+</tr>
+<tr>
+<td>log_retention_days 日志保留</td>
+<td>30天</td>
+<td>1至180天，1天</td>
+</tr>
+</tbody></table></div>
+<p>所有时间设置均为滑条，包括日志保留和后台登录有效期。总等待时间具有最高优先级。单次模型超时使用配置值与剩余预算中的较小值。动画周期只决定视觉循环，不强制用户至少等待一次完整循环。模型有效结果返回时可立即显示报告。</p>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>非时间数值</th>
+<th>预设与自定义</th>
+<th>校验范围</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>max_concurrency</td>
+<td>3、5、自定义</td>
+<td>1至50</td>
+</tr>
+<tr>
+<td>max_queue_size</td>
+<td>10、20、自定义</td>
+<td>0至200</td>
+</tr>
+<tr>
+<td>question_count</td>
+<td>5、7、自定义</td>
+<td>3至10</td>
+</tr>
+<tr>
+<td>suggestion_count</td>
+<td>3、5、自定义</td>
+<td>3至5</td>
+</tr>
+<tr>
+<td>max_output_tokens</td>
+<td>1024、2048、自定义</td>
+<td>256至8192，另校验模型支持</td>
+</tr>
+<tr>
+<td>temperature</td>
+<td>0.2、0.5、自定义</td>
+<td>0至2，另校验模型支持</td>
+</tr>
+<tr>
+<td>ai_retry_count</td>
+<td>0、1、自定义</td>
+<td>0至2</td>
+</tr>
+<tr>
+<td>login_failure_limit</td>
+<td>5、10、自定义</td>
+<td>3至20</td>
+</tr>
+</tbody></table></div>
+<p>模型配置包括协议类型、API 地址、模型名称、API 密钥、温度、Token 上限及结构化输出模式。题库配置包括部位、视角点击区域、感受、题目、选项、条件、顺序和数量。报告配置包括 Prompt、建议数量、文案规则、允许任务和 Buff。安全配置包括拦截规则、提示文案、任务排除规则和兜底模板。运营配置包括首页、奖励说明、全屏提示、动画资源和可选二维码。</p>
+<p>日志配置包括完整日志开关、保留时间、导出权限和脱敏规则。默认启用完整输入输出。后台监控显示服务状态、调用次数、成功率、平均耗时、排队时间和失败次数。</p>
+<p>配置采用草稿、校验、发布和版本记录。每次发布形成新 config_version。当前会话使用创建时的快照，新会话使用新版本。紧急安全规则可即时对在途会话生效，并记录所用安全版本。模型并发容量按控制器规则即时调整。</p>
+<p>数据库地址、端口、凭证、加密主密钥、进程数量和服务监听参数属于启动配置。后台可显示状态和重启提示，不能把它们作为即时业务配置。管理员账号按用户要求在命令行管理。不得把加密主密钥和加密后的 API 密钥放在同一个数据库中。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-E">
+<header class="am-panel-head"><span class="am-panel-id">E</span><h2>管理日志 接口与存储</h2></header>
+<div class="am-panel-body"><div class="am-md"><h3>9 管理员与日志设计</h3>
+<p>管理员账户在 MySQL 保存 username、password_hash、role、enabled 和凭证版本。通过命令行工具生成密码哈希后写入数据库，不保存明文密码。修改密码或停用账号后撤销已有登录会话。登录采用安全 Cookie、失败次数限制及适当的 CSRF 防护。后台提供配置变更审计，不提供新增账号入口。</p>
+<p>每次体验记录完整选择、答案及版本。每次模型尝试记录完整应用层请求、模型原始输出、有效报告、错误和耗时。即使 JSON 无效或超时，也记录已收到的输出和错误。API 密钥、Authorization、登录密码、会话凭证不属于用户输入，始终排除。</p>
+<p>结束体验清除浏览器、后端临时会话和报告缓存。按本方案保留历史日志，供登录后的管理员查询。这与现场清除不是同一操作。首页应明确告知会保存问答和模型输出。日志不主动收集身份信息；健康回答仍需限制查看、导出和保留时间。到期删除完整内容，可保留不含回答的聚合统计。</p>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>指标</th>
+<th>统计定义</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>体验次数</td>
+<td>创建的 session_id 数量，另列完成、退出和安全拦截</td>
+</tr>
+<tr>
+<td>分析次数</td>
+<td>用户最终确认触发的逻辑分析次数</td>
+</tr>
+<tr>
+<td>模型调用次数</td>
+<td>实际发出的请求尝试数，包含重试</td>
+</tr>
+<tr>
+<td>平均调用时间</td>
+<td>完成的模型尝试 model_ms 之和除以对应尝试数，成功与失败分别显示</td>
+</tr>
+<tr>
+<td>用户等待时间</td>
+<td>最终确认至 AI 或兜底报告就绪的 total_ms，另显示P95</td>
+</tr>
+<tr>
+<td>失败次数</td>
+<td>超时、网络失败、上游错误、结构失败和安全拒绝分类计数</td>
+</tr>
+<tr>
+<td>兜底率</td>
+<td>兜底报告数量除以正常分析请求数，安全拦截单列</td>
+</tr>
+</tbody></table></div>
+<h3>10 接口与存储</h3>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>接口</th>
+<th>作用</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>POST /api/sessions</td>
+<td>创建体验并返回会话凭证与配置快照</td>
+</tr>
+<tr>
+<td>POST /api/sessions/{id}/selection</td>
+<td>确认并锁定部位或感受</td>
+</tr>
+<tr>
+<td>PUT /api/sessions/{id}/answers/{question_id}</td>
+<td>保存或修改答案，返回进度与受影响题目</td>
+</tr>
+<tr>
+<td>GET /api/sessions/{id}/summary</td>
+<td>返回自动生成的最新总结</td>
+</tr>
+<tr>
+<td>POST /api/sessions/{id}/analysis</td>
+<td>最终确认并创建幂等分析任务</td>
+</tr>
+<tr>
+<td>GET /api/sessions/{id}/analysis</td>
+<td>返回等待、AI报告、兜底或安全拦截</td>
+</tr>
+<tr>
+<td>POST /api/sessions/{id}/task</td>
+<td>启动一次任务并返回结束时间</td>
+</tr>
+<tr>
+<td>POST /api/sessions/{id}/close</td>
+<td>关闭会话并清除临时数据</td>
+</tr>
+<tr>
+<td>POST /api/admin/login</td>
+<td>后台登录</td>
+</tr>
+<tr>
+<td>GET PUT /api/admin/config</td>
+<td>查看或编辑草稿配置</td>
+</tr>
+<tr>
+<td>POST /api/admin/config/publish</td>
+<td>校验并发布配置版本</td>
+</tr>
+<tr>
+<td>GET /api/admin/logs 和 /metrics</td>
+<td>按权限查询日志及统计</td>
+</tr>
+<tr>
+<td>GET /health/live 和 /health/ready</td>
+<td>进程存活与依赖就绪检查</td>
+</tr>
+</tbody></table></div>
+<p>题库、任务、兜底和安全规则提供相应后台 CRUD 接口。删除被发布版本引用的内容时应保留旧版本，避免在途会话失效。日志导出和重置接口须单独审计。</p>
+<p>接口使用统一封装：成功返回 data、request_id 和 server_time；错误返回 code、message 和 request_id。无效输入返回422，身份无效返回401，状态或版本冲突返回409。前端按错误码决定恢复、提示或退出，不显示内部异常堆栈。</p>
+<p>MySQL 建议分为 admin_accounts、config_versions、body_parts、feelings、question_sets、task_library、fallback_templates、safety_rules、experience_logs、ai_invocation_logs 和 audit_logs。结构化内容可保存 JSON。request_id 唯一，session_id 和 created_at 建索引。日志表按保留策略清理。临时会话初版放内存，服务重启使其失效，浏览器收到失效响应后回首页。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-F">
+<header class="am-panel-head"><span class="am-panel-id">F</span><h2>现场运行 部署与验收</h2></header>
+<div class="am-panel-body"><div class="am-md"><h3>11 视觉与现场运行</h3>
+<p>首页、扫描页、任务倒计时和通关页使用大字号、醒目的艺术字体。问题、确认内容、报告和后台使用清晰正文字体。字体需覆盖中文并具有使用许可。颜色对比应保证大屏远距离阅读。正文艺术化不能降低可读性。</p>
+<p>按钮参考 Apple 的圆角、轻量阴影、按压缩放、平滑过渡和明确选中状态。触摸按钮及人体区域需要足够大。细小部位可使用扩大命中区或放大视图，并防止重叠选择。动画不阻止点击响应，支持减少动态效果。</p>
+<p>现场页面支持全屏、工作人员重置和横竖屏适配。后台入口不出现在普通体验主流程。奖励由工作人员确认，系统不声称已自动发奖。若以后引入二维码或自动核销，需单独增加唯一领奖码、核销状态及防重复领取接口。</p>
+<h3>12 异常恢复与部署</h3>
+<p>请求在总等待截止时由后端原子确定最终报告。AI 成功和超时竞争时只能有一个结果生效。页面轮询失败时提示连接问题，重试期间仍使用原截止时间，不延长等待。若后端失联，前端使用启动时获得的审核部位兜底内容或显示服务不可用，并拒绝接收过期结果。</p>
+<p>数据库故障时禁止发布配置。AI 日志写入失败应进入有界重试缓冲并显示后台告警。缓冲耗尽时标记日志丢失，不宣称完整保存。密钥错误、配额不足等错误进入监控分类，不把原始敏感异常直接展示给用户。</p>
+<p>部署初版采用反向代理、一个 FastAPI Worker、MySQL 和外部模型服务。启用 HTTPS。使用进程管理器或容器自动重启。静态资源本地提供，避免现场依赖外部字体。上线前备份配置和题库，验证数据库恢复、密钥轮换和模型连接。</p>
+<h3>13 验收标准</h3>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>验收项</th>
+<th>通过条件</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>主流程</td>
+<td>十个环节完整，单题无需下一步，最后一题自动进入总结</td>
+</tr>
+<tr>
+<td>锁定与修改</td>
+<td>部位和感受确认后不可改，修改答案自动更新总结和失效分支</td>
+</tr>
+<tr>
+<td>视角一致</td>
+<td>三种视角同一部位使用同一ID和同一题库</td>
+</tr>
+<tr>
+<td>报告数量</td>
+<td>配置3或5时AI和兜底均严格输出对应数量且无重复</td>
+</tr>
+<tr>
+<td>超时</td>
+<td>排队与模型耗时受总预算约束，到期显示部位兜底</td>
+</tr>
+<tr>
+<td>晚返回</td>
+<td>超时后AI不覆盖兜底，退出后结果不进入新会话</td>
+</tr>
+<tr>
+<td>并发隔离</td>
+<td>至少两台设备同时完成体验，无答案、报告或状态串用</td>
+</tr>
+<tr>
+<td>限制容量</td>
+<td>模型在途请求不超过当前规则允许值，队列满时及时兜底</td>
+</tr>
+<tr>
+<td>安全拦截</td>
+<td>规则命中不展示普通任务和Buff，AI和兜底均不能绕过</td>
+</tr>
+<tr>
+<td>后台控件</td>
+<td>全部时间均为滑条，其他数值含两个预设和自定义</td>
+</tr>
+<tr>
+<td>配置版本</td>
+<td>发布后新会话更新，在途会话保持快照，可审计与回退</td>
+</tr>
+<tr>
+<td>日志</td>
+<td>完整输入输出可查，统计定义正确，密钥与凭证不入日志</td>
+</tr>
+<tr>
+<td>清理</td>
+<td>退出、闲置和通关到期后现场内容清除，历史日志按策略保留</td>
+</tr>
+<tr>
+<td>大屏与重置</td>
+<td>触摸区域可用，文本无溢出，刷新及工作人员重置回首页</td>
+</tr>
+<tr>
+<td>故障</td>
+<td>覆盖模型失败、无效JSON、断网、数据库失败与服务重启</td>
+</tr>
+</tbody></table></div>
+<p>压力测试至少覆盖配置最大并发、超出队列容量、慢模型、频繁退出和后台并发变更。测试记录模型实际并行能力、等待P95、兜底率和日志完整率。完成这些检查后再确定现场可接入设备数量。</p>
+<h3>14 实施顺序与参考资料</h3>
+<p>第一阶段建立状态机、题库、总结模板和完整前端流程。第二阶段接入 AI、Schema 校验、安全规则和兜底。第三阶段开发配置后台、完整日志与监控。第四阶段进行多设备联调、异常测试和现场压力测试。上线前审核全部问题、预置建议、任务和安全提示。</p>
+<p>参考资料：ASD-STE100 skill 仓库与 SKILL.md，<a href="https://github.com/danyuchn/asd-ste100-skill">https://github.com/danyuchn/asd-ste100-skill</a> 。该仓库提供简化英文的写作原则，未包含完整官方词典。Python asyncio 官方文档，<a href="https://docs.python.org/3/library/asyncio.html">https://docs.python.org/3/library/asyncio.html</a> 。本文件的中文写作规则和系统配置范围为项目设计约定。</p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-G">
+<header class="am-panel-head"><span class="am-panel-id">G</span><h2>产品与组件原型</h2></header>
+<div class="am-panel-body"><div class="am-md"><h3>15 产品与组件原型</h3>
+<p>本节补充25张页面和组件原型。原型用于确认布局、状态和交互，不是可运行页面。画面采用浅灰背景、白色圆角卡片和紫色主操作，按钮参考Apple的轻量层次与按压反馈。人体轮廓为可点击区域的占位图。最终人体素材和艺术字体应在视觉定稿时替换。</p>
+<p>用户端共有11张图，覆盖十个主环节以及超时兜底和安全拦截。后台共有10张图，覆盖登录、监控、配置、题库、任务、安全、日志和发布。组件共有4张状态图，覆盖选择操作、配置表单、报告计时及弹窗异常。</p>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>图稿编号</th>
+<th>覆盖范围</th>
+<th>阅读重点</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>U01 至 U11</td>
+<td>用户端体验页面</td>
+<td>确认后锁定；问答自动推进；超时兜底；倒计时自动跳转</td>
+</tr>
+<tr>
+<td>A01 至 A10</td>
+<td>后台管理页面</td>
+<td>时间滑条；数值预设与自定义；日志完整查看；配置发布</td>
+</tr>
+<tr>
+<td>C01 至 C04</td>
+<td>公共组件及状态</td>
+<td>选中、禁用、加载、校验、报告来源、退出与闲置</td>
+</tr>
+</tbody></table></div>
+<p>交互补充：按钮按压后短暂缩放；加载态阻止重复操作。选择题只显示点击选项，不显示下一题按钮。确认页的修改操作完成后直接返回总结。退出弹窗提供取消入口。滑条应支持键盘调节与触摸操作。错误信息显示在对应控件旁，不能只用颜色表示。</p>
+<p>原型中的建议、任务、安全提示、模型地址和统计数据均为示例。上线前使用审核内容和实际配置。AI等待页面不显示虚构进度百分比。倒计时结束只表示游戏计时完成。后台敏感输入不回显密钥。</p>
+<h4>U01 首页</h4>
+<p><img src="assets/prototype-01.png" alt="U01 首页"></p>
+<p>点击开始创建会话。日志说明在开始操作前可见。后台入口不出现在体验主流程。</p>
+<h4>U02 人体部位选择页</h4>
+<p><img src="assets/prototype-02.png" alt="U02 人体部位选择页"></p>
+<p>一次只展示一张人体图。确认前可切换视角及部位。确认后进入感受页并锁定部位。图中人体为占位轮廓。</p>
+<h4>U03 感受选择页</h4>
+<p><img src="assets/prototype-03.png" alt="U03 感受选择页"></p>
+<p>选项单选。部位已锁定。感受需确认后才进入问答；可配置选项及安全拦截。</p>
+<h4>U04 生活习惯问答页</h4>
+<p><img src="assets/prototype-04.png" alt="U04 生活习惯问答页"></p>
+<p>不提供下一题或提交按钮。选项按压后短暂显示选中态并立即保存。最后一题保存后自动生成总结。</p>
+<h4>U05 情况总结确认页</h4>
+<p><img src="assets/prototype-05.png" alt="U05 情况总结确认页"></p>
+<p>总结由程序自动生成。修改任一答案后自动更新，无需生成按钮。最终确认仅用于启动 AI 分析。</p>
+<h4>U06 扫描与等待页</h4>
+<p><img src="assets/prototype-06.png" alt="U06 扫描与等待页"></p>
+<p>扫描示意为动画关键帧。默认循环周期5秒。排队、调用与校验均受总等待上限约束。到期自动转为部位兜底。</p>
+<h4>U07 健康报告页</h4>
+<p><img src="assets/prototype-07.png" alt="U07 健康报告页"></p>
+<p>报告内容使用清晰正文字体。建议数量与后台一致。现场任务来源于审核任务库，不允许模型自由生成动作。示例文案须经上线内容审核。</p>
+<h4>U08 超时兜底报告页</h4>
+<p><img src="assets/prototype-08.png" alt="U08 超时兜底报告页"></p>
+<p>明确标记预置内容。正文不得暗示个性化分析已完成。AI晚返回不覆盖此页。危险信号不进入该兜底页。</p>
+<h4>U09 现场任务倒计时页</h4>
+<p><img src="assets/prototype-09.png" alt="U09 现场任务倒计时页"></p>
+<p>大号数字显示剩余时间，依据服务端结束时间计算。没有提前通关按钮。到期自动进入Buff页，退出仍清除会话。</p>
+<h4>U10 Buff 通关页</h4>
+<p><img src="assets/prototype-10.png" alt="U10 Buff 通关页"></p>
+<p>工作人员根据页面发放奖励。返回首页时清除临时记录。停留时间后台可调，示例15秒。Buff不代表健康改善结论。</p>
+<h4>U11 安全拦截页</h4>
+<p><img src="assets/prototype-11.png" alt="U11 安全拦截页"></p>
+<p>仅呈现安全处理入口，不提供普通任务、通关Buff和奖励完成提示。具体安全文案从审核规则读取。</p>
+<h4>A01 管理后台登录页</h4>
+<p><img src="assets/prototype-12.png" alt="A01 管理后台登录页"></p>
+<p>没有注册入口或网页账号创建功能。密码不明文回显。登录失败在表单内提示，超过次数时限制登录。</p>
+<h4>A02 后台运行概览</h4>
+<p><img src="assets/prototype-13.png" alt="A02 后台运行概览"></p>
+<p>数据均为原型示例。点击设备可查看状态并确认重置。监控统计区分体验、模型尝试、成功与失败耗时。</p>
+<h4>A03 后台时间参数配置页</h4>
+<p><img src="assets/prototype-14.png" alt="A03 后台时间参数配置页"></p>
+<p>全部时间参数使用滑条，包括日志保留。数值和单位同时显示，支持触摸、键盘调节。发布与保存草稿分开。</p>
+<h4>A04 后台模型与数值配置页</h4>
+<p><img src="assets/prototype-15.png" alt="A04 后台模型与数值配置页"></p>
+<p>非时间数值下拉只含两个预设与自定义。自定义字段按范围校验。模型名称和地址直接输入。下拉展开态为示例。</p>
+<h4>A05 后台题库编辑页</h4>
+<p><img src="assets/prototype-16.png" alt="A05 后台题库编辑页"></p>
+<p>按题目排序编辑选项，条件分支由独立编辑面板配置。该图用于布局，生产表单应显示题目和选项稳定ID并校验重复。</p>
+<h4>A06 后台任务与 Buff 编辑页</h4>
+<p><img src="assets/prototype-17.png" alt="A06 后台任务与 Buff 编辑页"></p>
+<p>任务ID、适用部位、排除条件和审核状态需在详情页编辑。所有时长使用滑条。AI只能从审核后的允许任务中选取。</p>
+<h4>A07 后台安全与兜底页</h4>
+<p><img src="assets/prototype-18.png" alt="A07 后台安全与兜底页"></p>
+<p>切换到安全规则可编辑触发条件、拦截文案和允许的下一步。模板数量必须满足建议数量配置，发布前校验覆盖。</p>
+<h4>A08 后台日志列表页</h4>
+<p><img src="assets/prototype-19.png" alt="A08 后台日志列表页"></p>
+<p>支持按时间、状态、请求和会话过滤。日志导出需权限并记录审计。原型数据均为示例，不代表真实运行记录。</p>
+<h4>A09 后台完整日志详情页</h4>
+<p><img src="assets/prototype-20.png" alt="A09 后台完整日志详情页"></p>
+<p>输入与输出分栏显示。实际完整JSON采用可滚动查看和复制。密钥、密码与会话凭证永久排除。</p>
+<h4>A10 后台配置发布与版本页</h4>
+<p><img src="assets/prototype-21.png" alt="A10 后台配置发布与版本页"></p>
+<p>展示差异后发布，记录操作人和时间。新会话读取新版本；在途会话保持快照。回退同样生成一次可审计发布。</p>
+<h4>C01 组件原型 选择与操作</h4>
+<p><img src="assets/prototype-22.png" alt="C01 组件原型 选择与操作"></p>
+<p>按钮默认、按压、禁用、加载四态。按压缩放建议0.98，过渡120至180毫秒。选项与分段切换具有明确选中态。</p>
+<h4>C02 组件原型 配置表单</h4>
+<p><img src="assets/prototype-23.png" alt="C02 组件原型 配置表单"></p>
+<p>滑条支持单位、范围和步长。自定义只适用于数值。开关为布尔。密钥可替换不可明文回显。错误反馈不只依赖颜色。</p>
+<h4>C03 组件原型 报告与状态</h4>
+<p><img src="assets/prototype-24.png" alt="C03 组件原型 报告与状态"></p>
+<p>AI等待不展示虚构百分比。任务和通关计时来自各自截止时间。报告来源标签始终可见。</p>
+<h4>C04 组件原型 弹窗与异常</h4>
+<p><img src="assets/prototype-25.png" alt="C04 组件原型 弹窗与异常"></p>
+<p>退出需确认以防误触。闲置弹窗显示剩余时间。配置发布展示差异。断网不延长总等待。实际弹窗应同时提供关闭或取消入口。</p>
+</div></div>
+</section>
+</div>
+</div>
+</main>
+<footer class="am-colophon">Generated by Answer me with HTML 0.4.9 · 2026-10-08 11:55</footer>
+<textarea id="am-source" hidden readonly aria-hidden="true">---
+template: doc
+theme: shadcn
+mode: light
+lang: zh
+title: 人体 Debug 互动系统设计文档
+subtitle: 版本 1.1 · 需求确认与开发实施
+source: 原始 Word 设计文档
+---
+
+本页面完整保留原设计文档的产品规则、架构约束、接口定义、验收条件和原型图，并按阅读任务重新组织导航。
+
+```flow LR
+(开始) -&gt; 部位选择 -&gt; 感受选择 -&gt; 生活习惯问答 -&gt; 情况确认 -&gt; AI分析
+AI分析 -&gt; 健康报告 -&gt; 现场任务 -&gt; Buff通关
+AI分析 --&gt; 超时兜底: 超时或失败
+部位选择 --&gt; 安全拦截: 识别危险信号
+```
+
+版本 1.1 日期 2026年10月8日 用途 需求确认与开发实施
+
+本系统面向现场大屏互动。用户选择身体部位和感受，完成选择题，检查情况总结，再查看健康习惯建议。用户完成倒计时任务后领取健康 Buff。本文件确定体验流程、管理后台、数据契约、并发控制、日志和验收要求。初版采用单进程 FastAPI 与 asyncio。系统提供健康知识和生活习惯建议，不生成疾病诊断。
+
+## A 范围与核心规则
+
+### 1 设计范围与确定规则
+
+用户端包含首页、身体部位、感受、问答、确认、扫描、报告、任务和通关页面。后台包含配置、题库、任务库、兜底库、日志、监控和重置功能。管理员账号只通过命令行和 MySQL 管理。
+
+已确定规则：部位和感受确认后锁定。每题点击选项后自动推进。最后一题完成后自动生成情况总结。确认页保留一次最终确认操作。AI 分析从最终确认后开始。AI 超时使用基于身体部位的预置建议。全部时间配置使用滑条。完整输入和模型输出默认记录。
+
+下文默认值、范围和技术选型属于初版实施建议，可以在开发前调整。实际并发容量以模型服务能力和压力测试为准。
+
+## B 用户流程 文案与安全
+
+### 2 用户体验流程
+
+| 环节 | 页面与行为 |
+| --- | --- |
+| 1 开始 | 点击开始人体 Debug。创建独立会话。显示健康知识与日志保存说明。 |
+| 2 部位 | 同一区域显示一张人体图。支持正面、背面、侧面切换。点击部位后显示确认。确认后锁定。 |
+| 3 感受 | 点击酸、痛、僵硬、麻、容易疲劳或只是想了解一下。确认后锁定。选项根据部位配置。 |
+| 4 问答 | 默认五题。全部使用点击选项。点击即保存并进入下一题。显示第几题和总题数。 |
+| 5 确认 | 最后一题完成后自动生成初步情况总结。显示全部答案。允许逐题修改。修改后自动更新总结。点击确认并分析。 |
+| 6 扫描 | 立即开始总等待计时并提交 AI。扫描动画循环播放。有效报告返回后进入报告页。到达等待上限则展示兜底报告。 |
+| 7 报告 | 显示身体分析、改善建议和现场任务。说明建议来自 AI 或预置内容。点击开始健康任务。 |
+| 8 任务 | 显示动作说明及醒目倒计时。默认25秒。计时结束自动进入通关页。 |
+| 9 通关 | 显示健康 Buff、通关提示和奖励说明。供工作人员现场确认。 |
+| 10 结束 | 点击结束体验或默认停留15秒后自动退出。清除现场会话和页面数据，返回首页。 |
+
+身体部位覆盖眼睛、头部、颈肩、手腕、胸腹、腰背、膝盖和腿脚。每个视角的点击区域映射到同一 part_id。同一部位不会因为视角不同而改变问答或报告。
+
+确认页修改题目时，点击新选项后直接返回确认页。不得要求用户重答全部题目。若修改答案使后续分支题失效，系统只要求补答受影响题目，再自动更新总结。已确认的部位和感受不能修改。用户需要重新选择时退出并开始新会话。
+
+### 3 报告与文案规则
+
+初步情况总结由程序模板生成，不调用 AI。它复述已选部位、感受和答案，不添加疾病判断或因果结论。健康 Debug 报告由 AI 生成，并由后端校验。两份报告均使用短句、明确主语和统一术语。每句话说明一个事实或一个动作。保留可能性，不能把相关习惯写成已确认病因。
+
+ASD-STE100 是英文受控语言标准。本项目中文文案采用其写作原则，不宣称通过正式 STE 合规认证。英文文案按指定技能控制句长和表达。中文建议采用一句一个动作、明确对象、减少专业术语的项目规则。
+
+情况总结示例：你选择了颈肩。你感到僵硬。你每天使用电脑超过8小时。你很少活动。你选择的睡眠时间是6至7小时。请检查这些信息。
+
+身体分析应引用具体答案。改善建议应直接说明可执行动作。现场任务只能来自审核后的固定任务库。任务时长和 Buff 由后端配置。AI 仅选择允许的 task_id，不自行编写运动方案。倒计时结束代表游戏计时完成，不能宣称系统验证了动作或改善了健康。
+
+建议数量采用三层控制：Prompt 明确要求 N 条；动态 JSON Schema 将 suggestions 的 minItems 和 maxItems 同时设为 N；后端再次校验长度、重复内容和安全性。N 默认3，允许3至5。校验失败且重试预算不足时使用相同数量的预置建议。不得用重复建议补足数量。
+
+### 4 安全与特殊流程
+
+安全规则在感受确认、每次答案保存、最终确认和报告校验阶段执行。危险信号规则优先于模型和兜底。规则可关联部位、感受及题目选项。识别到规则命中时进入安全提示页，停止普通报告、健康任务和 Buff 流程。安全提示及规则内容上线前需由合适的健康内容审核人员确认。
+
+选择题应提供能触发安全规则的必要选项。系统只能识别问卷覆盖的风险，不能声称排除了危险。报告禁止疾病诊断、用药、治疗承诺和已改善健康等表述。
+
+AI 超时、网络失败、无效 JSON、字段缺失或不安全输出均可触发预置建议。兜底首先按 part_id 匹配，再可按 feeling_id 和答案标签细化。部位通用模板必须存在。无匹配时采用审核后的最低风险通用模板。危险信号不得被兜底绕过。
+
+用户随时退出。后端标记会话已结束，取消可取消的任务，删除临时状态。模型晚返回的内容只记录调用结果，不写回页面。刷新页面返回首页。长时间不操作先提示，再按配置退出。分析和任务阶段使用各自的期限，避免闲置计时与任务计时冲突。
+
+## C 架构 并发与状态机
+
+### 5 架构与并发控制
+
+建议架构：大屏浏览器 → 反向代理 → 单 Worker FastAPI → 异步模型客户端与 MySQL。前端建议 TypeScript，后端建议 Pydantic 校验，模型调用使用异步 HTTP 客户端，MySQL 使用异步驱动或隔离到线程执行同步调用。技术选型不改变数据契约。
+
+asyncio 默认在一个线程中运行事件循环。多个设备的请求在等待网络或数据库时交替推进。它不是多线程，也不保证上游模型同时推理。async def 内不得直接使用 requests.post、time.sleep 或阻塞数据库调用。CPU 密集任务需要移出事件循环。
+
+模型并发默认5。使用有界等待队列和进程内并发控制器。队列满时立即提供部位兜底，不无限堆积请求。等待队列中的请求同样消耗用户总等待预算。开始扫描时启动总截止时间；排队、请求、重试、校验均受该截止时间约束。
+
+初版仅一个 Worker。增加 Worker 或服务器后，需要共享会话存储和全局并发限制。单进程 Semaphore 不能控制多个进程的总并发。并发配置热更新采用可调整容量的控制器，不替换正在使用的 Semaphore，也不访问其私有属性。降低容量时允许已有请求结束，再停止发放超额许可。
+
+```python
+async def analyze(payload, limiter, client, timeout_s):
+async with asyncio.timeout(timeout_s): # 覆盖排队和模型调用的总等待时间
+async with limiter: # 获取并发许可，退出时释放
+return await client.generate(payload) # 使用真正的异步客户端
+```
+
+示例需导入 asyncio。payload 是确认后的输入，limiter 是并发控制器，client 是异步模型客户端，timeout_s 是总预算。调用方必须捕获 TimeoutError 并返回兜底，并在保存结果前校验会话状态。取消客户端请求不一定能停止上游已开始的推理。
+
+### 6 会话与状态机
+
+| 状态 | 进入条件与允许操作 |
+| --- | --- |
+| PART_SELECTION | 创建会话后选择并确认部位 |
+| FEELING_SELECTION | 部位锁定后确认感受 |
+| QUESTIONNAIRE | 感受锁定后逐题作答 |
+| SUMMARY_REVIEW | 全部题目完成，可修改答案并最终确认 |
+| ANALYZING | 最终确认后等待 AI 或兜底 |
+| REPORT_READY | 只接收一次有效报告，可开始任务 |
+| TASK_RUNNING | 显示倒计时，结束进入通关 |
+| COMPLETED | 显示 Buff，结束或停留超时后清理 |
+| SAFETY_STOP | 规则拦截，显示审核后的安全提示 |
+| CLOSED | 退出、清理或闲置结束，不接受新结果 |
+
+每次体验使用随机 session_id 和私有会话凭证。session_id 不能单独作为授权依据。每次模型调用使用 request_id，每次答案变更递增 answer_revision。确认时生成 input_revision，并保存 config_version。结果写入必须同时匹配会话、输入版本、请求和当前状态。
+
+最终确认接口支持 Idempotency-Key。相同输入和相同键只创建一个分析任务。报告、倒计时启动和通关迁移使用原子状态转换。任务倒计时以服务端记录的结束时间为依据，前端仅展示剩余时间，避免重复点击重启计时。
+
+## D 数据契约与后台配置
+
+### 7 Schema 数据契约
+
+统一采用 JSON Schema 2020-12。顶层对象禁止未知字段。时间戳采用带时区的 ISO 8601。ID 为字符串。枚举、必填字段、长度和范围由后端校验。输入使用稳定 ID，显示文案由固定版本题库解析。不得仅把不可理解的 option_id 交给模型。
+
+| Schema | 必填字段及约束 |
+| --- | --- |
+| SessionSchema | session_id、status、answer_revision、config_version、created_at、expires_at。会话凭证只在创建响应交付，不写普通日志。 |
+| BodySelectionSchema | part_id、view、feeling_id、part_locked、feeling_locked。view 为 front、back、side。后端验证部位与感受关系。 |
+| QuestionSchema | question_id、text、options、order、conditions。options 包含 option_id、label、tags。题目与选项 ID 不重复。 |
+| AnswerSchema | question_id、option_id。单题单选。选项必须属于当前题目。答案数与实际题集一致。 |
+| SummarySchema | session_id、answer_revision、facts、summary_text。facts 引用 question_id 和 option_id。生成来源固定为 template。 |
+| AIInputSchema | session_id、request_id、input_revision、config_version、body_selection、answers、report_rules、allowed_task_ids。answers 包含题目和答案显示文字。 |
+| AIReportSchema | body_analysis、suggestions、task_id。suggestions 恰好 N 条。task_id 必须来自当前允许任务集合。 |
+| ReportEnvelopeSchema | report_id、session_id、source、fallback_reason、body_analysis、suggestions、task、buff、config_version。source 为 ai 或 preset。 |
+| SystemConfigSchema | schema_version、config_version、model、runtime、questions、report、safety、ui、logging。密钥读取时只返回是否已设置。 |
+| AIInvocationLogSchema | request_id、session_id、attempt、input_snapshot、request_body、raw_output、validated_output、status、queue_ms、model_ms、total_ms、error_code、created_at。 |
+| SafetyResultSchema | blocked、rule_ids、message、allowed_next_action。命中时不得返回普通任务。 |
+| TaskSchema | task_id、title、instructions、allowed_parts、excluded_tags、duration_seconds、buff_id。由审核任务库生成。 |
+
+输入示例。每个 answer 对象说明一道题和用户选择。report_rules 控制建议数量。allowed_task_ids 限制模型可选任务。示例为单条答案节选，生产接口必须校验全部题目。
+
+```json
+{
+&quot;session_id&quot;: &quot;example-session&quot;,
+&quot;request_id&quot;: &quot;example-request&quot;,
+&quot;input_revision&quot;: 1,
+&quot;config_version&quot;: 1,
+&quot;body_selection&quot;: {
+&quot;part_id&quot;: &quot;neck_shoulder&quot;,
+&quot;part_label&quot;: &quot;颈肩&quot;,
+&quot;feeling_id&quot;: &quot;stiffness&quot;,
+&quot;feeling_label&quot;: &quot;僵硬&quot;
+},
+&quot;answers&quot;: [
+{
+&quot;question_id&quot;: &quot;screen_time&quot;,
+&quot;question_text&quot;: &quot;你每天使用电脑多久&quot;,
+&quot;option_id&quot;: &quot;over_8_hours&quot;,
+&quot;option_text&quot;: &quot;超过8小时&quot;
+}
+],
+&quot;report_rules&quot;: {
+&quot;suggestion_count&quot;: 3,
+&quot;language&quot;: &quot;zh-CN&quot;
+},
+&quot;allowed_task_ids&quot;: [
+&quot;rest_gaze&quot;
+]
+}
+```
+
+AI 输出结构示例。task_id 由后端解析为任务说明和 Buff。下面的动态 Schema 将 N 固定为3，部署时按会话配置生成。
+
+```json
+{
+&quot;$schema&quot;: &quot;https://json-schema.org/draft/2020-12/schema&quot;,
+&quot;type&quot;: &quot;object&quot;,
+&quot;additionalProperties&quot;: false,
+&quot;required&quot;: [
+&quot;body_analysis&quot;,
+&quot;suggestions&quot;,
+&quot;task_id&quot;
+],
+&quot;properties&quot;: {
+&quot;body_analysis&quot;: {
+&quot;type&quot;: &quot;string&quot;,
+&quot;minLength&quot;: 1,
+&quot;maxLength&quot;: 500
+},
+&quot;suggestions&quot;: {
+&quot;type&quot;: &quot;array&quot;,
+&quot;minItems&quot;: 3,
+&quot;maxItems&quot;: 3,
+&quot;uniqueItems&quot;: true,
+&quot;items&quot;: {
+&quot;type&quot;: &quot;string&quot;,
+&quot;minLength&quot;: 1,
+&quot;maxLength&quot;: 120
+}
+},
+&quot;task_id&quot;: {
+&quot;type&quot;: &quot;string&quot;,
+&quot;enum&quot;: [
+&quot;rest_gaze&quot;
+]
+}
+}
+}
+```
+
+Schema 只能验证结构和部分内容约束。它不能证明医学安全、语义正确或 STE 合规。后端还需要规则检查、事实引用检查和人工审核的模板。模型服务不支持结构化输出时，仍要求纯 JSON，并执行相同本地校验。
+
+### 8 后台配置与控件
+
+后台必须登录。时间参数统一使用滑条，显示数值、单位、最小值、最大值和步长。非时间数值参数统一使用两个预设值与自定义三个下拉选项，选自定义后出现输入框。布尔使用开关，枚举使用下拉框，字符串使用输入框，Prompt 使用多行编辑框，密钥使用密码框。
+
+| 时间配置 | 默认值 | 建议范围与步长 |
+| --- | --- | --- |
+| ai_total_wait_seconds 总等待 | 15秒 | 5至60秒，1秒 |
+| queue_timeout_seconds 排队 | 5秒 | 0至30秒，1秒 |
+| model_timeout_seconds 单次调用 | 15秒 | 1至60秒，1秒 |
+| scan_cycle_seconds 动画周期 | 5秒 | 1至10秒，1秒 |
+| task_duration_seconds 任务 | 25秒 | 20至30秒，1秒 |
+| completion_timeout_seconds 通关 | 15秒 | 5至60秒，1秒 |
+| session_idle_timeout_seconds 闲置 | 60秒 | 30至300秒，5秒 |
+| idle_warning_seconds 退出提示 | 10秒 | 5至30秒，1秒 |
+| retry_backoff_seconds 重试间隔 | 1秒 | 0至5秒，1秒 |
+| admin_session_timeout_minutes 后台 | 30分钟 | 5至120分钟，5分钟 |
+| log_retention_days 日志保留 | 30天 | 1至180天，1天 |
+
+所有时间设置均为滑条，包括日志保留和后台登录有效期。总等待时间具有最高优先级。单次模型超时使用配置值与剩余预算中的较小值。动画周期只决定视觉循环，不强制用户至少等待一次完整循环。模型有效结果返回时可立即显示报告。
+
+| 非时间数值 | 预设与自定义 | 校验范围 |
+| --- | --- | --- |
+| max_concurrency | 3、5、自定义 | 1至50 |
+| max_queue_size | 10、20、自定义 | 0至200 |
+| question_count | 5、7、自定义 | 3至10 |
+| suggestion_count | 3、5、自定义 | 3至5 |
+| max_output_tokens | 1024、2048、自定义 | 256至8192，另校验模型支持 |
+| temperature | 0.2、0.5、自定义 | 0至2，另校验模型支持 |
+| ai_retry_count | 0、1、自定义 | 0至2 |
+| login_failure_limit | 5、10、自定义 | 3至20 |
+
+模型配置包括协议类型、API 地址、模型名称、API 密钥、温度、Token 上限及结构化输出模式。题库配置包括部位、视角点击区域、感受、题目、选项、条件、顺序和数量。报告配置包括 Prompt、建议数量、文案规则、允许任务和 Buff。安全配置包括拦截规则、提示文案、任务排除规则和兜底模板。运营配置包括首页、奖励说明、全屏提示、动画资源和可选二维码。
+
+日志配置包括完整日志开关、保留时间、导出权限和脱敏规则。默认启用完整输入输出。后台监控显示服务状态、调用次数、成功率、平均耗时、排队时间和失败次数。
+
+配置采用草稿、校验、发布和版本记录。每次发布形成新 config_version。当前会话使用创建时的快照，新会话使用新版本。紧急安全规则可即时对在途会话生效，并记录所用安全版本。模型并发容量按控制器规则即时调整。
+
+数据库地址、端口、凭证、加密主密钥、进程数量和服务监听参数属于启动配置。后台可显示状态和重启提示，不能把它们作为即时业务配置。管理员账号按用户要求在命令行管理。不得把加密主密钥和加密后的 API 密钥放在同一个数据库中。
+
+## E 管理日志 接口与存储
+
+### 9 管理员与日志设计
+
+管理员账户在 MySQL 保存 username、password_hash、role、enabled 和凭证版本。通过命令行工具生成密码哈希后写入数据库，不保存明文密码。修改密码或停用账号后撤销已有登录会话。登录采用安全 Cookie、失败次数限制及适当的 CSRF 防护。后台提供配置变更审计，不提供新增账号入口。
+
+每次体验记录完整选择、答案及版本。每次模型尝试记录完整应用层请求、模型原始输出、有效报告、错误和耗时。即使 JSON 无效或超时，也记录已收到的输出和错误。API 密钥、Authorization、登录密码、会话凭证不属于用户输入，始终排除。
+
+结束体验清除浏览器、后端临时会话和报告缓存。按本方案保留历史日志，供登录后的管理员查询。这与现场清除不是同一操作。首页应明确告知会保存问答和模型输出。日志不主动收集身份信息；健康回答仍需限制查看、导出和保留时间。到期删除完整内容，可保留不含回答的聚合统计。
+
+| 指标 | 统计定义 |
+| --- | --- |
+| 体验次数 | 创建的 session_id 数量，另列完成、退出和安全拦截 |
+| 分析次数 | 用户最终确认触发的逻辑分析次数 |
+| 模型调用次数 | 实际发出的请求尝试数，包含重试 |
+| 平均调用时间 | 完成的模型尝试 model_ms 之和除以对应尝试数，成功与失败分别显示 |
+| 用户等待时间 | 最终确认至 AI 或兜底报告就绪的 total_ms，另显示P95 |
+| 失败次数 | 超时、网络失败、上游错误、结构失败和安全拒绝分类计数 |
+| 兜底率 | 兜底报告数量除以正常分析请求数，安全拦截单列 |
+
+### 10 接口与存储
+
+| 接口 | 作用 |
+| --- | --- |
+| POST /api/sessions | 创建体验并返回会话凭证与配置快照 |
+| POST /api/sessions/{id}/selection | 确认并锁定部位或感受 |
+| PUT /api/sessions/{id}/answers/{question_id} | 保存或修改答案，返回进度与受影响题目 |
+| GET /api/sessions/{id}/summary | 返回自动生成的最新总结 |
+| POST /api/sessions/{id}/analysis | 最终确认并创建幂等分析任务 |
+| GET /api/sessions/{id}/analysis | 返回等待、AI报告、兜底或安全拦截 |
+| POST /api/sessions/{id}/task | 启动一次任务并返回结束时间 |
+| POST /api/sessions/{id}/close | 关闭会话并清除临时数据 |
+| POST /api/admin/login | 后台登录 |
+| GET PUT /api/admin/config | 查看或编辑草稿配置 |
+| POST /api/admin/config/publish | 校验并发布配置版本 |
+| GET /api/admin/logs 和 /metrics | 按权限查询日志及统计 |
+| GET /health/live 和 /health/ready | 进程存活与依赖就绪检查 |
+
+题库、任务、兜底和安全规则提供相应后台 CRUD 接口。删除被发布版本引用的内容时应保留旧版本，避免在途会话失效。日志导出和重置接口须单独审计。
+
+接口使用统一封装：成功返回 data、request_id 和 server_time；错误返回 code、message 和 request_id。无效输入返回422，身份无效返回401，状态或版本冲突返回409。前端按错误码决定恢复、提示或退出，不显示内部异常堆栈。
+
+MySQL 建议分为 admin_accounts、config_versions、body_parts、feelings、question_sets、task_library、fallback_templates、safety_rules、experience_logs、ai_invocation_logs 和 audit_logs。结构化内容可保存 JSON。request_id 唯一，session_id 和 created_at 建索引。日志表按保留策略清理。临时会话初版放内存，服务重启使其失效，浏览器收到失效响应后回首页。
+
+## F 现场运行 部署与验收
+
+### 11 视觉与现场运行
+
+首页、扫描页、任务倒计时和通关页使用大字号、醒目的艺术字体。问题、确认内容、报告和后台使用清晰正文字体。字体需覆盖中文并具有使用许可。颜色对比应保证大屏远距离阅读。正文艺术化不能降低可读性。
+
+按钮参考 Apple 的圆角、轻量阴影、按压缩放、平滑过渡和明确选中状态。触摸按钮及人体区域需要足够大。细小部位可使用扩大命中区或放大视图，并防止重叠选择。动画不阻止点击响应，支持减少动态效果。
+
+现场页面支持全屏、工作人员重置和横竖屏适配。后台入口不出现在普通体验主流程。奖励由工作人员确认，系统不声称已自动发奖。若以后引入二维码或自动核销，需单独增加唯一领奖码、核销状态及防重复领取接口。
+
+### 12 异常恢复与部署
+
+请求在总等待截止时由后端原子确定最终报告。AI 成功和超时竞争时只能有一个结果生效。页面轮询失败时提示连接问题，重试期间仍使用原截止时间，不延长等待。若后端失联，前端使用启动时获得的审核部位兜底内容或显示服务不可用，并拒绝接收过期结果。
+
+数据库故障时禁止发布配置。AI 日志写入失败应进入有界重试缓冲并显示后台告警。缓冲耗尽时标记日志丢失，不宣称完整保存。密钥错误、配额不足等错误进入监控分类，不把原始敏感异常直接展示给用户。
+
+部署初版采用反向代理、一个 FastAPI Worker、MySQL 和外部模型服务。启用 HTTPS。使用进程管理器或容器自动重启。静态资源本地提供，避免现场依赖外部字体。上线前备份配置和题库，验证数据库恢复、密钥轮换和模型连接。
+
+### 13 验收标准
+
+| 验收项 | 通过条件 |
+| --- | --- |
+| 主流程 | 十个环节完整，单题无需下一步，最后一题自动进入总结 |
+| 锁定与修改 | 部位和感受确认后不可改，修改答案自动更新总结和失效分支 |
+| 视角一致 | 三种视角同一部位使用同一ID和同一题库 |
+| 报告数量 | 配置3或5时AI和兜底均严格输出对应数量且无重复 |
+| 超时 | 排队与模型耗时受总预算约束，到期显示部位兜底 |
+| 晚返回 | 超时后AI不覆盖兜底，退出后结果不进入新会话 |
+| 并发隔离 | 至少两台设备同时完成体验，无答案、报告或状态串用 |
+| 限制容量 | 模型在途请求不超过当前规则允许值，队列满时及时兜底 |
+| 安全拦截 | 规则命中不展示普通任务和Buff，AI和兜底均不能绕过 |
+| 后台控件 | 全部时间均为滑条，其他数值含两个预设和自定义 |
+| 配置版本 | 发布后新会话更新，在途会话保持快照，可审计与回退 |
+| 日志 | 完整输入输出可查，统计定义正确，密钥与凭证不入日志 |
+| 清理 | 退出、闲置和通关到期后现场内容清除，历史日志按策略保留 |
+| 大屏与重置 | 触摸区域可用，文本无溢出，刷新及工作人员重置回首页 |
+| 故障 | 覆盖模型失败、无效JSON、断网、数据库失败与服务重启 |
+
+压力测试至少覆盖配置最大并发、超出队列容量、慢模型、频繁退出和后台并发变更。测试记录模型实际并行能力、等待P95、兜底率和日志完整率。完成这些检查后再确定现场可接入设备数量。
+
+### 14 实施顺序与参考资料
+
+第一阶段建立状态机、题库、总结模板和完整前端流程。第二阶段接入 AI、Schema 校验、安全规则和兜底。第三阶段开发配置后台、完整日志与监控。第四阶段进行多设备联调、异常测试和现场压力测试。上线前审核全部问题、预置建议、任务和安全提示。
+
+参考资料：ASD-STE100 skill 仓库与 SKILL.md，https://github.com/danyuchn/asd-ste100-skill 。该仓库提供简化英文的写作原则，未包含完整官方词典。Python asyncio 官方文档，https://docs.python.org/3/library/asyncio.html 。本文件的中文写作规则和系统配置范围为项目设计约定。
+
+## G 产品与组件原型
+
+### 15 产品与组件原型
+
+本节补充25张页面和组件原型。原型用于确认布局、状态和交互，不是可运行页面。画面采用浅灰背景、白色圆角卡片和紫色主操作，按钮参考Apple的轻量层次与按压反馈。人体轮廓为可点击区域的占位图。最终人体素材和艺术字体应在视觉定稿时替换。
+
+用户端共有11张图，覆盖十个主环节以及超时兜底和安全拦截。后台共有10张图，覆盖登录、监控、配置、题库、任务、安全、日志和发布。组件共有4张状态图，覆盖选择操作、配置表单、报告计时及弹窗异常。
+
+| 图稿编号 | 覆盖范围 | 阅读重点 |
+| --- | --- | --- |
+| U01 至 U11 | 用户端体验页面 | 确认后锁定；问答自动推进；超时兜底；倒计时自动跳转 |
+| A01 至 A10 | 后台管理页面 | 时间滑条；数值预设与自定义；日志完整查看；配置发布 |
+| C01 至 C04 | 公共组件及状态 | 选中、禁用、加载、校验、报告来源、退出与闲置 |
+
+交互补充：按钮按压后短暂缩放；加载态阻止重复操作。选择题只显示点击选项，不显示下一题按钮。确认页的修改操作完成后直接返回总结。退出弹窗提供取消入口。滑条应支持键盘调节与触摸操作。错误信息显示在对应控件旁，不能只用颜色表示。
+
+原型中的建议、任务、安全提示、模型地址和统计数据均为示例。上线前使用审核内容和实际配置。AI等待页面不显示虚构进度百分比。倒计时结束只表示游戏计时完成。后台敏感输入不回显密钥。
+
+#### U01 首页
+
+![U01 首页](assets/prototype-01.png)
+
+点击开始创建会话。日志说明在开始操作前可见。后台入口不出现在体验主流程。
+
+#### U02 人体部位选择页
+
+![U02 人体部位选择页](assets/prototype-02.png)
+
+一次只展示一张人体图。确认前可切换视角及部位。确认后进入感受页并锁定部位。图中人体为占位轮廓。
+
+#### U03 感受选择页
+
+![U03 感受选择页](assets/prototype-03.png)
+
+选项单选。部位已锁定。感受需确认后才进入问答；可配置选项及安全拦截。
+
+#### U04 生活习惯问答页
+
+![U04 生活习惯问答页](assets/prototype-04.png)
+
+不提供下一题或提交按钮。选项按压后短暂显示选中态并立即保存。最后一题保存后自动生成总结。
+
+#### U05 情况总结确认页
+
+![U05 情况总结确认页](assets/prototype-05.png)
+
+总结由程序自动生成。修改任一答案后自动更新，无需生成按钮。最终确认仅用于启动 AI 分析。
+
+#### U06 扫描与等待页
+
+![U06 扫描与等待页](assets/prototype-06.png)
+
+扫描示意为动画关键帧。默认循环周期5秒。排队、调用与校验均受总等待上限约束。到期自动转为部位兜底。
+
+#### U07 健康报告页
+
+![U07 健康报告页](assets/prototype-07.png)
+
+报告内容使用清晰正文字体。建议数量与后台一致。现场任务来源于审核任务库，不允许模型自由生成动作。示例文案须经上线内容审核。
+
+#### U08 超时兜底报告页
+
+![U08 超时兜底报告页](assets/prototype-08.png)
+
+明确标记预置内容。正文不得暗示个性化分析已完成。AI晚返回不覆盖此页。危险信号不进入该兜底页。
+
+#### U09 现场任务倒计时页
+
+![U09 现场任务倒计时页](assets/prototype-09.png)
+
+大号数字显示剩余时间，依据服务端结束时间计算。没有提前通关按钮。到期自动进入Buff页，退出仍清除会话。
+
+#### U10 Buff 通关页
+
+![U10 Buff 通关页](assets/prototype-10.png)
+
+工作人员根据页面发放奖励。返回首页时清除临时记录。停留时间后台可调，示例15秒。Buff不代表健康改善结论。
+
+#### U11 安全拦截页
+
+![U11 安全拦截页](assets/prototype-11.png)
+
+仅呈现安全处理入口，不提供普通任务、通关Buff和奖励完成提示。具体安全文案从审核规则读取。
+
+#### A01 管理后台登录页
+
+![A01 管理后台登录页](assets/prototype-12.png)
+
+没有注册入口或网页账号创建功能。密码不明文回显。登录失败在表单内提示，超过次数时限制登录。
+
+#### A02 后台运行概览
+
+![A02 后台运行概览](assets/prototype-13.png)
+
+数据均为原型示例。点击设备可查看状态并确认重置。监控统计区分体验、模型尝试、成功与失败耗时。
+
+#### A03 后台时间参数配置页
+
+![A03 后台时间参数配置页](assets/prototype-14.png)
+
+全部时间参数使用滑条，包括日志保留。数值和单位同时显示，支持触摸、键盘调节。发布与保存草稿分开。
+
+#### A04 后台模型与数值配置页
+
+![A04 后台模型与数值配置页](assets/prototype-15.png)
+
+非时间数值下拉只含两个预设与自定义。自定义字段按范围校验。模型名称和地址直接输入。下拉展开态为示例。
+
+#### A05 后台题库编辑页
+
+![A05 后台题库编辑页](assets/prototype-16.png)
+
+按题目排序编辑选项，条件分支由独立编辑面板配置。该图用于布局，生产表单应显示题目和选项稳定ID并校验重复。
+
+#### A06 后台任务与 Buff 编辑页
+
+![A06 后台任务与 Buff 编辑页](assets/prototype-17.png)
+
+任务ID、适用部位、排除条件和审核状态需在详情页编辑。所有时长使用滑条。AI只能从审核后的允许任务中选取。
+
+#### A07 后台安全与兜底页
+
+![A07 后台安全与兜底页](assets/prototype-18.png)
+
+切换到安全规则可编辑触发条件、拦截文案和允许的下一步。模板数量必须满足建议数量配置，发布前校验覆盖。
+
+#### A08 后台日志列表页
+
+![A08 后台日志列表页](assets/prototype-19.png)
+
+支持按时间、状态、请求和会话过滤。日志导出需权限并记录审计。原型数据均为示例，不代表真实运行记录。
+
+#### A09 后台完整日志详情页
+
+![A09 后台完整日志详情页](assets/prototype-20.png)
+
+输入与输出分栏显示。实际完整JSON采用可滚动查看和复制。密钥、密码与会话凭证永久排除。
+
+#### A10 后台配置发布与版本页
+
+![A10 后台配置发布与版本页](assets/prototype-21.png)
+
+展示差异后发布，记录操作人和时间。新会话读取新版本；在途会话保持快照。回退同样生成一次可审计发布。
+
+#### C01 组件原型 选择与操作
+
+![C01 组件原型 选择与操作](assets/prototype-22.png)
+
+按钮默认、按压、禁用、加载四态。按压缩放建议0.98，过渡120至180毫秒。选项与分段切换具有明确选中态。
+
+#### C02 组件原型 配置表单
+
+![C02 组件原型 配置表单](assets/prototype-23.png)
+
+滑条支持单位、范围和步长。自定义只适用于数值。开关为布尔。密钥可替换不可明文回显。错误反馈不只依赖颜色。
+
+#### C03 组件原型 报告与状态
+
+![C03 组件原型 报告与状态](assets/prototype-24.png)
+
+AI等待不展示虚构百分比。任务和通关计时来自各自截止时间。报告来源标签始终可见。
+
+#### C04 组件原型 弹窗与异常
+
+![C04 组件原型 弹窗与异常](assets/prototype-25.png)
+
+退出需确认以防误触。闲置弹窗显示剩余时间。配置发布展示差异。断网不延长总等待。实际弹窗应同时提供关闭或取消入口。
+</textarea>
+<script>
+(() => {
+  const root = document.documentElement;
+  const cycle = (list, cur) => list[(list.indexOf(cur) + 1) % list.length];
+  const label = (btn, value) => {
+    const map = JSON.parse(btn.dataset.labels || '{}');
+    btn.textContent = map[value] || value;
+  };
+  const bind = (name, attr, values) => {
+    const btn = document.querySelector(`[data-am="${name}"]`);
+    if (!btn) return;
+    label(btn, root.getAttribute(attr));
+    btn.addEventListener('click', () => {
+      const next = cycle(values, root.getAttribute(attr));
+      root.setAttribute(attr, next);
+      label(btn, next);
+    });
+  };
+  bind('theme', 'data-theme', ['blueprint', 'shadcn']);
+  bind('mode', 'data-mode', ['auto', 'light', 'dark']);
+
+  const copyBtn = document.querySelector('[data-am="copy"]');
+  copyBtn?.addEventListener('click', async () => {
+    const nodes = document.querySelectorAll('#am-source');
+    const text = nodes[nodes.length - 1]?.value ?? '';
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = Object.assign(document.createElement('textarea'), { value: text });
+      document.body.append(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    }
+    const original = copyBtn.textContent;
+    copyBtn.textContent = copyBtn.dataset.done;
+    setTimeout(() => { copyBtn.textContent = original; }, 1400);
+  });
+})();
+(() => {
+// Pure planner for justified ("photo wall") rows on sheet pages. No DOM access.
+//
+// This file must stay inlinable into the page script: top-level declarations only, no imports, and the exports are
+// `planLayout` and the constants the DOM adapter shares (STEP, MAX_SCALE, MIN_SCALE). The page build strips the `export ` keyword,
+// and test/layout-plan.test.js checks that this still works.
+//
+// planLayout({ width, gap, cols, panels }) -> { rows: [{ columns: [{ panels: [index, ...], width }], height }] }
+//
+// Input (all lengths in px):
+//   width   container width
+//   gap     space between columns, and between two panels stacked in one column
+//   cols    most columns in one row (the planner never uses more than MAX_COLUMNS, but spans stay shares of `cols`)
+//   panels  one entry per panel, in reading order:
+//     samples   [{ w, h }] panel height at sampled widths, ascending by w (heights between samples are interpolated)
+//     minWidth  narrowest feasible width (clamped to `width`)
+//     maxWidth  widest useful width; beyond it the panel only gains empty space (default: no limit)
+//     natural   natural diagram width for a diagram-only panel (default: none)
+//     pad       panel width not used by the diagram (padding and border; default 0)
+//     span      the author's width hint in grid columns (default 1); span >= cols keeps the panel alone in its row
+//
+// Output: { rows, maxScale }. Rows are in reading order; a row is a list of columns (at most `cols`); a column holds one panel or two
+// consecutive panels, stacked. For integer inputs the column widths plus the gaps between them equal `width`.
+// Rows are chosen by dynamic programming over break points; widths by a search in STEP px steps. Cost per row:
+//   H = tallest column; waste = sum((H - columnHeight) * columnWidth) + sum over diagrams wider than maxWidth of (w - maxWidth) * h
+//   dev = sum(((w - preferred) / oneColumn)^2) + SCALE_WEIGHT * sum over diagrams of (ln(scale) / ln(MAX_SCALE))^2
+//   cost = waste / 1000 + PREF_WEIGHT * dev * H
+// Scale band: diagrams on one page stay at similar sizes. With the result's `maxScale` as the diagram size limit, a diagram is
+// shown at scale min(maxScale, (width - pad) / natural). The planner tries a few bands [lo, lo * BAND_RATIO] (lo in BAND_LOS) and
+// keeps the cheapest plan in which no diagram is narrower than scale lo and none is shown above the band's top, so the largest and
+// smallest diagram scale on the page differ by at most BAND_RATIO. A panel wider than its diagram's top size keeps the diagram at
+// that size, and the page script must set the diagram's max-width to natural * maxScale. The band starts no higher than the
+// largest scale the page allows the least roomy diagram, so one wide diagram lowers the band for the others.
+// If no band is feasible the plan is made without a band (maxScale = MAX_SCALE); if no plan fits (or the input is unusable) the
+// result is a single column: one panel per row at the full width.
+
+const STEP = 10;
+const MAX_SCALE = 1.25;
+const MIN_SCALE = 0.75; // the narrowest a diagram is shown, as a share of its natural width
+const MAX_COLUMNS = 6; // rows with more columns are unreadable, and the search grows steeply with the column count
+const BAND_RATIO = 1.25; // the largest and smallest diagram scale on a page differ by at most this
+const BAND_LOS = [MIN_SCALE, 0.85, 0.95, 1]; // lower ends tried for the band; lo * BAND_RATIO is the upper end (1.25 means no upper limit)
+const SCALE_WEIGHT = 3;
+const PREF_WEIGHT = 0.15;
+
+function heightAt(samples, w) {
+  const i = samples.findIndex((s) => s.w >= w);
+  if (i === -1) return samples[samples.length - 1].h;
+  if (i === 0) return samples[0].h;
+  const a = samples[i - 1];
+  const b = samples[i];
+  return a.h + ((b.h - a.h) * (w - a.w)) / (b.w - a.w);
+}
+
+// Every way to split `len` consecutive panels into columns of 1 or 2 panels, as lists of column sizes.
+function splits(len) {
+  if (len === 0) return [[]];
+  return [1, 2].filter((k) => k <= len).flatMap((k) => splits(len - k).map((rest) => [k, ...rest]));
+}
+
+function singleColumn(width, panels) {
+  return { rows: panels.map((_, i) => ({ columns: [{ panels: [i], width }], height: 0 })) };
+}
+
+function planLayout({ width, gap = 0, cols = 3, panels }) {
+  const usable = Number.isFinite(width) && width > 0 && panels.every((p) => Array.isArray(p.samples) && p.samples.length > 0);
+  if (!usable) return singleColumn(width, panels);
+
+  // `cols` stays the unit of the author's spans; no row gets more than MAX_COLUMNS columns however large `cols` is.
+  const maxColumns = Math.min(cols, MAX_COLUMNS);
+  const oneColumn = Math.max(1, (width - gap * (cols - 1)) / cols);
+  // Per-panel limits. With a band [lo, lo * BAND_RATIO], a diagram is no narrower than scale lo and shown at most at the top of the
+  // band: a wider panel keeps it at that size and gains empty space, which the cost counts as waste.
+  const prepare = (lo) => panels.map((p) => {
+    const pad = p.pad ?? 0;
+    const diagram = lo > 0 && p.natural > 0;
+    const scaleCap = diagram ? Math.min(MAX_SCALE, lo * BAND_RATIO) : MAX_SCALE;
+    return {
+      ...p,
+      minWidth: Math.min(width, Math.max(Math.ceil(p.minWidth || 0), diagram ? Math.ceil(p.natural * lo + pad) : 0)),
+      maxWidth: Math.min(p.maxWidth ?? Infinity, diagram ? p.natural * scaleCap + pad : Infinity),
+      scaleCap,
+      pad,
+      preferred: Math.min(width, (p.span ?? 1) * oneColumn + ((p.span ?? 1) - 1) * gap),
+      alone: (p.span ?? 1) >= cols,
+    };
+  });
+  let info = prepare(0);
+  // Beyond its maxWidth a panel only gains empty space, so its height stops changing there (matters when a band lowers maxWidth).
+  const heightOf = (p, w) => heightAt(p.samples, Math.min(w, p.maxWidth));
+  const columnHeight = (col, w) => col.reduce((h, k) => h + heightOf(info[k], w), 0) + gap * (col.length - 1);
+
+  function bestColumns(columns) {
+    const avail = width - gap * (columns.length - 1);
+    const mins = columns.map((c) => Math.max(...c.map((k) => info[k].minWidth)));
+    const minsFrom = mins.map((_, n) => mins.slice(n).reduce((s, w) => s + w, 0));
+    if (minsFrom[0] > avail) return null;
+    let best = null;
+    const evaluate = (ws) => {
+      const hs = ws.map((w, n) => columnHeight(columns[n], w));
+      const H = Math.max(...hs);
+      let waste = 0;
+      let dev = 0;
+      ws.forEach((w, n) => {
+        waste += (H - hs[n]) * w;
+        for (const k of columns[n]) {
+          const p = info[k];
+          if (w > p.maxWidth) waste += (w - p.maxWidth) * heightOf(p, w);
+          dev += ((w - p.preferred) / oneColumn) ** 2;
+          if (p.natural > 0) {
+            const scale = Math.min(p.scaleCap, Math.max(w - p.pad, 1) / p.natural);
+            dev += SCALE_WEIGHT * (Math.log(scale) / Math.log(MAX_SCALE)) ** 2;
+          }
+        }
+      });
+      const cost = waste / 1000 + PREF_WEIGHT * dev * H;
+      if (!best || cost < best.cost) best = { cost, ws, height: H, columns };
+    };
+    const choose = (n, used, ws) => {
+      if (n === columns.length - 1) {
+        const w = avail - used;
+        if (w >= mins[n]) evaluate([...ws, w]);
+        return;
+      }
+      for (let w = mins[n]; used + w + minsFrom[n + 1] <= avail; w += STEP) choose(n + 1, used + w, [...ws, w]);
+    };
+    choose(0, 0, []);
+    return best;
+  }
+
+  // Best columns for one row of panels i..j.
+  function bestRow(i, j) {
+    if (j > i && info.slice(i, j + 1).some((p) => p.alone)) return null;
+    let best = null;
+    for (const split of splits(j - i + 1)) {
+      if (split.length > maxColumns) continue;
+      let next = i;
+      const columns = split.map((size) => Array.from({ length: size }, () => next++));
+      const r = bestColumns(columns);
+      if (r && (!best || r.cost < best.cost)) best = r;
+    }
+    return best;
+  }
+
+  // Row breaks in reading order, for the band set up in `info`. A row holds at most 2 * maxColumns panels. Null if nothing fits.
+  function solve() {
+    const n = panels.length;
+    const total = Array(n + 1).fill(Infinity);
+    const from = Array(n + 1).fill(-1);
+    const chosen = Array(n + 1).fill(null);
+    total[0] = 0;
+    for (let j = 1; j <= n; j++) {
+      for (let i = Math.max(0, j - 2 * maxColumns); i < j; i++) {
+        if (total[i] === Infinity) continue;
+        const r = bestRow(i, j - 1);
+        if (r && total[i] + r.cost < total[j]) {
+          total[j] = total[i] + r.cost;
+          from[j] = i;
+          chosen[j] = r;
+        }
+      }
+    }
+    if (total[n] === Infinity) return null;
+    const rows = [];
+    for (let j = n; j > 0; j = from[j]) {
+      const r = chosen[j];
+      rows.unshift({ columns: r.columns.map((panelsInColumn, c) => ({ panels: panelsInColumn, width: r.ws[c] })), height: r.height });
+    }
+    return { rows, cost: total[n] };
+  }
+
+  let best = null;
+  const diagrams = panels.filter((p) => p.natural > 0);
+  if (diagrams.length > 1) {
+    // No diagram can be shown larger than the page allows, so the band cannot start above the smallest of those limits.
+    const reach = Math.min(...diagrams.map((p) => Math.min(MAX_SCALE, Math.max(width - (p.pad ?? 0), 1) / p.natural)));
+    for (const lo of new Set([...BAND_LOS.filter((x) => x < reach), reach])) {
+      info = prepare(lo);
+      const r = solve();
+      if (r && (!best || r.cost < best.cost)) best = { ...r, maxScale: Math.min(MAX_SCALE, lo * BAND_RATIO) };
+    }
+    info = prepare(0);
+  }
+  best ??= solve();
+  return best ? { rows: best.rows, maxScale: best.maxScale ?? MAX_SCALE } : singleColumn(width, panels);
+}
+
+// DOM adapter for the sheet's justified ("photo wall") layout. Not a module: compose.js puts it after src/runtime/layout-plan.js
+// (which defines planLayout and the shared STEP, MAX_SCALE, MIN_SCALE) inside one function scope of the page script.
+//
+// It measures every panel at sampled widths, asks planLayout for rows and column widths, and applies them with flexbox.
+// The rendered HTML keeps the plain CSS grid: with JavaScript off, at the single-column breakpoint, or while printing, the grid is what
+// shows (the planned widths belong to the screen width, so print never gets a mix of the two); after printing the layout comes back.
+
+const grid = document.querySelector('.am-grid');
+const panels = grid ? [...grid.children].filter((el) => el.classList.contains('am-panel')) : [];
+
+if (panels.length > 1) {
+  const SINGLE_COLUMN = '(max-width: 760px)'; // the single-column breakpoint in src/themes/base.css
+  const TWO_COLUMNS = '(max-width: 1100px)'; // below this the CSS grid has two columns
+  const SAMPLE_STEP = 20; // width sampling step, px; the planner interpolates between samples
+  const TEXT_MIN = 260; // text keeps at least about 16 CJK characters per line
+  const TABLE_COL_MIN = 96; // per table column, px
+  const DIAGRAM_MIN = 160;
+  const RESIZE_DELAY = 150;
+  const OVERFLOWING = '.am-table-wrap, .am-diagram, .am-annot-scroll, pre';
+
+  const original = new Map([grid, ...panels, ...grid.querySelectorAll('.am-diagram > svg')].map((el) => [el, el.getAttribute('style')]));
+  const restoreStyle = (el) => (original.get(el) === null ? el.removeAttribute('style') : el.setAttribute('style', original.get(el)));
+
+  // Back to the plain grid markup and styles.
+  const restore = () => {
+    for (const box of grid.querySelectorAll(':scope > .am-col')) box.replaceWith(...box.children);
+    for (const el of original.keys()) restoreStyle(el);
+  };
+
+  // The author's width hint, rendered as data-span only when the author wrote one. The inline grid-column is the no-JavaScript fallback
+  // and may hold spans the server added, so it is never read here.
+  const spanHint = (el) => Number(el.dataset.span) || 1;
+  const diagramOnly = (el) => {
+    const body = el.querySelector(':scope > .am-panel-body');
+    return body && body.children.length === 1 ? body.querySelector(':scope > .am-diagram > svg') : null;
+  };
+  const naturalWidth = (svg) => Number(svg.getAttribute('width')) || 0;
+
+  // Height (and, for panels with tables or code, the narrowest width without sideways scrolling) at sampled widths.
+  // Only one panel is displayed while it is measured, so each width change lays out that panel alone.
+  function measure(width) {
+    grid.style.display = 'block';
+    for (const el of panels) {
+      el.style.display = 'none';
+      el.style.boxSizing = 'border-box';
+      for (const svg of el.querySelectorAll('.am-diagram > svg')) {
+        svg.style.width = '100%';
+        svg.style.maxWidth = `${naturalWidth(svg) * MAX_SCALE}px`;
+      }
+    }
+    const info = panels.map((el) => {
+      const svg = diagramOnly(el);
+      const svgs = [...el.querySelectorAll('.am-diagram > svg')];
+      const scrollers = el.querySelectorAll(OVERFLOWING);
+      const tableCols = Math.max(0, ...[...el.querySelectorAll('table tr:first-child')].map((tr) => tr.children.length));
+      el.style.display = '';
+      el.style.width = `${width}px`;
+      const pad = svg ? el.offsetWidth - svg.parentElement.clientWidth : 0;
+      const natural = svg ? naturalWidth(svg) : 0;
+      const shrunk = Math.max(0, ...svgs.map((s) => naturalWidth(s) * MIN_SCALE)) + (svg ? pad : 34);
+      const floor = svg ? Math.max(DIAGRAM_MIN, natural * MIN_SCALE + pad) : Math.max(TEXT_MIN, shrunk, tableCols * TABLE_COL_MIN + 34);
+      const from = Math.min(width, Math.floor(floor / STEP) * STEP);
+      const samples = [];
+      let fits = null;
+      for (let w = from; ; w += SAMPLE_STEP) {
+        w = Math.min(w, width);
+        el.style.width = `${w}px`;
+        if (fits === null && !svg && scrollers.length && ![...scrollers].some((s) => s.scrollWidth > s.clientWidth + 1)) fits = w;
+        samples.push({ w, h: el.offsetHeight });
+        if (w === width) break;
+      }
+      el.style.display = 'none';
+      return {
+        samples,
+        minWidth: svg ? floor : Math.max(floor, fits ?? (scrollers.length ? width : 0)),
+        maxWidth: svg ? natural * MAX_SCALE + pad : Infinity,
+        natural,
+        pad,
+        span: spanHint(el),
+      };
+    });
+    for (const el of panels) {
+      el.style.display = '';
+      el.style.width = '';
+    }
+    return info;
+  }
+
+  // Each column gets a fixed width. A row adds up to the full width, so flex-wrap breaks rows by itself.
+  // Stacked panels go into a column wrapper whose last panel absorbs the extra height.
+  function apply(plan, gap) {
+    grid.style.display = 'flex';
+    grid.style.flexWrap = 'wrap';
+    grid.style.alignItems = 'stretch';
+    grid.style.gap = `${gap}px`;
+    for (const el of panels) {
+      el.style.gridColumn = '';
+      el.style.gridRow = '';
+      el.style.flex = '0 0 auto';
+    }
+    for (const row of plan.rows) {
+      for (const col of row.columns) {
+        const width = `${col.width}px`;
+        if (col.panels.length === 1) {
+          panels[col.panels[0]].style.width = width;
+          continue;
+        }
+        const box = document.createElement('div');
+        box.className = 'am-col';
+        box.style.cssText = `width:${width};flex:0 0 auto;display:flex;flex-direction:column;gap:${gap}px`;
+        panels[col.panels[0]].before(box);
+        for (const k of col.panels) {
+          panels[k].style.width = '';
+          box.append(panels[k]);
+        }
+        panels[col.panels[col.panels.length - 1]].style.flex = '1 1 auto';
+      }
+    }
+  }
+
+  // Diagram-only panels show their diagram at most at the top of the page's scale band; a wider panel gains empty space instead.
+  function capDiagrams(maxScale) {
+    for (const el of panels) {
+      const svg = diagramOnly(el);
+      if (svg) svg.style.maxWidth = `${naturalWidth(svg) * maxScale}px`;
+    }
+  }
+
+  const containerWidth = () => Math.floor(grid.getBoundingClientRect().width);
+
+  function justify() {
+    if (printing || printQuery.matches) return;
+    try {
+      // A vertical scrollbar can appear or vanish once the rows change height; plan again if the width moved.
+      let planned = -1;
+      for (let pass = 0; pass < 3 && planned !== containerWidth(); pass++) {
+        restore();
+        if (matchMedia(SINGLE_COLUMN).matches) return;
+        planned = containerWidth();
+        const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+        const cols = Math.max(1, Number(getComputedStyle(grid).getPropertyValue('--cols')) || 3);
+        const plan = planLayout({ width: planned, gap, cols: matchMedia(TWO_COLUMNS).matches ? Math.min(cols, 2) : cols, panels: measure(planned) });
+        apply(plan, gap);
+        capDiagrams(plan.maxScale);
+      }
+      // The width never settled: columns planned for another width would overflow or leave gaps, so show the plain grid.
+      if (planned !== containerWidth()) restore();
+    } catch {
+      restore();
+    }
+  }
+
+  // Printing: back to the plain grid (spans and all), and the layout again afterwards. Browsers disagree on which of the
+  // `beforeprint` event and the print media query change fires first, or at all, so listen to both; both are idempotent.
+  // While `printing` is set (beforeprint to afterprint) justify() does nothing, so a late resize cannot bring flex widths into the print layout.
+  let printing = false;
+  const printQuery = matchMedia('print');
+  let timer = 0;
+  const later = () => {
+    clearTimeout(timer);
+    timer = setTimeout(justify, RESIZE_DELAY);
+  };
+  const toPrint = () => {
+    clearTimeout(timer);
+    restore();
+  };
+  justify();
+  addEventListener('resize', later);
+  addEventListener('beforeprint', () => {
+    printing = true;
+    toPrint();
+  });
+  addEventListener('afterprint', () => {
+    printing = false;
+    later();
+  });
+  printQuery.addEventListener('change', (e) => (e.matches ? toPrint() : later()));
+  // Late changes to panel heights: web fonts arriving, and images inside the grid finishing their load (load does not bubble, so capture it).
+  document.fonts?.ready.then(later);
+  grid.addEventListener('load', later, true);
+  // Switching theme changes paddings and fonts, hence panel heights.
+  document.querySelector('[data-am="theme"]')?.addEventListener('click', later);
+}
+})();
+</script>
+</body>
+</html>
