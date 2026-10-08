@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="zh-CN" data-theme="shadcn" data-mode="light" data-style="off">
+<html lang="zh-CN" data-theme="shadcn" data-mode="light" data-style="80">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="generator" content="Answer me with HTML 0.4.9">
-<title>人体 Debug 互动系统设计文档</title>
+<title>人体 Debug 系统如何运转</title>
 <style>
 html[data-theme="blueprint"], html[data-theme="blueprint"][data-mode="light"] {
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -444,1213 +444,460 @@ html[data-theme="shadcn"] .am-kv { border-color: var(--line); border-radius: var
 <button class="am-btn" type="button" data-am="copy" data-done="已复制 ✓">复制源稿</button>
 </div>
 <main class="am-doc">
-<header class="am-head"><h1>人体 Debug 互动系统设计文档</h1><p class="am-sub">版本 1.1 · 需求确认与开发实施</p><div class="am-head-meta"><span><b>source</b>原始 Word 设计文档</span></div><div class="am-intro am-md"><div class="am-md"><p>本页面完整保留原设计文档的产品规则、架构约束、接口定义、验收条件和原型图，并按阅读任务重新组织导航。</p>
-</div>
-<figure class="am-diagram am-flow"><svg viewBox="0 0 1274 170" width="1274" height="170" role="img" aria-label="流程图：开始、部位选择、感受选择、生活习惯问答、情况确认、AI分析、健康报告、现场任务" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M90,67 L101.5,67 Q113,67 124.5,67 L136,67" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M216,80.7 L247.8,91.6 Q279.5,102.5 311.3,102.5 L343,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M423,102.5 L434.5,102.5 Q446,102.5 457.5,102.5 L469,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M575,102.5 L586.5,102.5 Q598,102.5 609.5,102.5 L621,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="0"><path class="am-edge" d="M701,102.5 L712.5,102.5 Q724,102.5 735.5,102.5 L747,102.5" marker-end="url(#am1-arrow)"/></g><g data-step="1"><path class="am-edge" d="M814,115.5 L842.9,126.8 Q871.8,138 900.6,138 L929.5,138" marker-end="url(#am1-arrow)"/></g><g data-step="1"><path class="am-edge" d="M1009.5,138 L1021,138 Q1032.5,138 1044,138 L1055.5,138" marker-end="url(#am1-arrow)"/></g><g data-step="1"><path class="am-edge" d="M1135.5,138 L1147,138 Q1158.5,138 1170,138 L1181.5,138" marker-end="url(#am1-arrow)"/></g><g data-step="2"><path class="am-edge am-edge--dashed" d="M814,89.5 L842.9,78.2 Q871.8,67 900.6,67 L929.5,67" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="838" y="58" width="67.5" height="18" rx="3"/><text x="871.8" y="67" text-anchor="middle" dominant-baseline="central">超时或失败</text></g></g><g data-step="3"><path class="am-edge am-edge--dashed" d="M216,53.3 L247.8,42.4 Q279.5,31.5 311.3,31.5 L343,31.5" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="240" y="22.5" width="79" height="18" rx="3"/><text x="279.5" y="31.5" text-anchor="middle" dominant-baseline="central">识别危险信号</text></g></g></g><g><g class="am-node am-node--round" data-key="开始" data-step="0"><rect class="am-node-shape" x="14" y="49.5" width="76" height="35" rx="17.5"/><text x="52" y="67" text-anchor="middle" dominant-baseline="central">开始</text></g><g class="am-node am-node--rect" data-key="部位选择" data-step="0"><rect class="am-node-shape" x="136" y="49.5" width="80" height="35" rx="3"/><text x="176" y="67" text-anchor="middle" dominant-baseline="central">部位选择</text></g><g class="am-node am-node--rect" data-key="感受选择" data-step="0"><rect class="am-node-shape" x="343" y="85" width="80" height="35" rx="3"/><text x="383" y="102.5" text-anchor="middle" dominant-baseline="central">感受选择</text></g><g class="am-node am-node--rect" data-key="生活习惯问答" data-step="0"><rect class="am-node-shape" x="469" y="85" width="106" height="35" rx="3"/><text x="522" y="102.5" text-anchor="middle" dominant-baseline="central">生活习惯问答</text></g><g class="am-node am-node--rect" data-key="情况确认" data-step="0"><rect class="am-node-shape" x="621" y="85" width="80" height="35" rx="3"/><text x="661" y="102.5" text-anchor="middle" dominant-baseline="central">情况确认</text></g><g class="am-node am-node--rect" data-key="AI分析" data-step="0"><rect class="am-node-shape" x="747" y="85" width="67" height="35" rx="3"/><text x="780.5" y="102.5" text-anchor="middle" dominant-baseline="central">AI分析</text></g><g class="am-node am-node--rect" data-key="健康报告" data-step="1"><rect class="am-node-shape" x="929.5" y="120.5" width="80" height="35" rx="3"/><text x="969.5" y="138" text-anchor="middle" dominant-baseline="central">健康报告</text></g><g class="am-node am-node--rect" data-key="现场任务" data-step="1"><rect class="am-node-shape" x="1055.5" y="120.5" width="80" height="35" rx="3"/><text x="1095.5" y="138" text-anchor="middle" dominant-baseline="central">现场任务</text></g><g class="am-node am-node--rect" data-key="Buff通关" data-step="1"><rect class="am-node-shape" x="1181.5" y="120.5" width="78.4" height="35" rx="3"/><text x="1220.7" y="138" text-anchor="middle" dominant-baseline="central">Buff通关</text></g><g class="am-node am-node--rect" data-key="超时兜底" data-step="2"><rect class="am-node-shape" x="929.5" y="49.5" width="80" height="35" rx="3"/><text x="969.5" y="67" text-anchor="middle" dominant-baseline="central">超时兜底</text></g><g class="am-node am-node--rect" data-key="安全拦截" data-step="3"><rect class="am-node-shape" x="343" y="14" width="80" height="35" rx="3"/><text x="383" y="31.5" text-anchor="middle" dominant-baseline="central">安全拦截</text></g></g></svg></figure>
-<div class="am-md"><p>版本 1.1 日期 2026年10月8日 用途 需求确认与开发实施</p>
-<p>本系统面向现场大屏互动。用户选择身体部位和感受，完成选择题，检查情况总结，再查看健康习惯建议。用户完成倒计时任务后领取健康 Buff。本文件确定体验流程、管理后台、数据契约、并发控制、日志和验收要求。初版采用单进程 FastAPI 与 asyncio。系统提供健康知识和生活习惯建议，不生成疾病诊断。</p>
+<header class="am-head"><h1>人体 Debug 系统如何运转</h1><p class="am-sub">从一次体验到后台运行 · 设计总览</p><div class="am-head-meta"><span><b>source</b>人体 Debug 互动系统设计文档 1.1</span></div><div class="am-intro am-md"><div class="am-md"><p>用户提供部位、感受和生活习惯，系统给出建议，再引导完成现场计时任务。理解这套设计，先看体验，再看系统如何保证结果有效。</p>
+<p><a href="reference.html">查阅完整设计、参数和 25 张原型图</a></p>
 </div></div></header>
 <div class="am-doc-layout">
-<nav class="am-toc" aria-label="目录"><a href="#panel-A">A · 范围与核心规则</a><a href="#panel-B">B · 用户流程 文案与安全</a><a href="#panel-C">C · 架构 并发与状态机</a><a href="#panel-D">D · 数据契约与后台配置</a><a href="#panel-E">E · 管理日志 接口与存储</a><a href="#panel-F">F · 现场运行 部署与验收</a><a href="#panel-G">G · 产品与组件原型</a></nav><div class="am-doc-body">
+<nav class="am-toc" aria-label="目录"><a href="#panel-A">A · 先明确 谁负责什么</a><a href="#panel-B">B · 一次体验 分四段理解</a><a href="#panel-C">C · 状态机 让每一步只有合法入口</a><a href="#panel-D">D · 系统架构 把职责放到正确位置</a><a href="#panel-E">E · AI 调用 一次等待只落定一个结果</a><a href="#panel-F">F · 数据与配置 先区分生命周期</a><a href="#panel-G">G · 实施顺序 每阶段交付可验证的结果</a><a href="#panel-H">H · 用三个画面对应上述逻辑</a></nav><div class="am-doc-body">
 <section class="am-panel" id="panel-A">
-<header class="am-panel-head"><span class="am-panel-id">A</span><h2>范围与核心规则</h2></header>
-<div class="am-panel-body"><div class="am-md"><h3>1 设计范围与确定规则</h3>
-<p>用户端包含首页、身体部位、感受、问答、确认、扫描、报告、任务和通关页面。后台包含配置、题库、任务库、兜底库、日志、监控和重置功能。管理员账号只通过命令行和 MySQL 管理。</p>
-<p>已确定规则：部位和感受确认后锁定。每题点击选项后自动推进。最后一题完成后自动生成情况总结。确认页保留一次最终确认操作。AI 分析从最终确认后开始。AI 超时使用基于身体部位的预置建议。全部时间配置使用滑条。完整输入和模型输出默认记录。</p>
-<p>下文默认值、范围和技术选型属于初版实施建议，可以在开发前调整。实际并发容量以模型服务能力和压力测试为准。</p>
+<header class="am-panel-head"><span class="am-panel-id">A</span><h2>先明确 谁负责什么</h2></header>
+<div class="am-panel-body"><div class="am-md"><p>这个产品面向现场大屏，提供健康知识和生活习惯建议。</p>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>参与者</th>
+<th>负责的事</th>
+<th>交付结果</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>用户</td>
+<td>选择部位与感受，回答习惯问题</td>
+<td>已确认的输入</td>
+</tr>
+<tr>
+<td>程序</td>
+<td>控制流程、检查安全、校验结果、运行倒计时</td>
+<td>可展示的报告与任务</td>
+</tr>
+<tr>
+<td>AI</td>
+<td>根据已确认输入分析，选择允许的 task_id</td>
+<td>分析文字、N 条建议、任务 ID</td>
+</tr>
+<tr>
+<td>管理员</td>
+<td>审核题库、任务、安全规则和兜底内容</td>
+<td>可发布的配置版本</td>
+</tr>
+<tr>
+<td>工作人员</td>
+<td>查看通关页面，现场确认奖励</td>
+<td>奖励发放</td>
+</tr>
+</tbody></table></div>
+<p>疾病诊断、用药和治疗承诺不在产品范围内。任务倒计时结束，只表示游戏计时完成。</p>
 </div></div>
 </section>
 <section class="am-panel" id="panel-B">
-<header class="am-panel-head"><span class="am-panel-id">B</span><h2>用户流程 文案与安全</h2></header>
-<div class="am-panel-body"><div class="am-md"><h3>2 用户体验流程</h3>
-<div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>环节</th>
-<th>页面与行为</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>1 开始</td>
-<td>点击开始人体 Debug。创建独立会话。显示健康知识与日志保存说明。</td>
-</tr>
-<tr>
-<td>2 部位</td>
-<td>同一区域显示一张人体图。支持正面、背面、侧面切换。点击部位后显示确认。确认后锁定。</td>
-</tr>
-<tr>
-<td>3 感受</td>
-<td>点击酸、痛、僵硬、麻、容易疲劳或只是想了解一下。确认后锁定。选项根据部位配置。</td>
-</tr>
-<tr>
-<td>4 问答</td>
-<td>默认五题。全部使用点击选项。点击即保存并进入下一题。显示第几题和总题数。</td>
-</tr>
-<tr>
-<td>5 确认</td>
-<td>最后一题完成后自动生成初步情况总结。显示全部答案。允许逐题修改。修改后自动更新总结。点击确认并分析。</td>
-</tr>
-<tr>
-<td>6 扫描</td>
-<td>立即开始总等待计时并提交 AI。扫描动画循环播放。有效报告返回后进入报告页。到达等待上限则展示兜底报告。</td>
-</tr>
-<tr>
-<td>7 报告</td>
-<td>显示身体分析、改善建议和现场任务。说明建议来自 AI 或预置内容。点击开始健康任务。</td>
-</tr>
-<tr>
-<td>8 任务</td>
-<td>显示动作说明及醒目倒计时。默认25秒。计时结束自动进入通关页。</td>
-</tr>
-<tr>
-<td>9 通关</td>
-<td>显示健康 Buff、通关提示和奖励说明。供工作人员现场确认。</td>
-</tr>
-<tr>
-<td>10 结束</td>
-<td>点击结束体验或默认停留15秒后自动退出。清除现场会话和页面数据，返回首页。</td>
-</tr>
-</tbody></table></div>
-<p>身体部位覆盖眼睛、头部、颈肩、手腕、胸腹、腰背、膝盖和腿脚。每个视角的点击区域映射到同一 part_id。同一部位不会因为视角不同而改变问答或报告。</p>
-<p>确认页修改题目时，点击新选项后直接返回确认页。不得要求用户重答全部题目。若修改答案使后续分支题失效，系统只要求补答受影响题目，再自动更新总结。已确认的部位和感受不能修改。用户需要重新选择时退出并开始新会话。</p>
-<h3>3 报告与文案规则</h3>
-<p>初步情况总结由程序模板生成，不调用 AI。它复述已选部位、感受和答案，不添加疾病判断或因果结论。健康 Debug 报告由 AI 生成，并由后端校验。两份报告均使用短句、明确主语和统一术语。每句话说明一个事实或一个动作。保留可能性，不能把相关习惯写成已确认病因。</p>
-<p>ASD-STE100 是英文受控语言标准。本项目中文文案采用其写作原则，不宣称通过正式 STE 合规认证。英文文案按指定技能控制句长和表达。中文建议采用一句一个动作、明确对象、减少专业术语的项目规则。</p>
-<p>情况总结示例：你选择了颈肩。你感到僵硬。你每天使用电脑超过8小时。你很少活动。你选择的睡眠时间是6至7小时。请检查这些信息。</p>
-<p>身体分析应引用具体答案。改善建议应直接说明可执行动作。现场任务只能来自审核后的固定任务库。任务时长和 Buff 由后端配置。AI 仅选择允许的 task_id，不自行编写运动方案。倒计时结束代表游戏计时完成，不能宣称系统验证了动作或改善了健康。</p>
-<p>建议数量采用三层控制：Prompt 明确要求 N 条；动态 JSON Schema 将 suggestions 的 minItems 和 maxItems 同时设为 N；后端再次校验长度、重复内容和安全性。N 默认3，允许3至5。校验失败且重试预算不足时使用相同数量的预置建议。不得用重复建议补足数量。</p>
-<h3>4 安全与特殊流程</h3>
-<p>安全规则在感受确认、每次答案保存、最终确认和报告校验阶段执行。危险信号规则优先于模型和兜底。规则可关联部位、感受及题目选项。识别到规则命中时进入安全提示页，停止普通报告、健康任务和 Buff 流程。安全提示及规则内容上线前需由合适的健康内容审核人员确认。</p>
-<p>选择题应提供能触发安全规则的必要选项。系统只能识别问卷覆盖的风险，不能声称排除了危险。报告禁止疾病诊断、用药、治疗承诺和已改善健康等表述。</p>
-<p>AI 超时、网络失败、无效 JSON、字段缺失或不安全输出均可触发预置建议。兜底首先按 part_id 匹配，再可按 feeling_id 和答案标签细化。部位通用模板必须存在。无匹配时采用审核后的最低风险通用模板。危险信号不得被兜底绕过。</p>
-<p>用户随时退出。后端标记会话已结束，取消可取消的任务，删除临时状态。模型晚返回的内容只记录调用结果，不写回页面。刷新页面返回首页。长时间不操作先提示，再按配置退出。分析和任务阶段使用各自的期限，避免闲置计时与任务计时冲突。</p>
+<header class="am-panel-head"><span class="am-panel-id">B</span><h2>一次体验 分四段理解</h2></header>
+<div class="am-panel-body"><ol class="am-timeline am-timeline--v"><li class="am-tl-item"><span class="am-tl-when">01</span><span class="am-tl-dot"></span><span class="am-tl-title">收集输入</span><span class="am-tl-text">开始 → 部位 → 感受 → 生活习惯问答</span></li><li class="am-tl-item"><span class="am-tl-when">02</span><span class="am-tl-dot"></span><span class="am-tl-title">检查信息</span><span class="am-tl-text">自动生成总结 → 修改答案 → 最终确认</span></li><li class="am-tl-item"><span class="am-tl-when">03</span><span class="am-tl-dot"></span><span class="am-tl-title">获得建议</span><span class="am-tl-text">扫描等待 → AI 报告或预置报告</span></li><li class="am-tl-item"><span class="am-tl-when">04</span><span class="am-tl-dot"></span><span class="am-tl-title">完成体验</span><span class="am-tl-text">开始任务 → 倒计时结束 → Buff → 返回首页</span></li></ol>
+<div class="am-md"><h3>操作为什么这样安排</h3>
+<ul>
+<li>部位和感受确认后锁定；重新选择需开始新会话。</li>
+<li>每题点击即保存并推进，最后一题自动进入总结。</li>
+<li>修改答案后直接回到总结；仅补答受影响的分支题。</li>
+<li>最终确认后才调用 AI，避免分析尚未确认的信息。</li>
+<li>任务计时结束自动通关；退出随时结束当前会话。</li>
+</ul>
+<p><strong>安全检查贯穿流程。</strong> 感受确认、保存答案、最终确认、报告校验都会检查规则。命中危险信号时进入安全提示页，停止普通报告、任务和 Buff。</p>
+<p><a href="reference.html#panel-B">查看十个环节与全部操作规则</a></p>
 </div></div>
 </section>
 <section class="am-panel" id="panel-C">
-<header class="am-panel-head"><span class="am-panel-id">C</span><h2>架构 并发与状态机</h2></header>
-<div class="am-panel-body"><div class="am-md"><h3>5 架构与并发控制</h3>
-<p>建议架构：大屏浏览器 → 反向代理 → 单 Worker FastAPI → 异步模型客户端与 MySQL。前端建议 TypeScript，后端建议 Pydantic 校验，模型调用使用异步 HTTP 客户端，MySQL 使用异步驱动或隔离到线程执行同步调用。技术选型不改变数据契约。</p>
-<p>asyncio 默认在一个线程中运行事件循环。多个设备的请求在等待网络或数据库时交替推进。它不是多线程，也不保证上游模型同时推理。async def 内不得直接使用 requests.post、time.sleep 或阻塞数据库调用。CPU 密集任务需要移出事件循环。</p>
-<p>模型并发默认5。使用有界等待队列和进程内并发控制器。队列满时立即提供部位兜底，不无限堆积请求。等待队列中的请求同样消耗用户总等待预算。开始扫描时启动总截止时间；排队、请求、重试、校验均受该截止时间约束。</p>
-<p>初版仅一个 Worker。增加 Worker 或服务器后，需要共享会话存储和全局并发限制。单进程 Semaphore 不能控制多个进程的总并发。并发配置热更新采用可调整容量的控制器，不替换正在使用的 Semaphore，也不访问其私有属性。降低容量时允许已有请求结束，再停止发放超额许可。</p>
+<header class="am-panel-head"><span class="am-panel-id">C</span><h2>状态机 让每一步只有合法入口</h2></header>
+<div class="am-panel-body"><div class="am-md"><p>下图聚焦确认后的状态迁移。此前依次为选择部位、选择感受和问答。</p>
 </div>
-<pre class="am-code"><code data-lang="python">async def analyze(payload, limiter, client, timeout_s):
-async with asyncio.timeout(timeout_s): # 覆盖排队和模型调用的总等待时间
-async with limiter: # 获取并发许可，退出时释放
-return await client.generate(payload) # 使用真正的异步客户端</code></pre>
-<div class="am-md"><p>示例需导入 asyncio。payload 是确认后的输入，limiter 是并发控制器，client 是异步模型客户端，timeout_s 是总预算。调用方必须捕获 TimeoutError 并返回兜底，并在保存结果前校验会话状态。取消客户端请求不一定能停止上游已开始的推理。</p>
-<h3>6 会话与状态机</h3>
+<figure class="am-diagram am-flow"><svg viewBox="0 0 136 558" width="136" height="558" role="img" aria-label="流程图：检查总结、分析中、报告就绪、任务进行中、已通关、已关闭" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am1-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M67.7,49 L67.7,65 Q67.7,81 67.7,97 L67.7,113" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="39.7" y="72" width="56" height="18" rx="3"/><text x="67.7" y="81" text-anchor="middle" dominant-baseline="central">最终确认</text></g></g><g data-step="1"><path class="am-edge" d="M67.7,148 L67.7,164 Q67.7,180 67.7,196 L67.7,212" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="15" y="171" width="105.5" height="18" rx="3"/><text x="67.7" y="180" text-anchor="middle" dominant-baseline="central">AI 或预置报告有效</text></g></g><g data-step="2"><path class="am-edge" d="M67.7,247 L67.7,263 Q67.7,279 67.7,295 L67.7,311" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="39.7" y="270" width="56" height="18" rx="3"/><text x="67.7" y="279" text-anchor="middle" dominant-baseline="central">开始任务</text></g></g><g data-step="3"><path class="am-edge" d="M67.7,346 L67.7,362 Q67.7,378 67.7,394 L67.7,410" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="22.5" y="369" width="90.5" height="18" rx="3"/><text x="67.7" y="378" text-anchor="middle" dominant-baseline="central">服务端计时结束</text></g></g><g data-step="4"><path class="am-edge" d="M67.7,445 L67.7,461 Q67.7,477 67.7,493 L67.7,509" marker-end="url(#am1-arrow)"/><g class="am-edge-label"><rect x="22.5" y="468" width="90.5" height="18" rx="3"/><text x="67.7" y="477" text-anchor="middle" dominant-baseline="central">结束或停留超时</text></g></g></g><g><g class="am-node am-node--rect" data-key="检查总结" data-step="0"><rect class="am-node-shape" x="27.7" y="14" width="80" height="35" rx="3"/><text x="67.7" y="31.5" text-anchor="middle" dominant-baseline="central">检查总结</text></g><g class="am-node am-node--rect" data-key="分析中" data-step="0"><rect class="am-node-shape" x="34.2" y="113" width="67" height="35" rx="3"/><text x="67.7" y="130.5" text-anchor="middle" dominant-baseline="central">分析中</text></g><g class="am-node am-node--rect" data-key="报告就绪" data-step="1"><rect class="am-node-shape" x="27.7" y="212" width="80" height="35" rx="3"/><text x="67.7" y="229.5" text-anchor="middle" dominant-baseline="central">报告就绪</text></g><g class="am-node am-node--rect" data-key="任务进行中" data-step="2"><rect class="am-node-shape" x="21.2" y="311" width="93" height="35" rx="3"/><text x="67.7" y="328.5" text-anchor="middle" dominant-baseline="central">任务进行中</text></g><g class="am-node am-node--rect" data-key="已通关" data-step="3"><rect class="am-node-shape" x="34.2" y="410" width="67" height="35" rx="3"/><text x="67.7" y="427.5" text-anchor="middle" dominant-baseline="central">已通关</text></g><g class="am-node am-node--rect" data-key="已关闭" data-step="4"><rect class="am-node-shape" x="34.2" y="509" width="67" height="35" rx="3"/><text x="67.7" y="526.5" text-anchor="middle" dominant-baseline="central">已关闭</text></g></g></svg></figure>
+<div class="am-md"><h3>三条约束防止状态混乱</h3>
 <div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>状态</th>
-<th>进入条件与允许操作</th>
+<th>场景</th>
+<th>程序必须保证</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>PART_SELECTION</td>
-<td>创建会话后选择并确认部位</td>
+<td>重复点击最终确认</td>
+<td>同一输入和 Idempotency-Key 只创建一个分析任务</td>
 </tr>
 <tr>
-<td>FEELING_SELECTION</td>
-<td>部位锁定后确认感受</td>
+<td>AI 晚返回或输入已经变化</td>
+<td>写入前匹配会话、input_revision、request_id 和当前状态</td>
 </tr>
 <tr>
-<td>QUESTIONNAIRE</td>
-<td>感受锁定后逐题作答</td>
-</tr>
-<tr>
-<td>SUMMARY_REVIEW</td>
-<td>全部题目完成，可修改答案并最终确认</td>
-</tr>
-<tr>
-<td>ANALYZING</td>
-<td>最终确认后等待 AI 或兜底</td>
-</tr>
-<tr>
-<td>REPORT_READY</td>
-<td>只接收一次有效报告，可开始任务</td>
-</tr>
-<tr>
-<td>TASK_RUNNING</td>
-<td>显示倒计时，结束进入通关</td>
-</tr>
-<tr>
-<td>COMPLETED</td>
-<td>显示 Buff，结束或停留超时后清理</td>
-</tr>
-<tr>
-<td>SAFETY_STOP</td>
-<td>规则拦截，显示审核后的安全提示</td>
-</tr>
-<tr>
-<td>CLOSED</td>
-<td>退出、清理或闲置结束，不接受新结果</td>
+<td>用户退出或命中安全规则</td>
+<td>退出关闭会话；规则命中进入安全拦截，阻止普通流程继续</td>
 </tr>
 </tbody></table></div>
-<p>每次体验使用随机 session_id 和私有会话凭证。session_id 不能单独作为授权依据。每次模型调用使用 request_id，每次答案变更递增 answer_revision。确认时生成 input_revision，并保存 config_version。结果写入必须同时匹配会话、输入版本、请求和当前状态。</p>
-<p>最终确认接口支持 Idempotency-Key。相同输入和相同键只创建一个分析任务。报告、倒计时启动和通关迁移使用原子状态转换。任务倒计时以服务端记录的结束时间为依据，前端仅展示剩余时间，避免重复点击重启计时。</p>
+<p>任务结束时间由服务端记录，前端展示剩余时间。重复点击不能重启倒计时。</p>
+<p><a href="reference.html#panel-C">查看十种状态与版本字段</a></p>
 </div></div>
 </section>
 <section class="am-panel" id="panel-D">
-<header class="am-panel-head"><span class="am-panel-id">D</span><h2>数据契约与后台配置</h2></header>
-<div class="am-panel-body"><div class="am-md"><h3>7 Schema 数据契约</h3>
-<p>统一采用 JSON Schema 2020-12。顶层对象禁止未知字段。时间戳采用带时区的 ISO 8601。ID 为字符串。枚举、必填字段、长度和范围由后端校验。输入使用稳定 ID，显示文案由固定版本题库解析。不得仅把不可理解的 option_id 交给模型。</p>
-<div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>Schema</th>
-<th>必填字段及约束</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>SessionSchema</td>
-<td>session_id、status、answer_revision、config_version、created_at、expires_at。会话凭证只在创建响应交付，不写普通日志。</td>
-</tr>
-<tr>
-<td>BodySelectionSchema</td>
-<td>part_id、view、feeling_id、part_locked、feeling_locked。view 为 front、back、side。后端验证部位与感受关系。</td>
-</tr>
-<tr>
-<td>QuestionSchema</td>
-<td>question_id、text、options、order、conditions。options 包含 option_id、label、tags。题目与选项 ID 不重复。</td>
-</tr>
-<tr>
-<td>AnswerSchema</td>
-<td>question_id、option_id。单题单选。选项必须属于当前题目。答案数与实际题集一致。</td>
-</tr>
-<tr>
-<td>SummarySchema</td>
-<td>session_id、answer_revision、facts、summary_text。facts 引用 question_id 和 option_id。生成来源固定为 template。</td>
-</tr>
-<tr>
-<td>AIInputSchema</td>
-<td>session_id、request_id、input_revision、config_version、body_selection、answers、report_rules、allowed_task_ids。answers 包含题目和答案显示文字。</td>
-</tr>
-<tr>
-<td>AIReportSchema</td>
-<td>body_analysis、suggestions、task_id。suggestions 恰好 N 条。task_id 必须来自当前允许任务集合。</td>
-</tr>
-<tr>
-<td>ReportEnvelopeSchema</td>
-<td>report_id、session_id、source、fallback_reason、body_analysis、suggestions、task、buff、config_version。source 为 ai 或 preset。</td>
-</tr>
-<tr>
-<td>SystemConfigSchema</td>
-<td>schema_version、config_version、model、runtime、questions、report、safety、ui、logging。密钥读取时只返回是否已设置。</td>
-</tr>
-<tr>
-<td>AIInvocationLogSchema</td>
-<td>request_id、session_id、attempt、input_snapshot、request_body、raw_output、validated_output、status、queue_ms、model_ms、total_ms、error_code、created_at。</td>
-</tr>
-<tr>
-<td>SafetyResultSchema</td>
-<td>blocked、rule_ids、message、allowed_next_action。命中时不得返回普通任务。</td>
-</tr>
-<tr>
-<td>TaskSchema</td>
-<td>task_id、title、instructions、allowed_parts、excluded_tags、duration_seconds、buff_id。由审核任务库生成。</td>
-</tr>
-</tbody></table></div>
-<p>输入示例。每个 answer 对象说明一道题和用户选择。report_rules 控制建议数量。allowed_task_ids 限制模型可选任务。示例为单条答案节选，生产接口必须校验全部题目。</p>
-</div>
-<pre class="am-code"><code data-lang="json">{
-&quot;session_id&quot;: &quot;example-session&quot;,
-&quot;request_id&quot;: &quot;example-request&quot;,
-&quot;input_revision&quot;: 1,
-&quot;config_version&quot;: 1,
-&quot;body_selection&quot;: {
-&quot;part_id&quot;: &quot;neck_shoulder&quot;,
-&quot;part_label&quot;: &quot;颈肩&quot;,
-&quot;feeling_id&quot;: &quot;stiffness&quot;,
-&quot;feeling_label&quot;: &quot;僵硬&quot;
-},
-&quot;answers&quot;: [
-{
-&quot;question_id&quot;: &quot;screen_time&quot;,
-&quot;question_text&quot;: &quot;你每天使用电脑多久&quot;,
-&quot;option_id&quot;: &quot;over_8_hours&quot;,
-&quot;option_text&quot;: &quot;超过8小时&quot;
-}
-],
-&quot;report_rules&quot;: {
-&quot;suggestion_count&quot;: 3,
-&quot;language&quot;: &quot;zh-CN&quot;
-},
-&quot;allowed_task_ids&quot;: [
-&quot;rest_gaze&quot;
-]
-}</code></pre>
-<div class="am-md"><p>AI 输出结构示例。task_id 由后端解析为任务说明和 Buff。下面的动态 Schema 将 N 固定为3，部署时按会话配置生成。</p>
-</div>
-<pre class="am-code"><code data-lang="json">{
-&quot;$schema&quot;: &quot;https://json-schema.org/draft/2020-12/schema&quot;,
-&quot;type&quot;: &quot;object&quot;,
-&quot;additionalProperties&quot;: false,
-&quot;required&quot;: [
-&quot;body_analysis&quot;,
-&quot;suggestions&quot;,
-&quot;task_id&quot;
-],
-&quot;properties&quot;: {
-&quot;body_analysis&quot;: {
-&quot;type&quot;: &quot;string&quot;,
-&quot;minLength&quot;: 1,
-&quot;maxLength&quot;: 500
-},
-&quot;suggestions&quot;: {
-&quot;type&quot;: &quot;array&quot;,
-&quot;minItems&quot;: 3,
-&quot;maxItems&quot;: 3,
-&quot;uniqueItems&quot;: true,
-&quot;items&quot;: {
-&quot;type&quot;: &quot;string&quot;,
-&quot;minLength&quot;: 1,
-&quot;maxLength&quot;: 120
-}
-},
-&quot;task_id&quot;: {
-&quot;type&quot;: &quot;string&quot;,
-&quot;enum&quot;: [
-&quot;rest_gaze&quot;
-]
-}
-}
-}</code></pre>
-<div class="am-md"><p>Schema 只能验证结构和部分内容约束。它不能证明医学安全、语义正确或 STE 合规。后端还需要规则检查、事实引用检查和人工审核的模板。模型服务不支持结构化输出时，仍要求纯 JSON，并执行相同本地校验。</p>
-<h3>8 后台配置与控件</h3>
-<p>后台必须登录。时间参数统一使用滑条，显示数值、单位、最小值、最大值和步长。非时间数值参数统一使用两个预设值与自定义三个下拉选项，选自定义后出现输入框。布尔使用开关，枚举使用下拉框，字符串使用输入框，Prompt 使用多行编辑框，密钥使用密码框。</p>
-<div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>时间配置</th>
-<th>默认值</th>
-<th>建议范围与步长</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>ai_total_wait_seconds 总等待</td>
-<td>15秒</td>
-<td>5至60秒，1秒</td>
-</tr>
-<tr>
-<td>queue_timeout_seconds 排队</td>
-<td>5秒</td>
-<td>0至30秒，1秒</td>
-</tr>
-<tr>
-<td>model_timeout_seconds 单次调用</td>
-<td>15秒</td>
-<td>1至60秒，1秒</td>
-</tr>
-<tr>
-<td>scan_cycle_seconds 动画周期</td>
-<td>5秒</td>
-<td>1至10秒，1秒</td>
-</tr>
-<tr>
-<td>task_duration_seconds 任务</td>
-<td>25秒</td>
-<td>20至30秒，1秒</td>
-</tr>
-<tr>
-<td>completion_timeout_seconds 通关</td>
-<td>15秒</td>
-<td>5至60秒，1秒</td>
-</tr>
-<tr>
-<td>session_idle_timeout_seconds 闲置</td>
-<td>60秒</td>
-<td>30至300秒，5秒</td>
-</tr>
-<tr>
-<td>idle_warning_seconds 退出提示</td>
-<td>10秒</td>
-<td>5至30秒，1秒</td>
-</tr>
-<tr>
-<td>retry_backoff_seconds 重试间隔</td>
-<td>1秒</td>
-<td>0至5秒，1秒</td>
-</tr>
-<tr>
-<td>admin_session_timeout_minutes 后台</td>
-<td>30分钟</td>
-<td>5至120分钟，5分钟</td>
-</tr>
-<tr>
-<td>log_retention_days 日志保留</td>
-<td>30天</td>
-<td>1至180天，1天</td>
-</tr>
-</tbody></table></div>
-<p>所有时间设置均为滑条，包括日志保留和后台登录有效期。总等待时间具有最高优先级。单次模型超时使用配置值与剩余预算中的较小值。动画周期只决定视觉循环，不强制用户至少等待一次完整循环。模型有效结果返回时可立即显示报告。</p>
-<div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>非时间数值</th>
-<th>预设与自定义</th>
-<th>校验范围</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>max_concurrency</td>
-<td>3、5、自定义</td>
-<td>1至50</td>
-</tr>
-<tr>
-<td>max_queue_size</td>
-<td>10、20、自定义</td>
-<td>0至200</td>
-</tr>
-<tr>
-<td>question_count</td>
-<td>5、7、自定义</td>
-<td>3至10</td>
-</tr>
-<tr>
-<td>suggestion_count</td>
-<td>3、5、自定义</td>
-<td>3至5</td>
-</tr>
-<tr>
-<td>max_output_tokens</td>
-<td>1024、2048、自定义</td>
-<td>256至8192，另校验模型支持</td>
-</tr>
-<tr>
-<td>temperature</td>
-<td>0.2、0.5、自定义</td>
-<td>0至2，另校验模型支持</td>
-</tr>
-<tr>
-<td>ai_retry_count</td>
-<td>0、1、自定义</td>
-<td>0至2</td>
-</tr>
-<tr>
-<td>login_failure_limit</td>
-<td>5、10、自定义</td>
-<td>3至20</td>
-</tr>
-</tbody></table></div>
-<p>模型配置包括协议类型、API 地址、模型名称、API 密钥、温度、Token 上限及结构化输出模式。题库配置包括部位、视角点击区域、感受、题目、选项、条件、顺序和数量。报告配置包括 Prompt、建议数量、文案规则、允许任务和 Buff。安全配置包括拦截规则、提示文案、任务排除规则和兜底模板。运营配置包括首页、奖励说明、全屏提示、动画资源和可选二维码。</p>
-<p>日志配置包括完整日志开关、保留时间、导出权限和脱敏规则。默认启用完整输入输出。后台监控显示服务状态、调用次数、成功率、平均耗时、排队时间和失败次数。</p>
-<p>配置采用草稿、校验、发布和版本记录。每次发布形成新 config_version。当前会话使用创建时的快照，新会话使用新版本。紧急安全规则可即时对在途会话生效，并记录所用安全版本。模型并发容量按控制器规则即时调整。</p>
-<p>数据库地址、端口、凭证、加密主密钥、进程数量和服务监听参数属于启动配置。后台可显示状态和重启提示，不能把它们作为即时业务配置。管理员账号按用户要求在命令行管理。不得把加密主密钥和加密后的 API 密钥放在同一个数据库中。</p>
+<header class="am-panel-head"><span class="am-panel-id">D</span><h2>系统架构 把职责放到正确位置</h2></header>
+<div class="am-panel-body"><figure class="am-diagram am-flow"><svg viewBox="0 0 228 360" width="228" height="360" role="img" aria-label="流程图：大屏浏览器、反向代理、FastAPI、模型服务、MySQL" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am2-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M117.1,49 L117.1,65 Q117.1,81 117.1,97 L117.1,113" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="70.2" y="72" width="93.7" height="18" rx="3"/><text x="117.1" y="81" text-anchor="middle" dominant-baseline="central">页面与 API 请求</text></g></g><g data-step="1"><path class="am-edge" d="M117.1,148 L117.1,164 Q117.1,180 117.1,196 L117.1,212" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="86.3" y="171" width="61.5" height="18" rx="3"/><text x="117.1" y="180" text-anchor="middle" dominant-baseline="central">单 Worker</text></g></g><g data-step="2"><path class="am-edge" d="M137.2,247 L155.5,263 Q173.9,279 173.9,295 L173.9,311" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="145.9" y="270" width="56" height="18" rx="3"/><text x="173.9" y="279" text-anchor="middle" dominant-baseline="central">异步调用</text></g></g><g data-step="3"><path class="am-edge" d="M97,247 L78.6,263 Q60.3,279 60.3,295 L60.3,311" marker-end="url(#am2-arrow)"/><g class="am-edge-label"><rect x="15" y="270" width="90.5" height="18" rx="3"/><text x="60.3" y="279" text-anchor="middle" dominant-baseline="central">配置与持久日志</text></g></g></g><g><g class="am-node am-node--rect" data-key="大屏浏览器" data-step="0"><rect class="am-node-shape" x="70.6" y="14" width="93" height="35" rx="3"/><text x="117.1" y="31.5" text-anchor="middle" dominant-baseline="central">大屏浏览器</text></g><g class="am-node am-node--rect" data-key="反向代理" data-step="0"><rect class="am-node-shape" x="77.1" y="113" width="80" height="35" rx="3"/><text x="117.1" y="130.5" text-anchor="middle" dominant-baseline="central">反向代理</text></g><g class="am-node am-node--rect" data-key="FastAPI" data-step="1"><rect class="am-node-shape" x="78.4" y="212" width="77.4" height="35" rx="3"/><text x="117.1" y="229.5" text-anchor="middle" dominant-baseline="central">FastAPI</text></g><g class="am-node am-node--rect" data-key="模型服务" data-step="2"><rect class="am-node-shape" x="133.9" y="311" width="80" height="35" rx="3"/><text x="173.9" y="328.5" text-anchor="middle" dominant-baseline="central">模型服务</text></g><g class="am-node am-node--rect" data-key="MySQL" data-step="3"><rect class="am-node-shape" x="22.6" y="311" width="75.3" height="35" rx="3"/><text x="60.3" y="328.5" text-anchor="middle" dominant-baseline="central">MySQL</text></g></g></svg></figure>
+<div class="am-md"><p><strong>浏览器负责展示，FastAPI 决定状态和最终结果。</strong> 会话初版放在服务内存中，配置和历史日志保存到 MySQL。</p>
+<h3>多台设备如何一起运行</h3>
+<p>asyncio 在等待网络时切换处理其他请求。模型调用通过有界队列和并发控制器，默认最多 5 个在途请求。</p>
+<ul>
+<li>队列满：立即提供部位兜底。</li>
+<li>容量降低：已有请求结束后再收紧许可。</li>
+<li>增加 Worker：需共享会话和全局并发限制。</li>
+</ul>
+<p>上游模型的实际并行能力与可接入设备数，需由压力测试确定。</p>
+<p><a href="reference.html#panel-C">查看并发约束和部署建议</a></p>
 </div></div>
 </section>
 <section class="am-panel" id="panel-E">
-<header class="am-panel-head"><span class="am-panel-id">E</span><h2>管理日志 接口与存储</h2></header>
-<div class="am-panel-body"><div class="am-md"><h3>9 管理员与日志设计</h3>
-<p>管理员账户在 MySQL 保存 username、password_hash、role、enabled 和凭证版本。通过命令行工具生成密码哈希后写入数据库，不保存明文密码。修改密码或停用账号后撤销已有登录会话。登录采用安全 Cookie、失败次数限制及适当的 CSRF 防护。后台提供配置变更审计，不提供新增账号入口。</p>
-<p>每次体验记录完整选择、答案及版本。每次模型尝试记录完整应用层请求、模型原始输出、有效报告、错误和耗时。即使 JSON 无效或超时，也记录已收到的输出和错误。API 密钥、Authorization、登录密码、会话凭证不属于用户输入，始终排除。</p>
-<p>结束体验清除浏览器、后端临时会话和报告缓存。按本方案保留历史日志，供登录后的管理员查询。这与现场清除不是同一操作。首页应明确告知会保存问答和模型输出。日志不主动收集身份信息；健康回答仍需限制查看、导出和保留时间。到期删除完整内容，可保留不含回答的聚合统计。</p>
+<header class="am-panel-head"><span class="am-panel-id">E</span><h2>AI 调用 一次等待只落定一个结果</h2></header>
+<div class="am-panel-body"><div class="am-md"><p>情况总结由程序模板生成。用户确认后，系统才把输入交给 AI。</p>
+</div>
+<figure class="am-diagram am-seq"><svg viewBox="0 0 523 454" width="523" height="454" role="img" aria-label="时序图：浏览器、后端、模型" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><line class="am-lifeline" x1="54" y1="42" x2="54" y2="450"/><g data-key="浏览器"><rect class="am-actor" x="12" y="8" width="84" height="34" rx="2"/><text x="54" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">浏览器</text></g><line class="am-lifeline" x1="231" y1="42" x2="231" y2="450"/><g data-key="后端"><rect class="am-actor" x="189" y="8" width="84" height="34" rx="2"/><text x="231" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">后端</text></g><line class="am-lifeline" x1="469" y1="42" x2="469" y2="450"/><g data-key="模型"><rect class="am-actor" x="427" y="8" width="84" height="34" rx="2"/><text x="469" y="25" text-anchor="middle" dominant-baseline="central" font-weight="600">模型</text></g><g data-step="0"><text x="142.5" y="70" text-anchor="middle">最终确认输入</text><path class="am-edge" d="M54,80 L229,80" marker-end="url(#am3-arrow)"/><text class="am-step" x="60" y="74" text-anchor="start">1</text></g><g data-step="1"><text x="271" y="108" dominant-baseline="central">安全检查并固定输入版本</text><path class="am-edge" d="M231,104 H261 V124 H233" marker-end="url(#am3-arrow)"/><text class="am-step" x="237" y="114" text-anchor="start">2</text></g><g data-step="2"><text x="142.5" y="158" text-anchor="middle">安全通过后进入扫描等待</text><path class="am-edge am-edge--dashed" d="M231,168 L56,168" marker-end="url(#am3-arrow)"/><text class="am-step" x="225" y="162" text-anchor="end">3</text></g><g data-step="3"><text x="271" y="196" dominant-baseline="central">排队并获取并发许可</text><path class="am-edge" d="M231,192 H261 V212 H233" marker-end="url(#am3-arrow)"/><text class="am-step" x="237" y="202" text-anchor="start">4</text></g><g data-step="4"><text x="350" y="246" text-anchor="middle">部位、答案、N 和允许任务 ID</text><path class="am-edge" d="M231,256 L467,256" marker-end="url(#am3-arrow)"/><text class="am-step" x="237" y="250" text-anchor="start">5</text></g><g data-step="5"><text x="350" y="286" text-anchor="middle">分析、建议和 task_id</text><path class="am-edge am-edge--dashed" d="M469,296 L233,296" marker-end="url(#am3-arrow)"/><text class="am-step" x="463" y="290" text-anchor="end">6</text></g><g data-step="6"><text x="271" y="324" dominant-baseline="central">校验结构、事实引用与安全</text><path class="am-edge" d="M231,320 H261 V340 H233" marker-end="url(#am3-arrow)"/><text class="am-step" x="237" y="330" text-anchor="start">7</text></g><g data-step="7"><text x="142.5" y="374" text-anchor="middle">查询分析状态</text><path class="am-edge" d="M54,384 L229,384" marker-end="url(#am3-arrow)"/><text class="am-step" x="60" y="378" text-anchor="start">8</text></g><g data-step="8"><text x="142.5" y="414" text-anchor="middle">返回唯一有效报告</text><path class="am-edge am-edge--dashed" d="M231,424 L56,424" marker-end="url(#am3-arrow)"/><text class="am-step" x="225" y="418" text-anchor="end">9</text></g></svg></figure>
+<div class="am-md"><h3>结果按这个优先级处理</h3>
 <div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>指标</th>
-<th>统计定义</th>
+<th>优先级</th>
+<th>条件</th>
+<th>用户看到什么</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>体验次数</td>
-<td>创建的 session_id 数量，另列完成、退出和安全拦截</td>
+<td>1 安全</td>
+<td>危险信号规则命中</td>
+<td>安全提示；停止任务与 Buff</td>
 </tr>
 <tr>
-<td>分析次数</td>
-<td>用户最终确认触发的逻辑分析次数</td>
+<td>2 AI</td>
+<td>预算内返回且校验通过</td>
+<td>AI 报告和审核任务</td>
 </tr>
 <tr>
-<td>模型调用次数</td>
-<td>实际发出的请求尝试数，包含重试</td>
-</tr>
-<tr>
-<td>平均调用时间</td>
-<td>完成的模型尝试 model_ms 之和除以对应尝试数，成功与失败分别显示</td>
-</tr>
-<tr>
-<td>用户等待时间</td>
-<td>最终确认至 AI 或兜底报告就绪的 total_ms，另显示P95</td>
-</tr>
-<tr>
-<td>失败次数</td>
-<td>超时、网络失败、上游错误、结构失败和安全拒绝分类计数</td>
-</tr>
-<tr>
-<td>兜底率</td>
-<td>兜底报告数量除以正常分析请求数，安全拦截单列</td>
+<td>3 预置</td>
+<td>队列满、超时、失败或输出不合格</td>
+<td>标记为预置内容的部位兜底报告</td>
 </tr>
 </tbody></table></div>
-<h3>10 接口与存储</h3>
-<div class="am-table-wrap"><table>
-<thead>
-<tr>
-<th>接口</th>
-<th>作用</th>
-</tr>
-</thead>
-<tbody><tr>
-<td>POST /api/sessions</td>
-<td>创建体验并返回会话凭证与配置快照</td>
-</tr>
-<tr>
-<td>POST /api/sessions/{id}/selection</td>
-<td>确认并锁定部位或感受</td>
-</tr>
-<tr>
-<td>PUT /api/sessions/{id}/answers/{question_id}</td>
-<td>保存或修改答案，返回进度与受影响题目</td>
-</tr>
-<tr>
-<td>GET /api/sessions/{id}/summary</td>
-<td>返回自动生成的最新总结</td>
-</tr>
-<tr>
-<td>POST /api/sessions/{id}/analysis</td>
-<td>最终确认并创建幂等分析任务</td>
-</tr>
-<tr>
-<td>GET /api/sessions/{id}/analysis</td>
-<td>返回等待、AI报告、兜底或安全拦截</td>
-</tr>
-<tr>
-<td>POST /api/sessions/{id}/task</td>
-<td>启动一次任务并返回结束时间</td>
-</tr>
-<tr>
-<td>POST /api/sessions/{id}/close</td>
-<td>关闭会话并清除临时数据</td>
-</tr>
-<tr>
-<td>POST /api/admin/login</td>
-<td>后台登录</td>
-</tr>
-<tr>
-<td>GET PUT /api/admin/config</td>
-<td>查看或编辑草稿配置</td>
-</tr>
-<tr>
-<td>POST /api/admin/config/publish</td>
-<td>校验并发布配置版本</td>
-</tr>
-<tr>
-<td>GET /api/admin/logs 和 /metrics</td>
-<td>按权限查询日志及统计</td>
-</tr>
-<tr>
-<td>GET /health/live 和 /health/ready</td>
-<td>进程存活与依赖就绪检查</td>
-</tr>
-</tbody></table></div>
-<p>题库、任务、兜底和安全规则提供相应后台 CRUD 接口。删除被发布版本引用的内容时应保留旧版本，避免在途会话失效。日志导出和重置接口须单独审计。</p>
-<p>接口使用统一封装：成功返回 data、request_id 和 server_time；错误返回 code、message 和 request_id。无效输入返回422，身份无效返回401，状态或版本冲突返回409。前端按错误码决定恢复、提示或退出，不显示内部异常堆栈。</p>
-<p>MySQL 建议分为 admin_accounts、config_versions、body_parts、feelings、question_sets、task_library、fallback_templates、safety_rules、experience_logs、ai_invocation_logs 和 audit_logs。结构化内容可保存 JSON。request_id 唯一，session_id 和 created_at 建索引。日志表按保留策略清理。临时会话初版放内存，服务重启使其失效，浏览器收到失效响应后回首页。</p>
+<p><strong>默认总等待预算为 15 秒。</strong> 排队、调用、重试和校验共同消耗这笔预算。到期落定预置报告，AI 晚返回只能记录日志。</p>
+<p>若校验失败且剩余预算允许，可按配置重试。AI 与兜底都必须输出恰好 N 条、不重复的建议；N 默认 3，允许 3 至 5。</p>
+<p><a href="reference.html#panel-D">查看 Schema、输出示例与时间参数</a></p>
 </div></div>
 </section>
 <section class="am-panel" id="panel-F">
-<header class="am-panel-head"><span class="am-panel-id">F</span><h2>现场运行 部署与验收</h2></header>
-<div class="am-panel-body"><div class="am-md"><h3>11 视觉与现场运行</h3>
-<p>首页、扫描页、任务倒计时和通关页使用大字号、醒目的艺术字体。问题、确认内容、报告和后台使用清晰正文字体。字体需覆盖中文并具有使用许可。颜色对比应保证大屏远距离阅读。正文艺术化不能降低可读性。</p>
-<p>按钮参考 Apple 的圆角、轻量阴影、按压缩放、平滑过渡和明确选中状态。触摸按钮及人体区域需要足够大。细小部位可使用扩大命中区或放大视图，并防止重叠选择。动画不阻止点击响应，支持减少动态效果。</p>
-<p>现场页面支持全屏、工作人员重置和横竖屏适配。后台入口不出现在普通体验主流程。奖励由工作人员确认，系统不声称已自动发奖。若以后引入二维码或自动核销，需单独增加唯一领奖码、核销状态及防重复领取接口。</p>
-<h3>12 异常恢复与部署</h3>
-<p>请求在总等待截止时由后端原子确定最终报告。AI 成功和超时竞争时只能有一个结果生效。页面轮询失败时提示连接问题，重试期间仍使用原截止时间，不延长等待。若后端失联，前端使用启动时获得的审核部位兜底内容或显示服务不可用，并拒绝接收过期结果。</p>
-<p>数据库故障时禁止发布配置。AI 日志写入失败应进入有界重试缓冲并显示后台告警。缓冲耗尽时标记日志丢失，不宣称完整保存。密钥错误、配额不足等错误进入监控分类，不把原始敏感异常直接展示给用户。</p>
-<p>部署初版采用反向代理、一个 FastAPI Worker、MySQL 和外部模型服务。启用 HTTPS。使用进程管理器或容器自动重启。静态资源本地提供，避免现场依赖外部字体。上线前备份配置和题库，验证数据库恢复、密钥轮换和模型连接。</p>
-<h3>13 验收标准</h3>
-<div class="am-table-wrap"><table>
+<header class="am-panel-head"><span class="am-panel-id">F</span><h2>数据与配置 先区分生命周期</h2></header>
+<div class="am-panel-body"><div class="am-md"><div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>验收项</th>
-<th>通过条件</th>
+<th>内容</th>
+<th>放在哪里</th>
+<th>何时变化或结束</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>主流程</td>
-<td>十个环节完整，单题无需下一步，最后一题自动进入总结</td>
+<td>当前会话、答案和报告缓存</td>
+<td>浏览器与后端临时状态</td>
+<td>退出后清理；服务重启使内存会话失效</td>
 </tr>
 <tr>
-<td>锁定与修改</td>
-<td>部位和感受确认后不可改，修改答案自动更新总结和失效分支</td>
+<td>题库、任务、兜底和业务配置</td>
+<td>MySQL 的发布版本</td>
+<td>新会话读取新版本，在途会话保持快照</td>
 </tr>
 <tr>
-<td>视角一致</td>
-<td>三种视角同一部位使用同一ID和同一题库</td>
+<td>问答和模型调用历史</td>
+<td>MySQL 日志</td>
+<td>管理员按权限查询，到期清理完整内容</td>
 </tr>
 <tr>
-<td>报告数量</td>
-<td>配置3或5时AI和兜底均严格输出对应数量且无重复</td>
-</tr>
-<tr>
-<td>超时</td>
-<td>排队与模型耗时受总预算约束，到期显示部位兜底</td>
-</tr>
-<tr>
-<td>晚返回</td>
-<td>超时后AI不覆盖兜底，退出后结果不进入新会话</td>
-</tr>
-<tr>
-<td>并发隔离</td>
-<td>至少两台设备同时完成体验，无答案、报告或状态串用</td>
-</tr>
-<tr>
-<td>限制容量</td>
-<td>模型在途请求不超过当前规则允许值，队列满时及时兜底</td>
-</tr>
-<tr>
-<td>安全拦截</td>
-<td>规则命中不展示普通任务和Buff，AI和兜底均不能绕过</td>
-</tr>
-<tr>
-<td>后台控件</td>
-<td>全部时间均为滑条，其他数值含两个预设和自定义</td>
-</tr>
-<tr>
-<td>配置版本</td>
-<td>发布后新会话更新，在途会话保持快照，可审计与回退</td>
-</tr>
-<tr>
-<td>日志</td>
-<td>完整输入输出可查，统计定义正确，密钥与凭证不入日志</td>
-</tr>
-<tr>
-<td>清理</td>
-<td>退出、闲置和通关到期后现场内容清除，历史日志按策略保留</td>
-</tr>
-<tr>
-<td>大屏与重置</td>
-<td>触摸区域可用，文本无溢出，刷新及工作人员重置回首页</td>
-</tr>
-<tr>
-<td>故障</td>
-<td>覆盖模型失败、无效JSON、断网、数据库失败与服务重启</td>
+<td>数据库连接、主密钥、Worker 数量</td>
+<td>启动配置</td>
+<td>按部署配置与重启流程生效</td>
 </tr>
 </tbody></table></div>
-<p>压力测试至少覆盖配置最大并发、超出队列容量、慢模型、频繁退出和后台并发变更。测试记录模型实际并行能力、等待P95、兜底率和日志完整率。完成这些检查后再确定现场可接入设备数量。</p>
-<h3>14 实施顺序与参考资料</h3>
-<p>第一阶段建立状态机、题库、总结模板和完整前端流程。第二阶段接入 AI、Schema 校验、安全规则和兜底。第三阶段开发配置后台、完整日志与监控。第四阶段进行多设备联调、异常测试和现场压力测试。上线前审核全部问题、预置建议、任务和安全提示。</p>
-<p>参考资料：ASD-STE100 skill 仓库与 SKILL.md，<a href="https://github.com/danyuchn/asd-ste100-skill">https://github.com/danyuchn/asd-ste100-skill</a> 。该仓库提供简化英文的写作原则，未包含完整官方词典。Python asyncio 官方文档，<a href="https://docs.python.org/3/library/asyncio.html">https://docs.python.org/3/library/asyncio.html</a> 。本文件的中文写作规则和系统配置范围为项目设计约定。</p>
+<h3>后台编辑怎样影响体验</h3>
+</div>
+<figure class="am-diagram am-flow"><svg viewBox="0 0 467 63" width="467" height="63" role="img" aria-label="流程图：草稿、校验、发布版本、新会话快照" xmlns="http://www.w3.org/2000/svg"><defs><marker id="am4-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="am-arrow" d="M0,0 L10,5 L0,10 z"/></marker></defs><g></g><g><g data-step="0"><path class="am-edge" d="M78,31.5 L89.5,31.5 Q101,31.5 112.5,31.5 L124,31.5" marker-end="url(#am4-arrow)"/></g><g data-step="0"><path class="am-edge" d="M188,31.5 L199.5,31.5 Q211,31.5 222.5,31.5 L234,31.5" marker-end="url(#am4-arrow)"/></g><g data-step="0"><path class="am-edge" d="M314,31.5 L325.5,31.5 Q337,31.5 348.5,31.5 L360,31.5" marker-end="url(#am4-arrow)"/></g></g><g><g class="am-node am-node--rect" data-key="草稿" data-step="0"><rect class="am-node-shape" x="14" y="14" width="64" height="35" rx="3"/><text x="46" y="31.5" text-anchor="middle" dominant-baseline="central">草稿</text></g><g class="am-node am-node--rect" data-key="校验" data-step="0"><rect class="am-node-shape" x="124" y="14" width="64" height="35" rx="3"/><text x="156" y="31.5" text-anchor="middle" dominant-baseline="central">校验</text></g><g class="am-node am-node--rect" data-key="发布版本" data-step="0"><rect class="am-node-shape" x="234" y="14" width="80" height="35" rx="3"/><text x="274" y="31.5" text-anchor="middle" dominant-baseline="central">发布版本</text></g><g class="am-node am-node--rect" data-key="新会话快照" data-step="0"><rect class="am-node-shape" x="360" y="14" width="93" height="35" rx="3"/><text x="406.5" y="31.5" text-anchor="middle" dominant-baseline="central">新会话快照</text></g></g></svg></figure>
+<div class="am-md"><p>紧急安全规则可即时作用于在途会话，并记录安全版本。模型并发容量由控制器即时调整。</p>
+<p><strong>现场清理和历史日志保留是两种操作。</strong> 首页说明日志保存，后台限制查看与导出。API 密钥、密码和会话凭证始终排除。</p>
+<h3>接口跟着体验走</h3>
+<div class="am-table-wrap"><table>
+<thead>
+<tr>
+<th>用户动作</th>
+<th>对应 API 责任</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>开始、选择、答题</td>
+<td>创建会话，锁定选择，保存答案</td>
+</tr>
+<tr>
+<td>检查总结、最终确认</td>
+<td>返回模板总结，幂等启动分析</td>
+</tr>
+<tr>
+<td>查看报告、开始任务、退出</td>
+<td>查询分析状态，返回任务结束时间，关闭会话</td>
+</tr>
+<tr>
+<td>后台编辑与发布</td>
+<td>登录授权，校验配置，记录发布审计</td>
+</tr>
+</tbody></table></div>
+<p><a href="reference.html#panel-E">查阅字段、API、日志统计与配置范围</a></p>
 </div></div>
 </section>
 <section class="am-panel" id="panel-G">
-<header class="am-panel-head"><span class="am-panel-id">G</span><h2>产品与组件原型</h2></header>
-<div class="am-panel-body"><div class="am-md"><h3>15 产品与组件原型</h3>
-<p>本节补充25张页面和组件原型。原型用于确认布局、状态和交互，不是可运行页面。画面采用浅灰背景、白色圆角卡片和紫色主操作，按钮参考Apple的轻量层次与按压反馈。人体轮廓为可点击区域的占位图。最终人体素材和艺术字体应在视觉定稿时替换。</p>
-<p>用户端共有11张图，覆盖十个主环节以及超时兜底和安全拦截。后台共有10张图，覆盖登录、监控、配置、题库、任务、安全、日志和发布。组件共有4张状态图，覆盖选择操作、配置表单、报告计时及弹窗异常。</p>
-<div class="am-table-wrap"><table>
+<header class="am-panel-head"><span class="am-panel-id">G</span><h2>实施顺序 每阶段交付可验证的结果</h2></header>
+<div class="am-panel-body"><ol class="am-timeline am-timeline--v"><li class="am-tl-item"><span class="am-tl-when">01</span><span class="am-tl-dot"></span><span class="am-tl-title">跑通完整体验</span><span class="am-tl-text">状态机、题库、模板总结与前端流程</span></li><li class="am-tl-item"><span class="am-tl-when">02</span><span class="am-tl-dot"></span><span class="am-tl-title">接入 AI 与异常处理</span><span class="am-tl-text">Schema 校验、安全规则与部位兜底</span></li><li class="am-tl-item"><span class="am-tl-when">03</span><span class="am-tl-dot"></span><span class="am-tl-title">建立运营后台</span><span class="am-tl-text">配置发布、完整日志与监控</span></li><li class="am-tl-item"><span class="am-tl-when">04</span><span class="am-tl-dot"></span><span class="am-tl-title">完成现场验收</span><span class="am-tl-text">多设备联调、异常测试与压力测试</span></li></ol>
+<div class="am-md"><div class="am-table-wrap"><table>
 <thead>
 <tr>
-<th>图稿编号</th>
-<th>覆盖范围</th>
-<th>阅读重点</th>
+<th>要验证什么</th>
+<th>判断依据</th>
 </tr>
 </thead>
 <tbody><tr>
-<td>U01 至 U11</td>
-<td>用户端体验页面</td>
-<td>确认后锁定；问答自动推进；超时兜底；倒计时自动跳转</td>
+<td>体验连贯</td>
+<td>自动推进、总结修改与倒计时通关符合规则</td>
 </tr>
 <tr>
-<td>A01 至 A10</td>
-<td>后台管理页面</td>
-<td>时间滑条；数值预设与自定义；日志完整查看；配置发布</td>
+<td>结果可靠</td>
+<td>超时落定兜底，晚返回不覆盖，安全不能被绕过</td>
 </tr>
 <tr>
-<td>C01 至 C04</td>
-<td>公共组件及状态</td>
-<td>选中、禁用、加载、校验、报告来源、退出与闲置</td>
+<td>会话隔离</td>
+<td>至少两台设备同时体验，无答案、报告或状态串用</td>
+</tr>
+<tr>
+<td>运营可追溯</td>
+<td>配置版本可审计，日志可查且排除密钥与凭证</td>
 </tr>
 </tbody></table></div>
-<p>交互补充：按钮按压后短暂缩放；加载态阻止重复操作。选择题只显示点击选项，不显示下一题按钮。确认页的修改操作完成后直接返回总结。退出弹窗提供取消入口。滑条应支持键盘调节与触摸操作。错误信息显示在对应控件旁，不能只用颜色表示。</p>
-<p>原型中的建议、任务、安全提示、模型地址和统计数据均为示例。上线前使用审核内容和实际配置。AI等待页面不显示虚构进度百分比。倒计时结束只表示游戏计时完成。后台敏感输入不回显密钥。</p>
-<h4>U01 首页</h4>
-<p><img src="assets/prototype-01.png" alt="U01 首页"></p>
-<p>点击开始创建会话。日志说明在开始操作前可见。后台入口不出现在体验主流程。</p>
-<h4>U02 人体部位选择页</h4>
-<p><img src="assets/prototype-02.png" alt="U02 人体部位选择页"></p>
-<p>一次只展示一张人体图。确认前可切换视角及部位。确认后进入感受页并锁定部位。图中人体为占位轮廓。</p>
-<h4>U03 感受选择页</h4>
-<p><img src="assets/prototype-03.png" alt="U03 感受选择页"></p>
-<p>选项单选。部位已锁定。感受需确认后才进入问答；可配置选项及安全拦截。</p>
-<h4>U04 生活习惯问答页</h4>
-<p><img src="assets/prototype-04.png" alt="U04 生活习惯问答页"></p>
-<p>不提供下一题或提交按钮。选项按压后短暂显示选中态并立即保存。最后一题保存后自动生成总结。</p>
-<h4>U05 情况总结确认页</h4>
+<p>上线前审核题目、预置建议、任务和安全提示。压测记录等待 P95、兜底率、日志完整率，再确定设备容量。</p>
+<p><a href="reference.html#panel-F">查看完整验收标准与故障处理</a></p>
+</div></div>
+</section>
+<section class="am-panel" id="panel-H">
+<header class="am-panel-head"><span class="am-panel-id">H</span><h2>用三个画面对应上述逻辑</h2></header>
+<div class="am-panel-body"><div class="am-md"><p>以下为设计原型，内容与统计值均为示例。</p>
+<h3>用户端 看清信息再启动分析</h3>
+<p>U05 总结确认页对应第二段体验。答案修改后自动更新总结，最终确认才启动 AI。</p>
 <p><img src="assets/prototype-05.png" alt="U05 情况总结确认页"></p>
-<p>总结由程序自动生成。修改任一答案后自动更新，无需生成按钮。最终确认仅用于启动 AI 分析。</p>
-<h4>U06 扫描与等待页</h4>
-<p><img src="assets/prototype-06.png" alt="U06 扫描与等待页"></p>
-<p>扫描示意为动画关键帧。默认循环周期5秒。排队、调用与校验均受总等待上限约束。到期自动转为部位兜底。</p>
-<h4>U07 健康报告页</h4>
-<p><img src="assets/prototype-07.png" alt="U07 健康报告页"></p>
-<p>报告内容使用清晰正文字体。建议数量与后台一致。现场任务来源于审核任务库，不允许模型自由生成动作。示例文案须经上线内容审核。</p>
-<h4>U08 超时兜底报告页</h4>
-<p><img src="assets/prototype-08.png" alt="U08 超时兜底报告页"></p>
-<p>明确标记预置内容。正文不得暗示个性化分析已完成。AI晚返回不覆盖此页。危险信号不进入该兜底页。</p>
-<h4>U09 现场任务倒计时页</h4>
-<p><img src="assets/prototype-09.png" alt="U09 现场任务倒计时页"></p>
-<p>大号数字显示剩余时间，依据服务端结束时间计算。没有提前通关按钮。到期自动进入Buff页，退出仍清除会话。</p>
-<h4>U10 Buff 通关页</h4>
-<p><img src="assets/prototype-10.png" alt="U10 Buff 通关页"></p>
-<p>工作人员根据页面发放奖励。返回首页时清除临时记录。停留时间后台可调，示例15秒。Buff不代表健康改善结论。</p>
-<h4>U11 安全拦截页</h4>
-<p><img src="assets/prototype-11.png" alt="U11 安全拦截页"></p>
-<p>仅呈现安全处理入口，不提供普通任务、通关Buff和奖励完成提示。具体安全文案从审核规则读取。</p>
-<h4>A01 管理后台登录页</h4>
-<p><img src="assets/prototype-12.png" alt="A01 管理后台登录页"></p>
-<p>没有注册入口或网页账号创建功能。密码不明文回显。登录失败在表单内提示，超过次数时限制登录。</p>
-<h4>A02 后台运行概览</h4>
-<p><img src="assets/prototype-13.png" alt="A02 后台运行概览"></p>
-<p>数据均为原型示例。点击设备可查看状态并确认重置。监控统计区分体验、模型尝试、成功与失败耗时。</p>
-<h4>A03 后台时间参数配置页</h4>
+<h3>后台 把运行参数变成可发布配置</h3>
+<p>A03 时间配置页对应配置管理。时间参数使用滑条，保存草稿与发布分开。</p>
 <p><img src="assets/prototype-14.png" alt="A03 后台时间参数配置页"></p>
-<p>全部时间参数使用滑条，包括日志保留。数值和单位同时显示，支持触摸、键盘调节。发布与保存草稿分开。</p>
-<h4>A04 后台模型与数值配置页</h4>
-<p><img src="assets/prototype-15.png" alt="A04 后台模型与数值配置页"></p>
-<p>非时间数值下拉只含两个预设与自定义。自定义字段按范围校验。模型名称和地址直接输入。下拉展开态为示例。</p>
-<h4>A05 后台题库编辑页</h4>
-<p><img src="assets/prototype-16.png" alt="A05 后台题库编辑页"></p>
-<p>按题目排序编辑选项，条件分支由独立编辑面板配置。该图用于布局，生产表单应显示题目和选项稳定ID并校验重复。</p>
-<h4>A06 后台任务与 Buff 编辑页</h4>
-<p><img src="assets/prototype-17.png" alt="A06 后台任务与 Buff 编辑页"></p>
-<p>任务ID、适用部位、排除条件和审核状态需在详情页编辑。所有时长使用滑条。AI只能从审核后的允许任务中选取。</p>
-<h4>A07 后台安全与兜底页</h4>
-<p><img src="assets/prototype-18.png" alt="A07 后台安全与兜底页"></p>
-<p>切换到安全规则可编辑触发条件、拦截文案和允许的下一步。模板数量必须满足建议数量配置，发布前校验覆盖。</p>
-<h4>A08 后台日志列表页</h4>
-<p><img src="assets/prototype-19.png" alt="A08 后台日志列表页"></p>
-<p>支持按时间、状态、请求和会话过滤。日志导出需权限并记录审计。原型数据均为示例，不代表真实运行记录。</p>
-<h4>A09 后台完整日志详情页</h4>
-<p><img src="assets/prototype-20.png" alt="A09 后台完整日志详情页"></p>
-<p>输入与输出分栏显示。实际完整JSON采用可滚动查看和复制。密钥、密码与会话凭证永久排除。</p>
-<h4>A10 后台配置发布与版本页</h4>
-<p><img src="assets/prototype-21.png" alt="A10 后台配置发布与版本页"></p>
-<p>展示差异后发布，记录操作人和时间。新会话读取新版本；在途会话保持快照。回退同样生成一次可审计发布。</p>
-<h4>C01 组件原型 选择与操作</h4>
-<p><img src="assets/prototype-22.png" alt="C01 组件原型 选择与操作"></p>
-<p>按钮默认、按压、禁用、加载四态。按压缩放建议0.98，过渡120至180毫秒。选项与分段切换具有明确选中态。</p>
-<h4>C02 组件原型 配置表单</h4>
-<p><img src="assets/prototype-23.png" alt="C02 组件原型 配置表单"></p>
-<p>滑条支持单位、范围和步长。自定义只适用于数值。开关为布尔。密钥可替换不可明文回显。错误反馈不只依赖颜色。</p>
-<h4>C03 组件原型 报告与状态</h4>
+<h3>公共组件 让状态与结果来源可见</h3>
+<p>C03 对应报告和计时状态。AI 等待不显示虚构百分比，报告来源始终可见。</p>
 <p><img src="assets/prototype-24.png" alt="C03 组件原型 报告与状态"></p>
-<p>AI等待不展示虚构百分比。任务和通关计时来自各自截止时间。报告来源标签始终可见。</p>
-<h4>C04 组件原型 弹窗与异常</h4>
-<p><img src="assets/prototype-25.png" alt="C04 组件原型 弹窗与异常"></p>
-<p>退出需确认以防误触。闲置弹窗显示剩余时间。配置发布展示差异。断网不延长总等待。实际弹窗应同时提供关闭或取消入口。</p>
+<p><a href="reference.html#panel-G">查看全部 25 张原型及逐图说明</a></p>
 </div></div>
 </section>
 </div>
 </div>
 </main>
-<footer class="am-colophon">Generated by Answer me with HTML 0.4.9 · 2026-10-08 11:55</footer>
+<footer class="am-colophon">Generated by Answer me with HTML 0.4.9 · 2026-10-08 12:51</footer>
 <textarea id="am-source" hidden readonly aria-hidden="true">---
 template: doc
 theme: shadcn
 mode: light
 lang: zh
-title: 人体 Debug 互动系统设计文档
-subtitle: 版本 1.1 · 需求确认与开发实施
-source: 原始 Word 设计文档
+title: 人体 Debug 系统如何运转
+subtitle: 从一次体验到后台运行 · 设计总览
+source: 人体 Debug 互动系统设计文档 1.1
 ---
 
-本页面完整保留原设计文档的产品规则、架构约束、接口定义、验收条件和原型图，并按阅读任务重新组织导航。
+用户提供部位、感受和生活习惯，系统给出建议，再引导完成现场计时任务。理解这套设计，先看体验，再看系统如何保证结果有效。
+
+[查阅完整设计、参数和 25 张原型图](reference.html)
+
+## A 先明确 谁负责什么
+
+这个产品面向现场大屏，提供健康知识和生活习惯建议。
+
+| 参与者 | 负责的事 | 交付结果 |
+| --- | --- | --- |
+| 用户 | 选择部位与感受，回答习惯问题 | 已确认的输入 |
+| 程序 | 控制流程、检查安全、校验结果、运行倒计时 | 可展示的报告与任务 |
+| AI | 根据已确认输入分析，选择允许的 task_id | 分析文字、N 条建议、任务 ID |
+| 管理员 | 审核题库、任务、安全规则和兜底内容 | 可发布的配置版本 |
+| 工作人员 | 查看通关页面，现场确认奖励 | 奖励发放 |
+
+疾病诊断、用药和治疗承诺不在产品范围内。任务倒计时结束，只表示游戏计时完成。
+
+## B 一次体验 分四段理解
+
+```timeline v
+01 | 收集输入 | 开始 → 部位 → 感受 → 生活习惯问答
+02 | 检查信息 | 自动生成总结 → 修改答案 → 最终确认
+03 | 获得建议 | 扫描等待 → AI 报告或预置报告
+04 | 完成体验 | 开始任务 → 倒计时结束 → Buff → 返回首页
+```
+
+### 操作为什么这样安排
+
+- 部位和感受确认后锁定；重新选择需开始新会话。
+- 每题点击即保存并推进，最后一题自动进入总结。
+- 修改答案后直接回到总结；仅补答受影响的分支题。
+- 最终确认后才调用 AI，避免分析尚未确认的信息。
+- 任务计时结束自动通关；退出随时结束当前会话。
+
+**安全检查贯穿流程。** 感受确认、保存答案、最终确认、报告校验都会检查规则。命中危险信号时进入安全提示页，停止普通报告、任务和 Buff。
+
+[查看十个环节与全部操作规则](reference.html#panel-B)
+
+## C 状态机 让每一步只有合法入口
+
+下图聚焦确认后的状态迁移。此前依次为选择部位、选择感受和问答。
+
+```flow
+检查总结 -&gt; 分析中: 最终确认
+分析中 -&gt; 报告就绪: AI 或预置报告有效
+报告就绪 -&gt; 任务进行中: 开始任务
+任务进行中 -&gt; 已通关: 服务端计时结束
+已通关 -&gt; 已关闭: 结束或停留超时
+```
+
+### 三条约束防止状态混乱
+
+| 场景 | 程序必须保证 |
+| --- | --- |
+| 重复点击最终确认 | 同一输入和 Idempotency-Key 只创建一个分析任务 |
+| AI 晚返回或输入已经变化 | 写入前匹配会话、input_revision、request_id 和当前状态 |
+| 用户退出或命中安全规则 | 退出关闭会话；规则命中进入安全拦截，阻止普通流程继续 |
+
+任务结束时间由服务端记录，前端展示剩余时间。重复点击不能重启倒计时。
+
+[查看十种状态与版本字段](reference.html#panel-C)
+
+## D 系统架构 把职责放到正确位置
+
+```flow
+大屏浏览器 -&gt; 反向代理: 页面与 API 请求
+反向代理 -&gt; FastAPI: 单 Worker
+FastAPI -&gt; 模型服务: 异步调用
+FastAPI -&gt; MySQL: 配置与持久日志
+```
+
+**浏览器负责展示，FastAPI 决定状态和最终结果。** 会话初版放在服务内存中，配置和历史日志保存到 MySQL。
+
+### 多台设备如何一起运行
+
+asyncio 在等待网络时切换处理其他请求。模型调用通过有界队列和并发控制器，默认最多 5 个在途请求。
+
+- 队列满：立即提供部位兜底。
+- 容量降低：已有请求结束后再收紧许可。
+- 增加 Worker：需共享会话和全局并发限制。
+
+上游模型的实际并行能力与可接入设备数，需由压力测试确定。
+
+[查看并发约束和部署建议](reference.html#panel-C)
+
+## E AI 调用 一次等待只落定一个结果
+
+情况总结由程序模板生成。用户确认后，系统才把输入交给 AI。
+
+```sequence num
+participants: 浏览器, 后端, 模型
+浏览器 -&gt; 后端: 最终确认输入
+后端 -&gt; 后端: 安全检查并固定输入版本
+后端 --&gt; 浏览器: 安全通过后进入扫描等待
+后端 -&gt; 后端: 排队并获取并发许可
+后端 -&gt; 模型: 部位、答案、N 和允许任务 ID
+模型 --&gt; 后端: 分析、建议和 task_id
+后端 -&gt; 后端: 校验结构、事实引用与安全
+浏览器 -&gt; 后端: 查询分析状态
+后端 --&gt; 浏览器: 返回唯一有效报告
+```
+
+### 结果按这个优先级处理
+
+| 优先级 | 条件 | 用户看到什么 |
+| --- | --- | --- |
+| 1 安全 | 危险信号规则命中 | 安全提示；停止任务与 Buff |
+| 2 AI | 预算内返回且校验通过 | AI 报告和审核任务 |
+| 3 预置 | 队列满、超时、失败或输出不合格 | 标记为预置内容的部位兜底报告 |
+
+**默认总等待预算为 15 秒。** 排队、调用、重试和校验共同消耗这笔预算。到期落定预置报告，AI 晚返回只能记录日志。
+
+若校验失败且剩余预算允许，可按配置重试。AI 与兜底都必须输出恰好 N 条、不重复的建议；N 默认 3，允许 3 至 5。
+
+[查看 Schema、输出示例与时间参数](reference.html#panel-D)
+
+## F 数据与配置 先区分生命周期
+
+| 内容 | 放在哪里 | 何时变化或结束 |
+| --- | --- | --- |
+| 当前会话、答案和报告缓存 | 浏览器与后端临时状态 | 退出后清理；服务重启使内存会话失效 |
+| 题库、任务、兜底和业务配置 | MySQL 的发布版本 | 新会话读取新版本，在途会话保持快照 |
+| 问答和模型调用历史 | MySQL 日志 | 管理员按权限查询，到期清理完整内容 |
+| 数据库连接、主密钥、Worker 数量 | 启动配置 | 按部署配置与重启流程生效 |
+
+### 后台编辑怎样影响体验
 
 ```flow LR
-(开始) -&gt; 部位选择 -&gt; 感受选择 -&gt; 生活习惯问答 -&gt; 情况确认 -&gt; AI分析
-AI分析 -&gt; 健康报告 -&gt; 现场任务 -&gt; Buff通关
-AI分析 --&gt; 超时兜底: 超时或失败
-部位选择 --&gt; 安全拦截: 识别危险信号
+草稿 -&gt; 校验 -&gt; 发布版本 -&gt; 新会话快照
 ```
 
-版本 1.1 日期 2026年10月8日 用途 需求确认与开发实施
+紧急安全规则可即时作用于在途会话，并记录安全版本。模型并发容量由控制器即时调整。
 
-本系统面向现场大屏互动。用户选择身体部位和感受，完成选择题，检查情况总结，再查看健康习惯建议。用户完成倒计时任务后领取健康 Buff。本文件确定体验流程、管理后台、数据契约、并发控制、日志和验收要求。初版采用单进程 FastAPI 与 asyncio。系统提供健康知识和生活习惯建议，不生成疾病诊断。
+**现场清理和历史日志保留是两种操作。** 首页说明日志保存，后台限制查看与导出。API 密钥、密码和会话凭证始终排除。
 
-## A 范围与核心规则
+### 接口跟着体验走
 
-### 1 设计范围与确定规则
-
-用户端包含首页、身体部位、感受、问答、确认、扫描、报告、任务和通关页面。后台包含配置、题库、任务库、兜底库、日志、监控和重置功能。管理员账号只通过命令行和 MySQL 管理。
-
-已确定规则：部位和感受确认后锁定。每题点击选项后自动推进。最后一题完成后自动生成情况总结。确认页保留一次最终确认操作。AI 分析从最终确认后开始。AI 超时使用基于身体部位的预置建议。全部时间配置使用滑条。完整输入和模型输出默认记录。
-
-下文默认值、范围和技术选型属于初版实施建议，可以在开发前调整。实际并发容量以模型服务能力和压力测试为准。
-
-## B 用户流程 文案与安全
-
-### 2 用户体验流程
-
-| 环节 | 页面与行为 |
+| 用户动作 | 对应 API 责任 |
 | --- | --- |
-| 1 开始 | 点击开始人体 Debug。创建独立会话。显示健康知识与日志保存说明。 |
-| 2 部位 | 同一区域显示一张人体图。支持正面、背面、侧面切换。点击部位后显示确认。确认后锁定。 |
-| 3 感受 | 点击酸、痛、僵硬、麻、容易疲劳或只是想了解一下。确认后锁定。选项根据部位配置。 |
-| 4 问答 | 默认五题。全部使用点击选项。点击即保存并进入下一题。显示第几题和总题数。 |
-| 5 确认 | 最后一题完成后自动生成初步情况总结。显示全部答案。允许逐题修改。修改后自动更新总结。点击确认并分析。 |
-| 6 扫描 | 立即开始总等待计时并提交 AI。扫描动画循环播放。有效报告返回后进入报告页。到达等待上限则展示兜底报告。 |
-| 7 报告 | 显示身体分析、改善建议和现场任务。说明建议来自 AI 或预置内容。点击开始健康任务。 |
-| 8 任务 | 显示动作说明及醒目倒计时。默认25秒。计时结束自动进入通关页。 |
-| 9 通关 | 显示健康 Buff、通关提示和奖励说明。供工作人员现场确认。 |
-| 10 结束 | 点击结束体验或默认停留15秒后自动退出。清除现场会话和页面数据，返回首页。 |
+| 开始、选择、答题 | 创建会话，锁定选择，保存答案 |
+| 检查总结、最终确认 | 返回模板总结，幂等启动分析 |
+| 查看报告、开始任务、退出 | 查询分析状态，返回任务结束时间，关闭会话 |
+| 后台编辑与发布 | 登录授权，校验配置，记录发布审计 |
 
-身体部位覆盖眼睛、头部、颈肩、手腕、胸腹、腰背、膝盖和腿脚。每个视角的点击区域映射到同一 part_id。同一部位不会因为视角不同而改变问答或报告。
+[查阅字段、API、日志统计与配置范围](reference.html#panel-E)
 
-确认页修改题目时，点击新选项后直接返回确认页。不得要求用户重答全部题目。若修改答案使后续分支题失效，系统只要求补答受影响题目，再自动更新总结。已确认的部位和感受不能修改。用户需要重新选择时退出并开始新会话。
+## G 实施顺序 每阶段交付可验证的结果
 
-### 3 报告与文案规则
-
-初步情况总结由程序模板生成，不调用 AI。它复述已选部位、感受和答案，不添加疾病判断或因果结论。健康 Debug 报告由 AI 生成，并由后端校验。两份报告均使用短句、明确主语和统一术语。每句话说明一个事实或一个动作。保留可能性，不能把相关习惯写成已确认病因。
-
-ASD-STE100 是英文受控语言标准。本项目中文文案采用其写作原则，不宣称通过正式 STE 合规认证。英文文案按指定技能控制句长和表达。中文建议采用一句一个动作、明确对象、减少专业术语的项目规则。
-
-情况总结示例：你选择了颈肩。你感到僵硬。你每天使用电脑超过8小时。你很少活动。你选择的睡眠时间是6至7小时。请检查这些信息。
-
-身体分析应引用具体答案。改善建议应直接说明可执行动作。现场任务只能来自审核后的固定任务库。任务时长和 Buff 由后端配置。AI 仅选择允许的 task_id，不自行编写运动方案。倒计时结束代表游戏计时完成，不能宣称系统验证了动作或改善了健康。
-
-建议数量采用三层控制：Prompt 明确要求 N 条；动态 JSON Schema 将 suggestions 的 minItems 和 maxItems 同时设为 N；后端再次校验长度、重复内容和安全性。N 默认3，允许3至5。校验失败且重试预算不足时使用相同数量的预置建议。不得用重复建议补足数量。
-
-### 4 安全与特殊流程
-
-安全规则在感受确认、每次答案保存、最终确认和报告校验阶段执行。危险信号规则优先于模型和兜底。规则可关联部位、感受及题目选项。识别到规则命中时进入安全提示页，停止普通报告、健康任务和 Buff 流程。安全提示及规则内容上线前需由合适的健康内容审核人员确认。
-
-选择题应提供能触发安全规则的必要选项。系统只能识别问卷覆盖的风险，不能声称排除了危险。报告禁止疾病诊断、用药、治疗承诺和已改善健康等表述。
-
-AI 超时、网络失败、无效 JSON、字段缺失或不安全输出均可触发预置建议。兜底首先按 part_id 匹配，再可按 feeling_id 和答案标签细化。部位通用模板必须存在。无匹配时采用审核后的最低风险通用模板。危险信号不得被兜底绕过。
-
-用户随时退出。后端标记会话已结束，取消可取消的任务，删除临时状态。模型晚返回的内容只记录调用结果，不写回页面。刷新页面返回首页。长时间不操作先提示，再按配置退出。分析和任务阶段使用各自的期限，避免闲置计时与任务计时冲突。
-
-## C 架构 并发与状态机
-
-### 5 架构与并发控制
-
-建议架构：大屏浏览器 → 反向代理 → 单 Worker FastAPI → 异步模型客户端与 MySQL。前端建议 TypeScript，后端建议 Pydantic 校验，模型调用使用异步 HTTP 客户端，MySQL 使用异步驱动或隔离到线程执行同步调用。技术选型不改变数据契约。
-
-asyncio 默认在一个线程中运行事件循环。多个设备的请求在等待网络或数据库时交替推进。它不是多线程，也不保证上游模型同时推理。async def 内不得直接使用 requests.post、time.sleep 或阻塞数据库调用。CPU 密集任务需要移出事件循环。
-
-模型并发默认5。使用有界等待队列和进程内并发控制器。队列满时立即提供部位兜底，不无限堆积请求。等待队列中的请求同样消耗用户总等待预算。开始扫描时启动总截止时间；排队、请求、重试、校验均受该截止时间约束。
-
-初版仅一个 Worker。增加 Worker 或服务器后，需要共享会话存储和全局并发限制。单进程 Semaphore 不能控制多个进程的总并发。并发配置热更新采用可调整容量的控制器，不替换正在使用的 Semaphore，也不访问其私有属性。降低容量时允许已有请求结束，再停止发放超额许可。
-
-```python
-async def analyze(payload, limiter, client, timeout_s):
-async with asyncio.timeout(timeout_s): # 覆盖排队和模型调用的总等待时间
-async with limiter: # 获取并发许可，退出时释放
-return await client.generate(payload) # 使用真正的异步客户端
+```timeline v
+01 | 跑通完整体验 | 状态机、题库、模板总结与前端流程
+02 | 接入 AI 与异常处理 | Schema 校验、安全规则与部位兜底
+03 | 建立运营后台 | 配置发布、完整日志与监控
+04 | 完成现场验收 | 多设备联调、异常测试与压力测试
 ```
 
-示例需导入 asyncio。payload 是确认后的输入，limiter 是并发控制器，client 是异步模型客户端，timeout_s 是总预算。调用方必须捕获 TimeoutError 并返回兜底，并在保存结果前校验会话状态。取消客户端请求不一定能停止上游已开始的推理。
-
-### 6 会话与状态机
-
-| 状态 | 进入条件与允许操作 |
+| 要验证什么 | 判断依据 |
 | --- | --- |
-| PART_SELECTION | 创建会话后选择并确认部位 |
-| FEELING_SELECTION | 部位锁定后确认感受 |
-| QUESTIONNAIRE | 感受锁定后逐题作答 |
-| SUMMARY_REVIEW | 全部题目完成，可修改答案并最终确认 |
-| ANALYZING | 最终确认后等待 AI 或兜底 |
-| REPORT_READY | 只接收一次有效报告，可开始任务 |
-| TASK_RUNNING | 显示倒计时，结束进入通关 |
-| COMPLETED | 显示 Buff，结束或停留超时后清理 |
-| SAFETY_STOP | 规则拦截，显示审核后的安全提示 |
-| CLOSED | 退出、清理或闲置结束，不接受新结果 |
+| 体验连贯 | 自动推进、总结修改与倒计时通关符合规则 |
+| 结果可靠 | 超时落定兜底，晚返回不覆盖，安全不能被绕过 |
+| 会话隔离 | 至少两台设备同时体验，无答案、报告或状态串用 |
+| 运营可追溯 | 配置版本可审计，日志可查且排除密钥与凭证 |
 
-每次体验使用随机 session_id 和私有会话凭证。session_id 不能单独作为授权依据。每次模型调用使用 request_id，每次答案变更递增 answer_revision。确认时生成 input_revision，并保存 config_version。结果写入必须同时匹配会话、输入版本、请求和当前状态。
+上线前审核题目、预置建议、任务和安全提示。压测记录等待 P95、兜底率、日志完整率，再确定设备容量。
 
-最终确认接口支持 Idempotency-Key。相同输入和相同键只创建一个分析任务。报告、倒计时启动和通关迁移使用原子状态转换。任务倒计时以服务端记录的结束时间为依据，前端仅展示剩余时间，避免重复点击重启计时。
+[查看完整验收标准与故障处理](reference.html#panel-F)
 
-## D 数据契约与后台配置
+## H 用三个画面对应上述逻辑
 
-### 7 Schema 数据契约
+以下为设计原型，内容与统计值均为示例。
 
-统一采用 JSON Schema 2020-12。顶层对象禁止未知字段。时间戳采用带时区的 ISO 8601。ID 为字符串。枚举、必填字段、长度和范围由后端校验。输入使用稳定 ID，显示文案由固定版本题库解析。不得仅把不可理解的 option_id 交给模型。
+### 用户端 看清信息再启动分析
 
-| Schema | 必填字段及约束 |
-| --- | --- |
-| SessionSchema | session_id、status、answer_revision、config_version、created_at、expires_at。会话凭证只在创建响应交付，不写普通日志。 |
-| BodySelectionSchema | part_id、view、feeling_id、part_locked、feeling_locked。view 为 front、back、side。后端验证部位与感受关系。 |
-| QuestionSchema | question_id、text、options、order、conditions。options 包含 option_id、label、tags。题目与选项 ID 不重复。 |
-| AnswerSchema | question_id、option_id。单题单选。选项必须属于当前题目。答案数与实际题集一致。 |
-| SummarySchema | session_id、answer_revision、facts、summary_text。facts 引用 question_id 和 option_id。生成来源固定为 template。 |
-| AIInputSchema | session_id、request_id、input_revision、config_version、body_selection、answers、report_rules、allowed_task_ids。answers 包含题目和答案显示文字。 |
-| AIReportSchema | body_analysis、suggestions、task_id。suggestions 恰好 N 条。task_id 必须来自当前允许任务集合。 |
-| ReportEnvelopeSchema | report_id、session_id、source、fallback_reason、body_analysis、suggestions、task、buff、config_version。source 为 ai 或 preset。 |
-| SystemConfigSchema | schema_version、config_version、model、runtime、questions、report、safety、ui、logging。密钥读取时只返回是否已设置。 |
-| AIInvocationLogSchema | request_id、session_id、attempt、input_snapshot、request_body、raw_output、validated_output、status、queue_ms、model_ms、total_ms、error_code、created_at。 |
-| SafetyResultSchema | blocked、rule_ids、message、allowed_next_action。命中时不得返回普通任务。 |
-| TaskSchema | task_id、title、instructions、allowed_parts、excluded_tags、duration_seconds、buff_id。由审核任务库生成。 |
-
-输入示例。每个 answer 对象说明一道题和用户选择。report_rules 控制建议数量。allowed_task_ids 限制模型可选任务。示例为单条答案节选，生产接口必须校验全部题目。
-
-```json
-{
-&quot;session_id&quot;: &quot;example-session&quot;,
-&quot;request_id&quot;: &quot;example-request&quot;,
-&quot;input_revision&quot;: 1,
-&quot;config_version&quot;: 1,
-&quot;body_selection&quot;: {
-&quot;part_id&quot;: &quot;neck_shoulder&quot;,
-&quot;part_label&quot;: &quot;颈肩&quot;,
-&quot;feeling_id&quot;: &quot;stiffness&quot;,
-&quot;feeling_label&quot;: &quot;僵硬&quot;
-},
-&quot;answers&quot;: [
-{
-&quot;question_id&quot;: &quot;screen_time&quot;,
-&quot;question_text&quot;: &quot;你每天使用电脑多久&quot;,
-&quot;option_id&quot;: &quot;over_8_hours&quot;,
-&quot;option_text&quot;: &quot;超过8小时&quot;
-}
-],
-&quot;report_rules&quot;: {
-&quot;suggestion_count&quot;: 3,
-&quot;language&quot;: &quot;zh-CN&quot;
-},
-&quot;allowed_task_ids&quot;: [
-&quot;rest_gaze&quot;
-]
-}
-```
-
-AI 输出结构示例。task_id 由后端解析为任务说明和 Buff。下面的动态 Schema 将 N 固定为3，部署时按会话配置生成。
-
-```json
-{
-&quot;$schema&quot;: &quot;https://json-schema.org/draft/2020-12/schema&quot;,
-&quot;type&quot;: &quot;object&quot;,
-&quot;additionalProperties&quot;: false,
-&quot;required&quot;: [
-&quot;body_analysis&quot;,
-&quot;suggestions&quot;,
-&quot;task_id&quot;
-],
-&quot;properties&quot;: {
-&quot;body_analysis&quot;: {
-&quot;type&quot;: &quot;string&quot;,
-&quot;minLength&quot;: 1,
-&quot;maxLength&quot;: 500
-},
-&quot;suggestions&quot;: {
-&quot;type&quot;: &quot;array&quot;,
-&quot;minItems&quot;: 3,
-&quot;maxItems&quot;: 3,
-&quot;uniqueItems&quot;: true,
-&quot;items&quot;: {
-&quot;type&quot;: &quot;string&quot;,
-&quot;minLength&quot;: 1,
-&quot;maxLength&quot;: 120
-}
-},
-&quot;task_id&quot;: {
-&quot;type&quot;: &quot;string&quot;,
-&quot;enum&quot;: [
-&quot;rest_gaze&quot;
-]
-}
-}
-}
-```
-
-Schema 只能验证结构和部分内容约束。它不能证明医学安全、语义正确或 STE 合规。后端还需要规则检查、事实引用检查和人工审核的模板。模型服务不支持结构化输出时，仍要求纯 JSON，并执行相同本地校验。
-
-### 8 后台配置与控件
-
-后台必须登录。时间参数统一使用滑条，显示数值、单位、最小值、最大值和步长。非时间数值参数统一使用两个预设值与自定义三个下拉选项，选自定义后出现输入框。布尔使用开关，枚举使用下拉框，字符串使用输入框，Prompt 使用多行编辑框，密钥使用密码框。
-
-| 时间配置 | 默认值 | 建议范围与步长 |
-| --- | --- | --- |
-| ai_total_wait_seconds 总等待 | 15秒 | 5至60秒，1秒 |
-| queue_timeout_seconds 排队 | 5秒 | 0至30秒，1秒 |
-| model_timeout_seconds 单次调用 | 15秒 | 1至60秒，1秒 |
-| scan_cycle_seconds 动画周期 | 5秒 | 1至10秒，1秒 |
-| task_duration_seconds 任务 | 25秒 | 20至30秒，1秒 |
-| completion_timeout_seconds 通关 | 15秒 | 5至60秒，1秒 |
-| session_idle_timeout_seconds 闲置 | 60秒 | 30至300秒，5秒 |
-| idle_warning_seconds 退出提示 | 10秒 | 5至30秒，1秒 |
-| retry_backoff_seconds 重试间隔 | 1秒 | 0至5秒，1秒 |
-| admin_session_timeout_minutes 后台 | 30分钟 | 5至120分钟，5分钟 |
-| log_retention_days 日志保留 | 30天 | 1至180天，1天 |
-
-所有时间设置均为滑条，包括日志保留和后台登录有效期。总等待时间具有最高优先级。单次模型超时使用配置值与剩余预算中的较小值。动画周期只决定视觉循环，不强制用户至少等待一次完整循环。模型有效结果返回时可立即显示报告。
-
-| 非时间数值 | 预设与自定义 | 校验范围 |
-| --- | --- | --- |
-| max_concurrency | 3、5、自定义 | 1至50 |
-| max_queue_size | 10、20、自定义 | 0至200 |
-| question_count | 5、7、自定义 | 3至10 |
-| suggestion_count | 3、5、自定义 | 3至5 |
-| max_output_tokens | 1024、2048、自定义 | 256至8192，另校验模型支持 |
-| temperature | 0.2、0.5、自定义 | 0至2，另校验模型支持 |
-| ai_retry_count | 0、1、自定义 | 0至2 |
-| login_failure_limit | 5、10、自定义 | 3至20 |
-
-模型配置包括协议类型、API 地址、模型名称、API 密钥、温度、Token 上限及结构化输出模式。题库配置包括部位、视角点击区域、感受、题目、选项、条件、顺序和数量。报告配置包括 Prompt、建议数量、文案规则、允许任务和 Buff。安全配置包括拦截规则、提示文案、任务排除规则和兜底模板。运营配置包括首页、奖励说明、全屏提示、动画资源和可选二维码。
-
-日志配置包括完整日志开关、保留时间、导出权限和脱敏规则。默认启用完整输入输出。后台监控显示服务状态、调用次数、成功率、平均耗时、排队时间和失败次数。
-
-配置采用草稿、校验、发布和版本记录。每次发布形成新 config_version。当前会话使用创建时的快照，新会话使用新版本。紧急安全规则可即时对在途会话生效，并记录所用安全版本。模型并发容量按控制器规则即时调整。
-
-数据库地址、端口、凭证、加密主密钥、进程数量和服务监听参数属于启动配置。后台可显示状态和重启提示，不能把它们作为即时业务配置。管理员账号按用户要求在命令行管理。不得把加密主密钥和加密后的 API 密钥放在同一个数据库中。
-
-## E 管理日志 接口与存储
-
-### 9 管理员与日志设计
-
-管理员账户在 MySQL 保存 username、password_hash、role、enabled 和凭证版本。通过命令行工具生成密码哈希后写入数据库，不保存明文密码。修改密码或停用账号后撤销已有登录会话。登录采用安全 Cookie、失败次数限制及适当的 CSRF 防护。后台提供配置变更审计，不提供新增账号入口。
-
-每次体验记录完整选择、答案及版本。每次模型尝试记录完整应用层请求、模型原始输出、有效报告、错误和耗时。即使 JSON 无效或超时，也记录已收到的输出和错误。API 密钥、Authorization、登录密码、会话凭证不属于用户输入，始终排除。
-
-结束体验清除浏览器、后端临时会话和报告缓存。按本方案保留历史日志，供登录后的管理员查询。这与现场清除不是同一操作。首页应明确告知会保存问答和模型输出。日志不主动收集身份信息；健康回答仍需限制查看、导出和保留时间。到期删除完整内容，可保留不含回答的聚合统计。
-
-| 指标 | 统计定义 |
-| --- | --- |
-| 体验次数 | 创建的 session_id 数量，另列完成、退出和安全拦截 |
-| 分析次数 | 用户最终确认触发的逻辑分析次数 |
-| 模型调用次数 | 实际发出的请求尝试数，包含重试 |
-| 平均调用时间 | 完成的模型尝试 model_ms 之和除以对应尝试数，成功与失败分别显示 |
-| 用户等待时间 | 最终确认至 AI 或兜底报告就绪的 total_ms，另显示P95 |
-| 失败次数 | 超时、网络失败、上游错误、结构失败和安全拒绝分类计数 |
-| 兜底率 | 兜底报告数量除以正常分析请求数，安全拦截单列 |
-
-### 10 接口与存储
-
-| 接口 | 作用 |
-| --- | --- |
-| POST /api/sessions | 创建体验并返回会话凭证与配置快照 |
-| POST /api/sessions/{id}/selection | 确认并锁定部位或感受 |
-| PUT /api/sessions/{id}/answers/{question_id} | 保存或修改答案，返回进度与受影响题目 |
-| GET /api/sessions/{id}/summary | 返回自动生成的最新总结 |
-| POST /api/sessions/{id}/analysis | 最终确认并创建幂等分析任务 |
-| GET /api/sessions/{id}/analysis | 返回等待、AI报告、兜底或安全拦截 |
-| POST /api/sessions/{id}/task | 启动一次任务并返回结束时间 |
-| POST /api/sessions/{id}/close | 关闭会话并清除临时数据 |
-| POST /api/admin/login | 后台登录 |
-| GET PUT /api/admin/config | 查看或编辑草稿配置 |
-| POST /api/admin/config/publish | 校验并发布配置版本 |
-| GET /api/admin/logs 和 /metrics | 按权限查询日志及统计 |
-| GET /health/live 和 /health/ready | 进程存活与依赖就绪检查 |
-
-题库、任务、兜底和安全规则提供相应后台 CRUD 接口。删除被发布版本引用的内容时应保留旧版本，避免在途会话失效。日志导出和重置接口须单独审计。
-
-接口使用统一封装：成功返回 data、request_id 和 server_time；错误返回 code、message 和 request_id。无效输入返回422，身份无效返回401，状态或版本冲突返回409。前端按错误码决定恢复、提示或退出，不显示内部异常堆栈。
-
-MySQL 建议分为 admin_accounts、config_versions、body_parts、feelings、question_sets、task_library、fallback_templates、safety_rules、experience_logs、ai_invocation_logs 和 audit_logs。结构化内容可保存 JSON。request_id 唯一，session_id 和 created_at 建索引。日志表按保留策略清理。临时会话初版放内存，服务重启使其失效，浏览器收到失效响应后回首页。
-
-## F 现场运行 部署与验收
-
-### 11 视觉与现场运行
-
-首页、扫描页、任务倒计时和通关页使用大字号、醒目的艺术字体。问题、确认内容、报告和后台使用清晰正文字体。字体需覆盖中文并具有使用许可。颜色对比应保证大屏远距离阅读。正文艺术化不能降低可读性。
-
-按钮参考 Apple 的圆角、轻量阴影、按压缩放、平滑过渡和明确选中状态。触摸按钮及人体区域需要足够大。细小部位可使用扩大命中区或放大视图，并防止重叠选择。动画不阻止点击响应，支持减少动态效果。
-
-现场页面支持全屏、工作人员重置和横竖屏适配。后台入口不出现在普通体验主流程。奖励由工作人员确认，系统不声称已自动发奖。若以后引入二维码或自动核销，需单独增加唯一领奖码、核销状态及防重复领取接口。
-
-### 12 异常恢复与部署
-
-请求在总等待截止时由后端原子确定最终报告。AI 成功和超时竞争时只能有一个结果生效。页面轮询失败时提示连接问题，重试期间仍使用原截止时间，不延长等待。若后端失联，前端使用启动时获得的审核部位兜底内容或显示服务不可用，并拒绝接收过期结果。
-
-数据库故障时禁止发布配置。AI 日志写入失败应进入有界重试缓冲并显示后台告警。缓冲耗尽时标记日志丢失，不宣称完整保存。密钥错误、配额不足等错误进入监控分类，不把原始敏感异常直接展示给用户。
-
-部署初版采用反向代理、一个 FastAPI Worker、MySQL 和外部模型服务。启用 HTTPS。使用进程管理器或容器自动重启。静态资源本地提供，避免现场依赖外部字体。上线前备份配置和题库，验证数据库恢复、密钥轮换和模型连接。
-
-### 13 验收标准
-
-| 验收项 | 通过条件 |
-| --- | --- |
-| 主流程 | 十个环节完整，单题无需下一步，最后一题自动进入总结 |
-| 锁定与修改 | 部位和感受确认后不可改，修改答案自动更新总结和失效分支 |
-| 视角一致 | 三种视角同一部位使用同一ID和同一题库 |
-| 报告数量 | 配置3或5时AI和兜底均严格输出对应数量且无重复 |
-| 超时 | 排队与模型耗时受总预算约束，到期显示部位兜底 |
-| 晚返回 | 超时后AI不覆盖兜底，退出后结果不进入新会话 |
-| 并发隔离 | 至少两台设备同时完成体验，无答案、报告或状态串用 |
-| 限制容量 | 模型在途请求不超过当前规则允许值，队列满时及时兜底 |
-| 安全拦截 | 规则命中不展示普通任务和Buff，AI和兜底均不能绕过 |
-| 后台控件 | 全部时间均为滑条，其他数值含两个预设和自定义 |
-| 配置版本 | 发布后新会话更新，在途会话保持快照，可审计与回退 |
-| 日志 | 完整输入输出可查，统计定义正确，密钥与凭证不入日志 |
-| 清理 | 退出、闲置和通关到期后现场内容清除，历史日志按策略保留 |
-| 大屏与重置 | 触摸区域可用，文本无溢出，刷新及工作人员重置回首页 |
-| 故障 | 覆盖模型失败、无效JSON、断网、数据库失败与服务重启 |
-
-压力测试至少覆盖配置最大并发、超出队列容量、慢模型、频繁退出和后台并发变更。测试记录模型实际并行能力、等待P95、兜底率和日志完整率。完成这些检查后再确定现场可接入设备数量。
-
-### 14 实施顺序与参考资料
-
-第一阶段建立状态机、题库、总结模板和完整前端流程。第二阶段接入 AI、Schema 校验、安全规则和兜底。第三阶段开发配置后台、完整日志与监控。第四阶段进行多设备联调、异常测试和现场压力测试。上线前审核全部问题、预置建议、任务和安全提示。
-
-参考资料：ASD-STE100 skill 仓库与 SKILL.md，https://github.com/danyuchn/asd-ste100-skill 。该仓库提供简化英文的写作原则，未包含完整官方词典。Python asyncio 官方文档，https://docs.python.org/3/library/asyncio.html 。本文件的中文写作规则和系统配置范围为项目设计约定。
-
-## G 产品与组件原型
-
-### 15 产品与组件原型
-
-本节补充25张页面和组件原型。原型用于确认布局、状态和交互，不是可运行页面。画面采用浅灰背景、白色圆角卡片和紫色主操作，按钮参考Apple的轻量层次与按压反馈。人体轮廓为可点击区域的占位图。最终人体素材和艺术字体应在视觉定稿时替换。
-
-用户端共有11张图，覆盖十个主环节以及超时兜底和安全拦截。后台共有10张图，覆盖登录、监控、配置、题库、任务、安全、日志和发布。组件共有4张状态图，覆盖选择操作、配置表单、报告计时及弹窗异常。
-
-| 图稿编号 | 覆盖范围 | 阅读重点 |
-| --- | --- | --- |
-| U01 至 U11 | 用户端体验页面 | 确认后锁定；问答自动推进；超时兜底；倒计时自动跳转 |
-| A01 至 A10 | 后台管理页面 | 时间滑条；数值预设与自定义；日志完整查看；配置发布 |
-| C01 至 C04 | 公共组件及状态 | 选中、禁用、加载、校验、报告来源、退出与闲置 |
-
-交互补充：按钮按压后短暂缩放；加载态阻止重复操作。选择题只显示点击选项，不显示下一题按钮。确认页的修改操作完成后直接返回总结。退出弹窗提供取消入口。滑条应支持键盘调节与触摸操作。错误信息显示在对应控件旁，不能只用颜色表示。
-
-原型中的建议、任务、安全提示、模型地址和统计数据均为示例。上线前使用审核内容和实际配置。AI等待页面不显示虚构进度百分比。倒计时结束只表示游戏计时完成。后台敏感输入不回显密钥。
-
-#### U01 首页
-
-![U01 首页](assets/prototype-01.png)
-
-点击开始创建会话。日志说明在开始操作前可见。后台入口不出现在体验主流程。
-
-#### U02 人体部位选择页
-
-![U02 人体部位选择页](assets/prototype-02.png)
-
-一次只展示一张人体图。确认前可切换视角及部位。确认后进入感受页并锁定部位。图中人体为占位轮廓。
-
-#### U03 感受选择页
-
-![U03 感受选择页](assets/prototype-03.png)
-
-选项单选。部位已锁定。感受需确认后才进入问答；可配置选项及安全拦截。
-
-#### U04 生活习惯问答页
-
-![U04 生活习惯问答页](assets/prototype-04.png)
-
-不提供下一题或提交按钮。选项按压后短暂显示选中态并立即保存。最后一题保存后自动生成总结。
-
-#### U05 情况总结确认页
+U05 总结确认页对应第二段体验。答案修改后自动更新总结，最终确认才启动 AI。
 
 ![U05 情况总结确认页](assets/prototype-05.png)
 
-总结由程序自动生成。修改任一答案后自动更新，无需生成按钮。最终确认仅用于启动 AI 分析。
+### 后台 把运行参数变成可发布配置
 
-#### U06 扫描与等待页
-
-![U06 扫描与等待页](assets/prototype-06.png)
-
-扫描示意为动画关键帧。默认循环周期5秒。排队、调用与校验均受总等待上限约束。到期自动转为部位兜底。
-
-#### U07 健康报告页
-
-![U07 健康报告页](assets/prototype-07.png)
-
-报告内容使用清晰正文字体。建议数量与后台一致。现场任务来源于审核任务库，不允许模型自由生成动作。示例文案须经上线内容审核。
-
-#### U08 超时兜底报告页
-
-![U08 超时兜底报告页](assets/prototype-08.png)
-
-明确标记预置内容。正文不得暗示个性化分析已完成。AI晚返回不覆盖此页。危险信号不进入该兜底页。
-
-#### U09 现场任务倒计时页
-
-![U09 现场任务倒计时页](assets/prototype-09.png)
-
-大号数字显示剩余时间，依据服务端结束时间计算。没有提前通关按钮。到期自动进入Buff页，退出仍清除会话。
-
-#### U10 Buff 通关页
-
-![U10 Buff 通关页](assets/prototype-10.png)
-
-工作人员根据页面发放奖励。返回首页时清除临时记录。停留时间后台可调，示例15秒。Buff不代表健康改善结论。
-
-#### U11 安全拦截页
-
-![U11 安全拦截页](assets/prototype-11.png)
-
-仅呈现安全处理入口，不提供普通任务、通关Buff和奖励完成提示。具体安全文案从审核规则读取。
-
-#### A01 管理后台登录页
-
-![A01 管理后台登录页](assets/prototype-12.png)
-
-没有注册入口或网页账号创建功能。密码不明文回显。登录失败在表单内提示，超过次数时限制登录。
-
-#### A02 后台运行概览
-
-![A02 后台运行概览](assets/prototype-13.png)
-
-数据均为原型示例。点击设备可查看状态并确认重置。监控统计区分体验、模型尝试、成功与失败耗时。
-
-#### A03 后台时间参数配置页
+A03 时间配置页对应配置管理。时间参数使用滑条，保存草稿与发布分开。
 
 ![A03 后台时间参数配置页](assets/prototype-14.png)
 
-全部时间参数使用滑条，包括日志保留。数值和单位同时显示，支持触摸、键盘调节。发布与保存草稿分开。
+### 公共组件 让状态与结果来源可见
 
-#### A04 后台模型与数值配置页
-
-![A04 后台模型与数值配置页](assets/prototype-15.png)
-
-非时间数值下拉只含两个预设与自定义。自定义字段按范围校验。模型名称和地址直接输入。下拉展开态为示例。
-
-#### A05 后台题库编辑页
-
-![A05 后台题库编辑页](assets/prototype-16.png)
-
-按题目排序编辑选项，条件分支由独立编辑面板配置。该图用于布局，生产表单应显示题目和选项稳定ID并校验重复。
-
-#### A06 后台任务与 Buff 编辑页
-
-![A06 后台任务与 Buff 编辑页](assets/prototype-17.png)
-
-任务ID、适用部位、排除条件和审核状态需在详情页编辑。所有时长使用滑条。AI只能从审核后的允许任务中选取。
-
-#### A07 后台安全与兜底页
-
-![A07 后台安全与兜底页](assets/prototype-18.png)
-
-切换到安全规则可编辑触发条件、拦截文案和允许的下一步。模板数量必须满足建议数量配置，发布前校验覆盖。
-
-#### A08 后台日志列表页
-
-![A08 后台日志列表页](assets/prototype-19.png)
-
-支持按时间、状态、请求和会话过滤。日志导出需权限并记录审计。原型数据均为示例，不代表真实运行记录。
-
-#### A09 后台完整日志详情页
-
-![A09 后台完整日志详情页](assets/prototype-20.png)
-
-输入与输出分栏显示。实际完整JSON采用可滚动查看和复制。密钥、密码与会话凭证永久排除。
-
-#### A10 后台配置发布与版本页
-
-![A10 后台配置发布与版本页](assets/prototype-21.png)
-
-展示差异后发布，记录操作人和时间。新会话读取新版本；在途会话保持快照。回退同样生成一次可审计发布。
-
-#### C01 组件原型 选择与操作
-
-![C01 组件原型 选择与操作](assets/prototype-22.png)
-
-按钮默认、按压、禁用、加载四态。按压缩放建议0.98，过渡120至180毫秒。选项与分段切换具有明确选中态。
-
-#### C02 组件原型 配置表单
-
-![C02 组件原型 配置表单](assets/prototype-23.png)
-
-滑条支持单位、范围和步长。自定义只适用于数值。开关为布尔。密钥可替换不可明文回显。错误反馈不只依赖颜色。
-
-#### C03 组件原型 报告与状态
+C03 对应报告和计时状态。AI 等待不显示虚构百分比，报告来源始终可见。
 
 ![C03 组件原型 报告与状态](assets/prototype-24.png)
 
-AI等待不展示虚构百分比。任务和通关计时来自各自截止时间。报告来源标签始终可见。
-
-#### C04 组件原型 弹窗与异常
-
-![C04 组件原型 弹窗与异常](assets/prototype-25.png)
-
-退出需确认以防误触。闲置弹窗显示剩余时间。配置发布展示差异。断网不延长总等待。实际弹窗应同时提供关闭或取消入口。
+[查看全部 25 张原型及逐图说明](reference.html#panel-G)
 </textarea>
 <script>
 (() => {
