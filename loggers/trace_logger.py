@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from config import LOGGING_ENABLED
+from config import LOGGING_ENABLED, LOGGING_DETAILED
 from loggers.trace_helpers import error_info
 
 
@@ -38,7 +38,7 @@ class TraceLogger:
         trace_id: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        self.path = Path(path) if path and LOGGING_ENABLED else None
+        self.path = Path(path) if path and LOGGING_ENABLED and LOGGING_DETAILED else None
         self.trace_id = trace_id or uuid.uuid4().hex
         self.metadata = metadata or {}
         self.runs: list[dict[str, Any]] = []
@@ -53,7 +53,9 @@ class TraceLogger:
         run_type: str,
         inputs: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "TraceSpan":
+    ) -> "TraceSpan | NoopTraceSpan":
+        if not LOGGING_ENABLED or not LOGGING_DETAILED:
+            return NoopTraceSpan()
         return TraceSpan(
             trace=self,
             name=name,
@@ -191,6 +193,7 @@ class NoopTraceLogger:
 
 
 class NoopTraceSpan:
+    run = {"id": None}
     async def __aenter__(self) -> "NoopTraceSpan":
         return self
 

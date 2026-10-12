@@ -9,7 +9,7 @@ import unittest
 from pydantic import ValidationError
 
 from endpoints.runtime.errors import classify_model_call_error
-from tools.docxindex.llm.client import LLMClient, LLMResponseValidationError
+from tools.docxindex.llm.client import LLMClient, LLMSettings, LLMResponseValidationError
 from tools.docxindex.llm.prompts import ATTACHMENT_HIERARCHY_PROMPT_VERSION, ROUTE_EXPECTED_JSON, route_prompt
 from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.retriever import DocxIndexRetriever
@@ -77,6 +77,7 @@ class RoutePromptContractTests(unittest.TestCase):
 
     def test_invalid_first_output_gets_schema_guided_retry(self) -> None:
         client = LLMClient.__new__(LLMClient)
+        client.settings = LLMSettings(model="fake")
         responses = iter([
             '{"steps":[{"method":"unsupported"}],"fallback":false}',
             ROUTE_EXPECTED_JSON,
@@ -154,14 +155,15 @@ class RoutePromptContractTests(unittest.TestCase):
                 "steps": [{"method": "subtree", "anchor_terms": ["支付方式"]}]
             })
 
-    def test_validation_failure_preserves_successful_upstream_http_status(self) -> None:
+    def test_validation_failure_does_not_invent_unavailable_http_status(self) -> None:
         client = LLMClient.__new__(LLMClient)
+        client.settings = LLMSettings(model="fake")
         client.complete = lambda _prompt: '{"steps":[{"method":"scan"},{"method":"hybrid"}]}'  # type: ignore[method-assign]
 
         with self.assertRaises(LLMResponseValidationError) as raised:
             client.complete_model("route prompt", RouteResponse, retries=0)
 
-        self.assertEqual(raised.exception.http_status, 200)
+        self.assertIsNone(raised.exception.http_status)
         self.assertEqual(raised.exception.error_type, "response_validation_error")
         self.assertIn("scan route may only be combined", str(raised.exception))
 

@@ -191,7 +191,7 @@ state/
 
 ## 全局模型并发
 
-`model_semaphore.llm`、`embedding`、`reranker` 使用 Redis 租约控制跨进程、跨容器的模型 HTTP 请求总并发。固定任务跳过 Planner/路由 LLM，但其检索、SubAgent 和 Reflector 模型请求仍走现有客户端和同一 Redis 全局限制；路由模块没有旁路模型调用。
+`model_semaphore.limits.llm`、`embedding`、`reranker` 分别控制 Redis 租约的模型 HTTP 总并发；enabled、redis_url、wait_timeout_seconds、lease_seconds 共用，仍兼容旧分模型配置。租约保持到期释放和请求结束释放，不增加任务执行租约。固定任务跳过 Planner/路由 LLM，但其检索、SubAgent 和 Reflector 模型请求仍走现有客户端和同一 Redis 全局限制；路由模块没有旁路模型调用。
 
 每类配置包含 `enabled`、`max_concurrent_requests`、`redis_url`、`key`、`wait_timeout_seconds`、`lease_seconds` 和 `poll_interval_seconds`。实际读取与租约实现位于 `config.py` 和 `endpoints/runtime/llm_semaphore.py`。
 

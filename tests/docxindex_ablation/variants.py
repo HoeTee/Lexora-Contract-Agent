@@ -81,9 +81,10 @@ def skip_single_rerank(index, query, candidates, *args, **kwargs):
 
 
 def field_removal(field):
-    original = RERANK_MODULE._fit_candidates
+    original = RERANK_MODULE._candidate_batches
 
     def fit(*args, **kwargs):
-        return [{k: v for k, v in row.items() if k != field} for row in original(*args, **kwargs)]
+        return [[{k: v for k, v in row.items() if k != field} for row in batch]
+                for batch in original(*args, **kwargs)]
 
-    return patch.object(RERANK_MODULE, "_fit_candidates", fit)
+    return patch.object(RERANK_MODULE, "_candidate_batches", fit)

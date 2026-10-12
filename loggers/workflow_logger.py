@@ -6,7 +6,8 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from config import LOGGING_ENABLED, MAX_CONTEXT_TOKENS
+from config import LOGGING_ENABLED, LOGGING_DETAILED, MAX_CONTEXT_TOKENS
+from loggers.api_event_logger import append_api_event
 
 
 class WorkflowLogger:
@@ -24,10 +25,11 @@ class WorkflowLogger:
         "mcp_cleanup",
     }
 
-    def __init__(self, log_dir: str | Path | None = None):
+    def __init__(self, log_dir: str | Path | None = None, *, events_path: str | Path | None = None):
         self.steps = []
         self.start_time = time.time()
         self.log_dir = Path(log_dir) if log_dir else None
+        self.events_path = Path(events_path) if events_path else None
 
     def log(
         self,
@@ -42,6 +44,12 @@ class WorkflowLogger:
     ) -> None:
         if not LOGGING_ENABLED:
             return
+        if self.events_path and action in self.SUMMARY_ACTIONS:
+            append_api_event(self.events_path, "phase_completed", phase=phase,
+                             action=action, duration_seconds=round(duration, 2))
+        if not LOGGING_DETAILED:
+            input_summary = output_summary = ""
+            tokens = 0
 
         ctx_pct = ""
         if tokens > 0 and MAX_CONTEXT_TOKENS > 0:
@@ -135,7 +143,7 @@ class WorkflowLogger:
         return "\n".join(blocks)
 
     def save(self) -> str | None:
-        if not LOGGING_ENABLED:
+        if not LOGGING_ENABLED or not LOGGING_DETAILED:
             return None
         if self.log_dir is None:
             raise ValueError("WorkflowLogger.log_dir is required when file logging is enabled.")
@@ -169,7 +177,7 @@ class WorkflowLogger:
 
 
 def save_review_outputs_json(results: list[dict], path: str | Path) -> str | None:
-    if not LOGGING_ENABLED:
+    if not LOGGING_ENABLED or not LOGGING_DETAILED:
         return None
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)

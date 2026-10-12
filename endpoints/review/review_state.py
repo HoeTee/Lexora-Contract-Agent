@@ -5,6 +5,7 @@ import re
 import uuid
 from pathlib import Path
 from typing import Any
+from config import LOGGING_ENABLED, LOGGING_DETAILED
 
 from endpoints.review.task_store import (
     criterion_error_state_path,
@@ -18,7 +19,7 @@ from endpoints.review.task_store import (
 
 
 CRITERION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
-REVIEW_CONTRACT_VERSION = 5
+REVIEW_CONTRACT_VERSION = 6
 
 
 def _safe_criterion_id(criterion_id: str) -> str:
@@ -89,7 +90,9 @@ class ReviewStateStore:
     def criterion_error_path(self, criterion_id: str) -> Path:
         return criterion_error_state_path(self.client_dir, self.task_id, _safe_criterion_id(criterion_id))
 
-    def save_criterion_input(self, criterion: dict[str, Any], *, attempt: int, max_attempts: int) -> Path:
+    def save_criterion_input(self, criterion: dict[str, Any], *, attempt: int, max_attempts: int) -> Path | None:
+        if not LOGGING_ENABLED or not LOGGING_DETAILED:
+            return None
         criterion_id = _safe_criterion_id(str(criterion.get("id", "")))
         return _write_json(
             self.criterion_input_path(criterion_id),
@@ -130,7 +133,9 @@ class ReviewStateStore:
         *,
         attempt: int,
         max_attempts: int,
-    ) -> Path:
+    ) -> Path | None:
+        if not LOGGING_ENABLED or not LOGGING_DETAILED:
+            return None
         criterion_id = _safe_criterion_id(str(criterion.get("id", "")))
         previous = _read_json(self.criterion_error_path(criterion_id)) or {}
         attempts = previous.get("attempts") if isinstance(previous.get("attempts"), list) else []

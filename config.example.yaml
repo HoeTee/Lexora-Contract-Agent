@@ -20,14 +20,6 @@ rerank:
   base_url: "http://higress.llmgateway.dev.qa.zrub.com/v1/rerank"
   name: "Qwen3-Reranker-8B"
   instruct: "Given a contract review query, retrieve relevant institutional policy passages."
-  provider_model_names:
-    higress_qwen:
-      - "Qwen3-Reranker-8B"
-    bge:
-      - "bge-reranker-v2-m3"
-    dashscope_qwen:
-      - "gte-rerank-v2"
-
 workflow:
   max_reflection_rounds: 3
   max_orchestrator_concurrency: 5
@@ -35,50 +27,25 @@ workflow:
   model_call_timeout_seconds: 30
   model_call_max_retries: 1
   criterion_retry_max_attempts: 2
-  subagent_allowed_tools:
-    - "contract_search"
-
 queue:
   enabled: true
   broker_url: "redis://localhost:6379/0"
-  worker_disable_prefetch: true
   pending_timeout_seconds: 60
   queued_timeout_seconds: 7200
   watchdog_interval_seconds: 10
 
 model_semaphore:
-  llm:
-    enabled: false
-    max_concurrent_requests: 5
-    redis_url: "redis://localhost:6379/2"
-    key: "contract_agent:model:llm:semaphore"
-    wait_timeout_seconds: 600
-    lease_seconds: 600
-    poll_interval_seconds: 0.2
-  embedding:
-    enabled: false
-    max_concurrent_requests: 3
-    redis_url: "redis://localhost:6379/2"
-    key: "contract_agent:model:embedding:semaphore"
-    wait_timeout_seconds: 600
-    lease_seconds: 600
-    poll_interval_seconds: 0.2
-  reranker:
-    enabled: false
-    max_concurrent_requests: 5
-    redis_url: "redis://localhost:6379/2"
-    key: "contract_agent:model:reranker:semaphore"
-    wait_timeout_seconds: 600
-    lease_seconds: 600
-    poll_interval_seconds: 0.2
+  enabled: false
+  redis_url: "redis://localhost:6379/2"
+  wait_timeout_seconds: 600
+  lease_seconds: 600
+  limits:
+    llm: 5
+    embedding: 3
+    reranker: 5
 
 retrieval:
   backend: "llamaindex"
-  llamaindex:
-    chunk_size: 512
-    chunk_overlap: 100
-    similarity_top_k: 10
-    rerank_top_n: 5
   docxindex:
     input_tokens: 20000
     output_tokens: 12000
@@ -92,50 +59,8 @@ retrieval:
       max_selected_nodes: 10
     rerank:
       enabled: true
-    indexing:
-      enrichment:
-        llm_expand: true
-        llm_summary: true
-        llm_attachment_hierarchy: true
-      heading:
-        profiles:
-          primary:
-            level_1_examples: ["第一条 合同内容"]
-            level_2_examples: ["一、合同总价"]
-            level_3_examples: ["（一）付款条件"]
-          variant_1:
-            level_1_examples: ["一、合作背景"]
-            level_2_examples: ["（一）通信业务合作", "（3）新技术与新业务合作"]
-            level_3_examples: ["1. 基础服务", "2、增值服务"]
-          chapter_decimal:
-            level_1_examples: ["第一章、合同内容"]
-            level_2_examples: ["1.1 供货范围"]
-            level_3_examples: ["（1）付款条件", "1）其他要求"]
-      paragraph:
-        split_threshold_tokens: 1000
-        chunk_target_tokens: 700
-      hierarchy:
-        input_max_tokens: 20000
-        batch_target_tokens: 16000
-        batch_overlap_tokens: 800
-        max_levels: 6
-        retry_count: 3
-      table:
-        split_threshold_tokens: 20000
-        chunk_target_tokens: 18000
-      attachment:
-        max_levels: 6
-      summary:
-        batch_max_nodes: 10
-        batch_max_tokens: 20000
     routing:
       fallback_enabled: true
-      methods:
-        title: "检查目录、标题、章节名称、必备标题和标题顺序。"
-        region: "限定合同首部、正文、尾部或附件后，先执行区域内结构树语义检索；结果不足时才使用向量补充，随后重排。"
-        rule: "仅按路由明确给出的原文短词，执行全文精确关键词、金额和存在性定位。"
-        scan: "按 token 预算把全部 anchor 分批交给 LLM 逐项检查。"
-        hybrid: "无法限定标题、区域或精确关键词时，先执行全局结构树语义检索；结果不足时才使用向量补充，随后重排。"
     concurrency:
       llm: 10
       embedding: 1
@@ -166,3 +91,4 @@ docx:
 
 logging:
   enabled: false
+  detailed: false

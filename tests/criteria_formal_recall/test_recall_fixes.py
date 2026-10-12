@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -412,6 +413,11 @@ class MissingTextReviewTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DocxAnchorRegressionTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch("tools.document.reporting.docx_report.LOGGING_DETAILED", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_new_summary_replaces_old_ai_summary(self) -> None:
         with TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "source.docx"

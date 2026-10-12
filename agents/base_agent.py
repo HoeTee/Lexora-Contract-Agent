@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError, APIStatusError
 from redis.exceptions import RedisError
 from loggers.agent_logger import agent_call_log_dir, log_agent_step, log_conversation
-from loggers.call_log import new_call
+from loggers.call_log import logical_call, new_call, request_model_async
 from loggers.trace_helpers import llm_inputs, llm_outputs
 from loggers.trace_logger import get_current_trace
 from config import (
@@ -27,6 +27,10 @@ from config import (
 from endpoints.runtime.errors import ModelCallError
 from endpoints.runtime.llm_semaphore import LLMGlobalSemaphoreTimeout, llm_global_semaphore
 import json
+import asyncio
+import random
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import tiktoken
 
 
@@ -102,7 +106,7 @@ class Agent:
             api_key=self.settings.api_key,
             base_url=self.settings.base_url,
             timeout=MODEL_CALL_TIMEOUT_SECONDS,
-            max_retries=MODEL_CALL_MAX_RETRIES,
+            max_retries=0,
         )
         self.name = name
         self.mcp_client = mcp_client
@@ -242,6 +246,43 @@ class Agent:
 
     # ==================== Main Loop ====================
 
+    async def _request_completion(self, request_kwargs, span):
+        with logical_call("agent", self.settings.model,
+                          directory=agent_call_log_dir(), source=self.name):
+            for attempt in range(MODEL_CALL_MAX_RETRIES + 1):
+                record = new_call(
+                    component="agent", model=self.settings.model,
+                    request=request_kwargs, directory=agent_call_log_dir(),
+                    criterion_id=self.name.removeprefix("SubAgent_") if self.name.startswith("SubAgent_") else None,
+                    stage="agent_model_call", source=self.name,
+                )
+                span.set_metadata({"call_id": record.call_id,
+                                   "call_path": str(record.path) if record.path else None})
+                request_started = False
+                try:
+                    async with llm_global_semaphore(agent_name=self.name, model=self.settings.model) as lease:
+                        if lease.enabled:
+                            span.set_metadata({
+                                "llm_global_semaphore_key": lease.key,
+                                "llm_global_semaphore_wait_seconds": lease.wait_seconds,
+                                "llm_global_semaphore_max_requests": lease.max_concurrent_requests,
+                            })
+                        request_started = True
+                        record.sent()
+                        completion, http_status = await request_model_async(self.client.chat.completions, **request_kwargs)
+                except Exception as exc:
+                    record.failed(exc, stage="request" if request_started else "semaphore_wait")
+                    exc.call_id = record.reference_id
+                    exc.call_path = str(record.reference_path) if record.reference_path else None
+                    if request_started and attempt < MODEL_CALL_MAX_RETRIES and _should_retry_model(exc):
+                        await asyncio.sleep(_model_retry_delay(exc, attempt))
+                        continue
+                    conversation_path = log_conversation(self.name, self.messages)
+                    span.set_metadata({"conversation_path": str(conversation_path) if conversation_path else None})
+                    raise
+                record.succeeded(completion.model_dump(), http_status=http_status)
+                return completion
+
     async def chat(self, message="") -> str:
         if message:
             self.messages.append({"role": "user", "content": message})
@@ -295,39 +336,7 @@ class Agent:
                         "seed": self.settings.seed,
                     },
                 ) as span:
-                    record = new_call(
-                        component="agent", model=self.settings.model,
-                        request=request_kwargs, directory=agent_call_log_dir(),
-                        criterion_id=self.name.removeprefix("SubAgent_") if self.name.startswith("SubAgent_") else None,
-                        stage="agent_model_call",
-                        source=self.name,
-                    )
-                    span.set_metadata({"call_id": record.call_id,
-                                       "call_path": str(record.path) if record.path else None})
-                    request_started = False
-                    try:
-                        async with llm_global_semaphore(
-                            agent_name=self.name,
-                            model=self.settings.model,
-                        ) as lease:
-                            if lease.enabled:
-                                span.set_metadata(
-                                    {
-                                        "llm_global_semaphore_key": lease.key,
-                                        "llm_global_semaphore_wait_seconds": lease.wait_seconds,
-                                        "llm_global_semaphore_max_requests": lease.max_concurrent_requests,
-                                    }
-                                )
-                            request_started = True
-                            completion = await self.client.chat.completions.create(**request_kwargs)
-                    except Exception as exc:
-                        record.failed(exc, stage="request" if request_started else "semaphore_wait")
-                        conversation_path = log_conversation(self.name, self.messages)
-                        span.set_metadata(
-                            {"conversation_path": str(conversation_path) if conversation_path else None}
-                        )
-                        raise
-                    record.succeeded(completion.model_dump())
+                    completion = await self._request_completion(request_kwargs, span)
                     span.set_outputs(llm_outputs(completion))
             except MODEL_API_ERRORS as exc:
                 error = ModelCallError(
@@ -338,8 +347,8 @@ class Agent:
                 )
                 error.origin = "agent"
                 error.failure_stage = "agent_model_call"
-                error.call_id = record.call_id
-                error.call_path = str(record.path) if record.path else None
+                error.call_id = getattr(exc, "call_id", None)
+                error.call_path = getattr(exc, "call_path", None)
                 raise error from exc
             except LLMGlobalSemaphoreTimeout as exc:
                 error = ModelCallError(
@@ -350,8 +359,8 @@ class Agent:
                 )
                 error.origin = "agent"
                 error.failure_stage = "semaphore_wait"
-                error.call_id = record.call_id
-                error.call_path = str(record.path) if record.path else None
+                error.call_id = getattr(exc, "call_id", None)
+                error.call_path = getattr(exc, "call_path", None)
                 raise error from exc
             except RedisError as exc:
                 error = ModelCallError(
@@ -360,8 +369,8 @@ class Agent:
                 )
                 error.origin = "semaphore"
                 error.failure_stage = "semaphore_wait"
-                error.call_id = record.call_id
-                error.call_path = str(record.path) if record.path else None
+                error.call_id = getattr(exc, "call_id", None)
+                error.call_path = getattr(exc, "call_path", None)
                 raise error from exc
 
             response_message = completion.choices[0].message
@@ -397,4 +406,26 @@ class Agent:
                     continue
             else:
                 return response_message.content
+
+
+def _should_retry_model(exc: Exception) -> bool:
+    headers = getattr(getattr(exc, "response", None), "headers", {})
+    override = headers.get("x-should-retry")
+    if override in {"true", "false"}:
+        return override == "true"
+    status = getattr(exc, "status_code", None)
+    return isinstance(exc, APIConnectionError) or status in {408, 409, 429} or (status is not None and status >= 500)
+
+
+def _model_retry_delay(exc: Exception, attempt: int) -> float:
+    headers = getattr(getattr(exc, "response", None), "headers", {})
+    try:
+        retry_after = float(headers["retry-after-ms"]) / 1000 if "retry-after-ms" in headers else float(headers.get("retry-after", 0))
+    except (TypeError, ValueError):
+        try:
+            retry_at = parsedate_to_datetime(headers.get("retry-after", ""))
+            retry_after = (retry_at - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError, OverflowError):
+            retry_after = 0
+    return retry_after if 0 < retry_after <= 60 else min(0.5 * 2**attempt, 8) * (1 - 0.25 * random.random())
 

@@ -9,7 +9,7 @@ import traceback
 import uuid
 from pathlib import Path
 
-from config import MCP_SERVER_TARGET
+from config import MCP_SERVER_TARGET, LOGGING_ENABLED, LOGGING_DETAILED
 from agents.base_agent import Settings
 from endpoints.review.task_store import (
     cleanup_runtime_input,
@@ -123,7 +123,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
             settings=agent_settings,
             mcp_env=mcp_env,
             state_store=ReviewStateStore(client_dir, task_id),
-            index_artifacts_path=str(docxindex_state_dir(client_dir, task_id)),
+            index_artifacts_path=str(docxindex_state_dir(client_dir, task_id)) if LOGGING_ENABLED and LOGGING_DETAILED else None,
         )
 
         async def persist_progress(update: dict) -> None:
@@ -191,7 +191,11 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
             raise RuntimeError("Output DOCX file was not found.")
 
         mark_succeeded(client_dir, task_id, criteria=result.get("criteria"))
-        write_task_log_event(client_dir, task_id, "review_completed", result_file=str(output_path))
+        write_task_log_event(client_dir, task_id, "review_completed", result_file=str(output_path),
+                             elapsed_seconds=result.get("elapsed_seconds"),
+                             criteria_count=result.get("criteria_count"),
+                             issue_count=result.get("issue_count"),
+                             annotation_stats=result.get("annotation_stats"))
     except Exception as exc:
         try:
             copy_contract_to_result(

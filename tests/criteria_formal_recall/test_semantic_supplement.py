@@ -83,7 +83,7 @@ class SemanticSupplementTests(unittest.TestCase):
         self.assertEqual(duplicates, 1)
         self.assertEqual(added, 1)
 
-    def test_single_structure_node_still_gets_vector_supplement_and_rerank(self) -> None:
+    def test_step_supplements_candidates_and_defers_rerank(self) -> None:
         retriever = self._retriever()
         retriever.retrieval_config.rerank.enabled = True
         with (
@@ -94,7 +94,7 @@ class SemanticSupplementTests(unittest.TestCase):
         ):
             result = retriever._semantic_matches({"nodes": []}, "金额", None, scope="global")
         vector.assert_called_once()
-        rerank.assert_called_once()
+        rerank.assert_not_called()
         self.assertEqual(len(result), 2)
 
     def test_single_merged_candidate_skips_only_rerank(self) -> None:
@@ -112,7 +112,11 @@ class SemanticSupplementTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["sources"], ["structure", "vector"])
         self.assertEqual(result[0]["vector_score"], 0.9)
-        self.assertTrue(event.call_args.kwargs["single_candidate_rerank_skipped"])
+        self.assertEqual(event.call_args.kwargs["candidate_count_before_rerank"], 1)
+        self.assertEqual(set(event.call_args.kwargs), {
+            "scope", "structure_candidate_count", "vector_enabled", "vector_triggered",
+            "vector_added_count", "candidate_count_before_rerank",
+        })
 
 
 class RetrievalSchemaTests(unittest.TestCase):

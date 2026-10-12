@@ -1,6 +1,8 @@
 # API 审查要点记录排查
 
-> 新任务请优先查 `state/criteria/H12.error.json` 中的 `origin`、`failure_stage`、`call_id` 和 `call_path`，然后按 `call_path` 打开 `logs/calls/` 中的实际文件，看请求、响应或异常。`logs/trace.json` 展示该调用在要点、MCP、DocxIndex 路线和 SubAgent 之间的位置；`logs/route_events/` 保存路线细节。文件名各段含义见[任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。下面涉及 `logs/conversations/` 的步骤适用于旧任务。
+> 默认 `logging.detailed=false`：先查 `task.json`、`logs/events.log` 和 `logs/logical_calls/`；逻辑记录提供最终错误、retry_count 和成功 token。错误中的 call_path 在默认模式指向逻辑记录，在详细模式指向实际尝试记录。`state/criteria/*.output.json` 保留完整恢复结果。
+>
+> 以下 trace、calls、route_events、criterion input/error 的排查步骤仅适用于 `logging.detailed=true` 或历史详细日志。具体保留规则见[日志设计](LOGGER_DESIGN.md)。详细模式可以通过 error 中的 origin、failure_stage、call_id 和 call_path 定位实际尝试；文件名说明见[任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。
 
 ```sh
 python3 -m json.tool "$TASK_DIR/state/criteria/H12.error.json"

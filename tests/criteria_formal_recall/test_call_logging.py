@@ -19,14 +19,20 @@ from tools.docxindex.retriever import DocxIndexRetriever
 
 
 class CallLoggingTests(unittest.TestCase):
+    def setUp(self):
+        for module in ("loggers.call_log", "loggers.trace_logger", "mcp_service.client.client"):
+            patcher = patch(f"{module}.LOGGING_DETAILED", True)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_docxindex_timeout_retains_input_without_inventing_http_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             events_path = Path(temp_dir) / "logs" / "events.log"
             token = set_call_context(events_path, operation_id="op-1", criterion_id="H12", stage="route.1.scan")
             client = object.__new__(LLMClient)
             client.settings = SimpleNamespace(model="fake", temperature=0, enable_thinking=False)
-            client.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
-                create=lambda **kwargs: (_ for _ in ()).throw(TimeoutError("request timed out")))))
+            raw_response = SimpleNamespace(create=lambda **kwargs: (_ for _ in ()).throw(TimeoutError("request timed out")))
+            client.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(with_raw_response=raw_response)))
             client._limiter = BoundedSemaphore(1)
             client._start_lock = Lock()
             client._next_start = 0.0

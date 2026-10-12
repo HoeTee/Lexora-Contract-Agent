@@ -12,7 +12,6 @@ from time import perf_counter
 from types import SimpleNamespace
 
 from tools.docxindex import retriever as retrieval
-from tools.docxindex.llm.schemas import RerankResponse
 from tools.docxindex.indexing import estimate_tokens
 from tests.docxindex_ablation.run import ROOT, read_json, write_json, write_csv, replay, anchor_texts
 from tests.docxindex_ablation.variants import ORIGINAL_MERGE, ORIGINAL_RERANK, RERANK_MODULE
@@ -41,12 +40,15 @@ def interventions(recorded, limit):
 
 
 def request(client, index, query, candidates, budget, field=None):
-    view = RERANK_MODULE._fit_candidates(index, candidates, budget)
+    batches = RERANK_MODULE._candidate_batches(index, query, candidates, budget)
+    if len(batches) != 1:
+        raise ValueError("Paired field screening requires all candidates to fit one rerank batch; increase the budget")
+    view = batches[0]
     if field:
         view = [{k: v for k, v in row.items() if k != field} for row in view]
     prompt = RERANK_MODULE._rerank_prompt(query, json.dumps(view, ensure_ascii=False))
     start = perf_counter()
-    response = client.complete_model(prompt, RerankResponse)
+    response = client.complete_model(prompt, RERANK_MODULE._complete_rerank_schema({row["node_id"] for row in view}))
     seconds = perf_counter() - start
     frozen = SimpleNamespace(settings=client.settings, complete_model=lambda *a: response)
     ranked = ORIGINAL_RERANK(index, query, candidates, frozen, budget, None)

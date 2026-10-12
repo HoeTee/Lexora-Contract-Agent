@@ -23,6 +23,8 @@ from tools.docxindex.retriever import DocxIndexRetriever
 from loggers.model_event_context import reset_model_event_path, set_model_event_path
 from loggers.call_log import reset_call_context, set_call_context
 from config import (
+    LOGGING_ENABLED,
+    LOGGING_DETAILED,
     CHUNK_OVERLAP,
     CHUNK_SIZE,
     CONFIG_PATH,
@@ -145,6 +147,7 @@ async def generate_docx_report(
             if isinstance(region_boundaries_json, str) and region_boundaries_json
             else region_boundaries_json
         )
+        annotation_report = {}
         with redirect_stdout(sys.stderr):
             path = ReportGenerator.generate_docx_report(
                 contract_name=contract_name,
@@ -155,16 +158,15 @@ async def generate_docx_report(
                 output_dir=output_dir,
                 output_path=output_path,
                 annotation_events_path=annotation_events_path,
+                annotation_summary=annotation_report,
             )
         if not path:
             return json.dumps({"error": "DOCX report generation failed."}, ensure_ascii=False)
-        response = {"docx": path}
-        if annotation_events_path and os.path.exists(annotation_events_path):
-            with open(annotation_events_path, encoding="utf-8") as report_file:
-                annotation_report = json.load(report_file)
+        response = {"docx": path,
+                    "annotation_stats": annotation_report.get("stats", {}),
+                    "annotation_skipped_count": annotation_report.get("skipped_count", 0)}
+        if annotation_events_path and LOGGING_ENABLED and LOGGING_DETAILED:
             response["annotation_events_path"] = annotation_events_path
-            response["annotation_stats"] = annotation_report.get("stats", {})
-            response["annotation_skipped_count"] = annotation_report.get("skipped_count", 0)
         return json.dumps(response, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
@@ -248,7 +250,7 @@ async def docxindex_build_index(
             payload = json.loads(result)
             if payload.get("error"):
                 return result
-            if artifact_dir:
+            if artifact_dir and LOGGING_ENABLED and LOGGING_DETAILED:
                 _write_docxindex_artifacts(artifact_dir, retriever.artifact_snapshot())
             return result
     finally:

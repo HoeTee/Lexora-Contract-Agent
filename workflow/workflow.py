@@ -25,6 +25,7 @@ from config import (
 )
 from loggers.workflow_logger import WorkflowLogger, save_review_outputs_json
 from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_trace
+from loggers.call_log import set_call_context, reset_call_context
 from agents.base_agent import Settings
 from agents.planner import PlannerAgent, assemble_tasks, split_criteria_from_docx
 from agents.orchestrator import OrchestratorAgent
@@ -182,7 +183,7 @@ class ContractReviewWorkflow:
         mcp_env: dict[str, str] | None = None,
     ):
         self.client = MinimalMCPClient(server_target, log_file=mcp_log_file, env=mcp_env)
-        self.logger = WorkflowLogger()
+        self.logger = WorkflowLogger(events_path=api_events_path)
         self.trace = TraceLogger(trace_path, metadata={"component": "workflow"})
         self.conversation_log_dir = conversation_log_dir
         self.api_events_path = api_events_path
@@ -219,6 +220,7 @@ class ContractReviewWorkflow:
             f"with retrieval mode being {RETRIEVAL_BACKEND}."
         )
         trace_token = set_current_trace(self.trace)
+        call_token = set_call_context(self.api_events_path, stage="agent")
         # Initialize MCP client
         mcp_cleaned = False
         start = time.time()
@@ -396,6 +398,9 @@ class ContractReviewWorkflow:
                     "criteria_count": len(results),
                     "issue_count": sum(len(result.get("issues", [])) for result in results),
                     "total_tokens": total_tokens,
+                    "elapsed_seconds": elapsed,
+                    "phase_durations": self.logger.summarize_phase_durations(),
+                    "annotation_stats": self.annotation_report_summary,
                     "retrieval_mode": RETRIEVAL_BACKEND,
                     "review_outputs_log": review_outputs_path,
                     "annotation_events_log": self.annotation_events_path,
@@ -417,6 +422,7 @@ class ContractReviewWorkflow:
                     )
             finally:
                 reset_current_trace(trace_token)
+                reset_call_context(call_token)
 
     # ==================== Phases ====================
 

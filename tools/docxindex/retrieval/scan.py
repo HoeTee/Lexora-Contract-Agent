@@ -10,6 +10,7 @@ from tools.docxindex.llm.prompts import scan_prompt
 from tools.docxindex.llm.schemas import ScanResponse
 from loggers.call_log import (
     append_route_event,
+    logical_call,
     map_with_context,
     reset_call_stage,
     set_call_stage,
@@ -36,6 +37,10 @@ def scan_matches(
         return []
 
     def inspect(entry: tuple[int, list[tuple[str, dict[str, Any], dict[str, Any], str]]]) -> list[dict[str, Any]]:
+        with logical_call("docxindex.llm", client.settings.model):
+            return inspect_batch(entry)
+
+    def inspect_batch(entry: tuple[int, list[tuple[str, dict[str, Any], dict[str, Any], str]]]) -> list[dict[str, Any]]:
         batch_index, batch = entry
         items = [{"anchor_id": anchor_id, "text": text} for anchor_id, _, _, text in batch]
         prompt = scan_prompt(query, items, candidate_instruction=candidate_instruction)

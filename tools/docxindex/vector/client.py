@@ -8,11 +8,10 @@ from threading import BoundedSemaphore, Lock
 
 import numpy as _numpy  # noqa: F401 - eagerly load before background response parsing
 from pydantic import BaseModel, ConfigDict
-from redis.exceptions import RedisError
 
 from tools.docxindex.llm.config import find_local_env, find_project_config, load_env_file, load_yaml
 from tools.docxindex.llm.client import os_env
-from loggers.call_log import new_call
+from loggers.call_log import logical_call, new_call, request_model
 
 EMBEDDING_BATCH_SIZE = 10
 
@@ -81,25 +80,34 @@ class EmbeddingClient:
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        with logical_call("docxindex.embedding", self.settings.model):
+            return self._embed_batch(texts)
+
+    def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         for attempt in range(self._rate_limit_retries + 1):
             record = new_call(component="docxindex.embedding", model=self.settings.model,
                               request={"input": texts, "attempt": attempt + 1})
             self._wait_for_start_slot()
+            request_started = False
             try:
                 with self._limiter:
                     with _global_model_slot("embedding", "DocxIndexEmbedding", self.settings.model):
-                        response = self.client.embeddings.create(model=self.settings.model, input=texts)
+                        request_started = True
+                        record.sent()
+                        response, http_status = request_model(self.client.embeddings, model=self.settings.model, input=texts)
                 vectors = [list(item.embedding) for item in response.data]
             except Exception as exc:
-                record.failed(exc, stage="semaphore_wait" if isinstance(exc, RedisError) or type(exc).__name__ == "LLMGlobalSemaphoreTimeout" else "request")
+                record.failed(exc, stage="request" if request_started else "semaphore_wait")
                 if not _is_rate_limit_error(exc) or attempt >= self._rate_limit_retries:
-                    exc.call_id = record.call_id
-                    exc.call_path = str(record.path) if record.path else None
+                    exc.call_id = record.reference_id
+                    exc.call_path = str(record.reference_path) if record.reference_path else None
                     exc.failure_stage = record.payload["failure_stage"]
                     raise
                 time.sleep(2**attempt)
                 continue
-            record.succeeded({"vector_count": len(vectors), "dimensions": len(vectors[0]) if vectors else 0})
+            record.succeeded({"vector_count": len(vectors), "dimensions": len(vectors[0]) if vectors else 0,
+                              "usage": response.usage.model_dump() if response.usage else None},
+                             http_status=http_status)
             return vectors
         raise RuntimeError("unreachable embedding retry state")
 

@@ -5,6 +5,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
+from loggers.call_log import logical_call
 
 from tools.docxindex.detection import heading_level, heading_score, is_plain_label, is_visual_title
 from tools.docxindex.llm import LLMClient
@@ -405,21 +406,32 @@ def _infer_profile_batch(
         validated, errors = _apply_profile(candidates, response, max_levels)
         return validated if not errors else None
 
+    with logical_call("docxindex.llm", client.settings.model) as logical:
+        return _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, retry_count, logical)
+
+
+def _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, retry_count, logical):
     current_prompt = prompt
+    last_error = None
     for _ in range(retry_count):
         try:
             response = client.complete_model(current_prompt, AttachmentHierarchyResponse, retries=0)
         except ValueError as exc:
+            last_error = exc
             current_prompt = f"{prompt}\n\n上一次输出无法通过 JSON 校验：{exc}\n请严格重新输出。"
             continue
         validated, errors = _apply_profile(candidates, response, max_levels)
         if not errors:
             cache.set(key, response.model_dump(mode="json"))
             return validated
+        last_error = ValueError("；".join(errors))
+        if logical.last_record:
+            logical.last_record.failed(last_error, stage="output_validation")
         current_prompt = (
             f"{prompt}\n\n上一次输出存在结构冲突：{'；'.join(errors)}。"
             "请重新核对 anchor、required 候选、原文顺序和层级。"
         )
+    logical.failed(last_error or ValueError("Hierarchy validation failed"))
     return None
 
 

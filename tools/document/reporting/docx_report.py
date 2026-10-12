@@ -20,7 +20,7 @@ from docx.text.paragraph import Paragraph
 from docx.text.run import Run
 from lxml import etree
 
-from config import DOCX_COMMENT_INCLUDE_CRITERION
+from config import DOCX_COMMENT_INCLUDE_CRITERION, LOGGING_ENABLED, LOGGING_DETAILED
 from tools.document.docx_anchor_index import paragraph_anchor_id, table_anchor_id
 
 
@@ -923,6 +923,7 @@ class DocxReportGenerator:
         summary_sections: dict | None = None,
         annotation_events_path: str | None = None,
         region_boundaries: dict[str, dict[str, str]] | None = None,
+        annotation_summary: dict | None = None,
     ) -> str:
         """Generate the annotated DOCX report using the original contract as the base."""
 
@@ -1093,7 +1094,9 @@ class DocxReportGenerator:
             DocxReportGenerator._add_comments_to_doc(doc, comments_data)
 
             doc.save(output_path)
-            if annotation_events_path:
+            if annotation_summary is not None:
+                annotation_summary.update(stats=annotation_stats, skipped_count=skipped_count)
+            if annotation_events_path and LOGGING_ENABLED and LOGGING_DETAILED:
                 annotation_path = Path(annotation_events_path)
                 annotation_path.parent.mkdir(parents=True, exist_ok=True)
                 annotation_path.write_text(
@@ -1181,6 +1184,7 @@ class DocxReportGenerator:
         summary_sections: dict | None = None,
         annotation_events_path: str | None = None,
         region_boundaries: dict[str, dict[str, str]] | None = None,
+        annotation_summary: dict | None = None,
     ) -> str | None:
         """Generate only the annotated original-contract DOCX."""
         if not DocxReportGenerator._can_generate_annotated_docx(contract_path, results):
@@ -1196,6 +1200,7 @@ class DocxReportGenerator:
             summary_sections=summary_sections,
             annotation_events_path=annotation_events_path,
             region_boundaries=region_boundaries,
+            annotation_summary=annotation_summary,
         )
 
 

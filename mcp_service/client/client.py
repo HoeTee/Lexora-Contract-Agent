@@ -8,6 +8,7 @@ import uuid
 from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from config import LOGGING_ENABLED, LOGGING_DETAILED
 
 from loggers.mcp_logger import create_mcp_logger
 from loggers.trace_helpers import mcp_inputs, mcp_outputs
@@ -178,6 +179,8 @@ class MinimalMCPClient:
             return text_result
 
     def _import_operation_records(self, events_path: str, operation_id: str, parent_id: str) -> None:
+        if not LOGGING_ENABLED or not LOGGING_DETAILED:
+            return
         calls_dir = Path(events_path).parent / "calls"
         external_records = []
         if calls_dir.is_dir():

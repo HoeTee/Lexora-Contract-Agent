@@ -4,6 +4,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+from config import LOGGING_DETAILED
 
 from loggers.api_event_logger import append_api_event
 
@@ -25,7 +26,7 @@ def reset_model_event_path(token) -> None:
 
 def append_model_event(event: str, **fields: Any) -> None:
     path = _model_event_path.get()
-    if path is None:
+    if path is None or (not LOGGING_DETAILED and event != "docxindex_ablation"):
         return
     append_api_event(path, event, **fields)
 

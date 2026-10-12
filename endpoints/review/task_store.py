@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 import httpx
 from fastapi import UploadFile
-from config import API_KEEP_INPUT, DATA_DIR, LOGGING_ENABLED
+from config import API_KEEP_INPUT, DATA_DIR, LOGGING_ENABLED, LOGGING_DETAILED
 from endpoints.runtime.filenames import safe_upload_filename
 from loggers.api_event_logger import append_api_event
 
@@ -329,31 +329,31 @@ def task_api_events_path(client_dir: str, task_id: str) -> Path | None:
 
 
 def task_trace_path(client_dir: str, task_id: str) -> Path | None:
-    if not should_write_task_file("logs"):
+    if not should_write_task_file("logs") or not LOGGING_DETAILED:
         return None
     return trace_path(client_dir, task_id)
 
 
 def task_review_outputs_path(client_dir: str, task_id: str) -> Path | None:
-    if not should_write_task_file("logs"):
+    if not should_write_task_file("logs") or not LOGGING_DETAILED:
         return None
     return review_outputs_path(client_dir, task_id)
 
 
 def task_annotation_events_path(client_dir: str, task_id: str) -> Path | None:
-    if not should_write_task_file("logs"):
+    if not should_write_task_file("logs") or not LOGGING_DETAILED:
         return None
     return annotation_events_path(client_dir, task_id)
 
 
 def task_conversation_log_dir(client_dir: str, task_id: str) -> Path | None:
-    if not should_write_task_file("logs"):
+    if not should_write_task_file("logs") or not LOGGING_DETAILED:
         return None
     return conversation_log_dir(client_dir, task_id)
 
 
 def task_mcp_log_file(client_dir: str, task_id: str) -> Path | None:
-    if not should_write_task_file("logs"):
+    if not should_write_task_file("logs") or not LOGGING_DETAILED:
         return None
     return mcp_log_path(client_dir, task_id)
 
@@ -374,11 +374,10 @@ def ensure_task_dirs(client_dir: str, task_id: str) -> None:
         input_dir(client_dir, task_id).mkdir(parents=True, exist_ok=True)
 
     if should_write_task_file("logs"):
-        for path in (
-            logs_dir(client_dir, task_id),
-            conversation_log_dir(client_dir, task_id),
-        ):
-            path.mkdir(parents=True, exist_ok=True)
+        logs_dir(client_dir, task_id).mkdir(parents=True, exist_ok=True)
+        (logs_dir(client_dir, task_id) / "logical_calls").mkdir(parents=True, exist_ok=True)
+        if LOGGING_DETAILED:
+            conversation_log_dir(client_dir, task_id).mkdir(parents=True, exist_ok=True)
 
 
 def _write_task_file(path: Path, task: dict[str, Any]) -> None:
@@ -644,17 +643,18 @@ def create_task(
             "state_dir": str(state_dir(client_dir, task_id)),
             "plan_path": str(plan_state_path(client_dir, task_id)),
             "criteria_dir": str(criteria_state_dir(client_dir, task_id)),
-            "docxindex_dir": str(docxindex_state_dir(client_dir, task_id)),
+            "docxindex_dir": str(docxindex_state_dir(client_dir, task_id)) if LOGGING_ENABLED and LOGGING_DETAILED else None,
         },
         "logs": {
             "api_events_path": str(task_api_log) if task_api_log else None,
             "events_log_path": str(task_api_log) if task_api_log else None,
             "trace_path": str(task_trace_log) if task_trace_log else None,
-            "calls_dir": str(task_trace_log.parent / "calls") if task_trace_log else None,
-            "route_events_dir": str(task_trace_log.parent / "route_events") if task_trace_log else None,
+            "logical_calls_dir": str(task_api_log.parent / "logical_calls") if task_api_log else None,
+            "calls_dir": str(task_api_log.parent / "calls") if task_api_log and LOGGING_DETAILED else None,
+            "route_events_dir": str(task_api_log.parent / "route_events") if task_api_log and LOGGING_DETAILED else None,
             "review_outputs_path": str(task_review_outputs_log) if task_review_outputs_log else None,
             "annotation_events_path": str(task_annotation_events_log) if task_annotation_events_log else None,
-            "conversation_log_dir": str(task_conversation_log) if task_conversation_log else None,
+            "conversation_log_dir": str(task_conversation_log) if task_conversation_log and LOGGING_DETAILED else None,
             "mcp_log_path": str(task_mcp_log) if task_mcp_log else None,
         },
     }

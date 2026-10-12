@@ -247,6 +247,11 @@ def _model_semaphore_value(model_type: str, key: str, default: Any) -> Any:
     section_data = _model_semaphore_section(model_type)
     if key in section_data:
         return section_data[key]
+    shared = CONFIG.get("model_semaphore") or {}
+    if key == "max_concurrent_requests" and model_type in (shared.get("limits") or {}):
+        return shared["limits"][model_type]
+    if key in shared:
+        return shared[key]
     if model_type == "llm":
         legacy_key_map = {
             "enabled": "global_semaphore_enabled",
@@ -333,7 +338,11 @@ RERANK_NAME = (
     else _as_str(cfg("rerank", "name"), "rerank.name")
 )
 RERANK_PROVIDER_MODEL_NAMES = _as_provider_model_names(
-    cfg("rerank", "provider_model_names"),
+    cfg_optional("rerank", "provider_model_names", {
+        "higress_qwen": ["Qwen3-Reranker-8B"],
+        "bge": ["bge-reranker-v2-m3"],
+        "dashscope_qwen": ["qwen3-rerank", "gte-rerank-v2"],
+    }),
     "rerank.provider_model_names",
 )
 RERANK_PROVIDER = infer_rerank_provider(RERANK_NAME)
@@ -404,19 +413,19 @@ RETRIEVAL_BACKEND = _as_str(cfg("retrieval", "backend"), "retrieval.backend").lo
 if RETRIEVAL_BACKEND not in {"llamaindex", "docxindex"}:
     raise RuntimeError("retrieval.backend must be 'llamaindex' or 'docxindex'.")
 CHUNK_SIZE = _as_int(
-    cfg_nested("retrieval", "llamaindex", "chunk_size"),
+    (CONFIG.get("retrieval", {}).get("llamaindex") or {}).get("chunk_size", 512),
     "retrieval.llamaindex.chunk_size",
 )
 CHUNK_OVERLAP = _as_int(
-    cfg_nested("retrieval", "llamaindex", "chunk_overlap"),
+    (CONFIG.get("retrieval", {}).get("llamaindex") or {}).get("chunk_overlap", 100),
     "retrieval.llamaindex.chunk_overlap",
 )
 SIMILARITY_TOP_K = _as_int(
-    cfg_nested("retrieval", "llamaindex", "similarity_top_k"),
+    (CONFIG.get("retrieval", {}).get("llamaindex") or {}).get("similarity_top_k", 10),
     "retrieval.llamaindex.similarity_top_k",
 )
 RERANK_TOP_N = _as_int(
-    cfg_nested("retrieval", "llamaindex", "rerank_top_n"),
+    (CONFIG.get("retrieval", {}).get("llamaindex") or {}).get("rerank_top_n", 5),
     "retrieval.llamaindex.rerank_top_n",
 )
 
@@ -477,6 +486,7 @@ LOGGING_ENABLED = _parse_bool(
     cfg("logging", "enabled"),
     "logging.enabled",
 )
+LOGGING_DETAILED = _parse_bool(cfg_optional("logging", "detailed", False), "logging.detailed")
 
 print(f"[config] Retrieval mode : {RETRIEVAL_BACKEND} temporary contract retrieval (MCP)")
 print(

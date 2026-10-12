@@ -6,7 +6,8 @@
 
 | 目录 | 新任务的格式 | 示例 |
 | --- | --- | --- |
-| `logs/calls/` | `<来源>__<调用阶段>__<UTC时间>__<call_id>.json` | `H12__docxindex-scan__20260923T034500123Z__a524...json` |
+| `logs/logical_calls/` | `<来源>__<logical_call_id>.json` | `docxindex-H12__a524...json` |
+| `logs/calls/`（详细模式） | `<来源>__<调用阶段>__<UTC时间>__<call_id>.json` | `H12__docxindex-scan__20260923T034500123Z__a524...json` |
 | `logs/route_events/` | `<要点>__<事件>__<UTC时间>__<event_id>.json` | `H12__plan__20260923T034500123Z__b715...json` |
 
 四段以双下划线 `__` 分隔，扩展名均为 `.json`。末段是完整的 32 位随机 UUID；示例中的 `...` 仅为排版省略，实际文件名不会省略。UUID 用于避免并发写入重名，**不是合同或日志内容的 hash**。文件名中的时间使用 UTC：`20260923T034500123Z` 表示 2026 年 9 月 23 日 03:45:00.123 UTC；JSON 内的 `started_at`、`at` 按运行环境显示时区，两者可相差八小时。
@@ -18,7 +19,9 @@
 - `Summarizer`、`Planner`、`Reflector`：任务级 Agent 调用，例如 `Summarizer__model`。这些记录的 `criterion_id` 为 `null`；没有 MCP 检索操作时 `operation_id` 也为 `null`，这不表示日志缺失。
 - `Task`：没有要点或更具体角色的任务级记录。实际来源以 JSON 内的 `source`、`component`、`stage` 为准。
 
-`calls` 文件在发出外部请求前创建，初始 `status=pending`，完成后改为 `succeeded` 或 `failed`。完整请求、响应或异常在文件内。`call_id` 与文件名末段相同；在 `trace.json` 或 `state/criteria/H12.error.json` 中找到 `call_path` 时，应优先直接打开该路径，不必猜文件名。
+`logical_calls` 在日志开启时始终保留，一个逻辑调用一份 prettified JSON，记录 retry_count 和最终成功 token。`calls`、`route_events`、`trace` 和 criterion input/error 只在 detailed=true 时生成。详细 calls 增加 logical_call_id、category、attempt、is_retry 和输入/输出/合计 token；失败尝试的标准 token 字段为 null。
+
+`calls` 文件在发出外部请求前创建，初始 `status=pending`，完成后改为 `succeeded` 或 `failed`。完整请求、响应或异常在文件内。`call_id` 与文件名末段相同；错误中的 `call_path` 在详细模式指向 calls，在默认模式指向 logical_calls，应优先直接打开实际路径。
 
 ### 路线事件
 

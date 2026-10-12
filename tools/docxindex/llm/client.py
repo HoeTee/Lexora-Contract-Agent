@@ -11,8 +11,7 @@ from threading import BoundedSemaphore, Lock
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, ValidationError
-from redis.exceptions import RedisError
-from loggers.call_log import new_call
+from loggers.call_log import logical_call, new_call, request_model
 
 from .config import env_api_key, find_local_env, find_project_config, load_env_file, load_yaml
 
@@ -98,6 +97,10 @@ class LLMClient:
         self._rate_limit_retries = 4
 
     def complete(self, prompt: str) -> str:
+        with logical_call("docxindex.llm", self.settings.model):
+            return self._complete(prompt)
+
+    def _complete(self, prompt: str) -> str:
         extra_body = {}
         if self.settings.enable_thinking is not None:
             extra_body["enable_thinking"] = self.settings.enable_thinking
@@ -113,7 +116,8 @@ class LLMClient:
                 with self._limiter:
                     with _global_model_slot("llm", "DocxIndexLLM", self.settings.model):
                         request_started = time.monotonic()
-                        response = self.client.chat.completions.create(
+                        record.sent()
+                        response, http_status = request_model(self.client.chat.completions,
                             model=self.settings.model,
                             messages=[{"role": "user", "content": prompt}],
                             temperature=self.settings.temperature,
@@ -134,17 +138,17 @@ class LLMClient:
                 }
                 record.failed(
                     exc,
-                    stage="semaphore_wait" if isinstance(exc, RedisError) or type(exc).__name__ == "LLMGlobalSemaphoreTimeout" else "request",
+                    stage="request" if request_started is not None else "semaphore_wait",
                     timing=timing,
                 )
                 if not _is_rate_limit_error(exc) or attempt >= self._rate_limit_retries:
                     error = LLMClientError(
                         str(exc),
-                        http_status=getattr(exc, "status_code", None),
+                        http_status=record.payload["error"]["http_status"],
                         error_type=type(exc).__name__,
                     )
-                    error.call_id = record.call_id
-                    error.call_path = str(record.path) if record.path else None
+                    error.call_id = record.reference_id
+                    error.call_path = str(record.reference_path) if record.reference_path else None
                     error.failure_stage = record.payload["failure_stage"]
                     raise error from exc
                 time.sleep(2**attempt)
@@ -157,8 +161,8 @@ class LLMClient:
                     "queue_wait_seconds": round((request_started or finished) - queue_started, 3),
                     "request_seconds": round(finished - (request_started or finished), 3),
                 },
-            })
-            _LAST_CALL.set((record.call_id, str(record.path) if record.path else None))
+            }, http_status=http_status)
+            _LAST_CALL.set((record.reference_id, str(record.reference_path) if record.reference_path else None))
             return content
         raise RuntimeError("unreachable LLM retry state")
 
@@ -172,9 +176,14 @@ class LLMClient:
             time.sleep(delay)
 
     def complete_json(self, prompt: str) -> dict[str, Any]:
-        return extract_json_object(self.complete(prompt))
+        with logical_call("docxindex.llm", self.settings.model):
+            return extract_json_object(self.complete(prompt))
 
     def complete_model(self, prompt: str, schema: type["TModel"], retries: int = 2) -> "TModel":
+        with logical_call("docxindex.llm", self.settings.model) as logical:
+            return self._complete_model(prompt, schema, retries, logical)
+
+    def _complete_model(self, prompt, schema, retries, logical):
         current_prompt = prompt
         last_error: Exception | None = None
         last_content = ""
@@ -185,11 +194,13 @@ class LLMClient:
                 return schema.model_validate(payload)
             except (json.JSONDecodeError, ValidationError, ValueError) as exc:
                 last_error = exc
+                if logical.last_record:
+                    logical.last_record.failed(exc, stage="output_validation")
                 current_prompt = retry_prompt(prompt, schema, last_content, exc)
         error = LLMResponseValidationError(
             f"LLM response failed {schema.__name__} validation after {retries + 1} attempts: "
             f"{last_error}; last_content={last_content[:2000]!r}",
-            http_status=200,
+            http_status=logical.last_record.payload.get("http_status") if logical.last_record else None,
             error_type="response_validation_error",
         )
         last_call = _LAST_CALL.get()

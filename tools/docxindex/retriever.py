@@ -257,72 +257,71 @@ class DocxIndexRetriever:
             route_source=route_source,
         )
         step_groups: list[list[dict[str, Any]]] = []
-        complete_title_matches: list[dict[str, Any]] = []
         deterministic_notices: list[str] = []
         for step_index, step in enumerate(route_plan.steps, 1):
             stage_token = set_call_stage(f"route.{step_index}.{step.method}")
-            if step.method == "title":
-                current = title_matches(index, step)
-                if step.all_titles:
-                    complete_title_matches.extend(current)
-            elif step.method == "rule":
-                current = rule_matches(index, step)
-                if not current:
-                    terms = "、".join(step.terms)
-                    deterministic_notices.append(
-                        "确定性全文精确检索（已覆盖全部合同原文）："
-                        f"以下检索词的出现次数均为0：{terms}。"
-                        "若当前审查标准以词语缺失为触发条件，应直接据此判断。"
+            try:
+                if step.method == "title":
+                    current = title_matches(index, step)
+                elif step.method == "rule":
+                    current = rule_matches(index, step)
+                    if not current:
+                        terms = "、".join(step.terms)
+                        deterministic_notices.append(
+                            "确定性全文精确检索（已覆盖全部合同原文）："
+                            f"以下检索词的出现次数均为0：{terms}。"
+                            "若当前审查标准以词语缺失为触发条件，应直接据此判断。"
+                        )
+                elif step.method == "region":
+                    root_ids = _region_root_ids(index, step)
+                    allowed_node_ids = _scope_node_ids(index, root_ids)
+                    scope = step.regions[0] if step.regions else "section"
+                    if step.coverage == "complete":
+                        current = _complete_scope_matches(index, root_ids)
+                    else:
+                        current = self._semantic_matches(
+                            index,
+                            _step_query(query, step.terms),
+                            allowed_node_ids,
+                            scope=scope,
+                        )
+                elif step.method == "scan":
+                    allowed_node_ids = None
+                    if step.regions:
+                        root_ids = _region_root_ids(index, step)
+                        allowed_node_ids = _scope_node_ids(index, root_ids)
+                    current = scan_matches(
+                        index,
+                        query,
+                        self.llm_client,
+                        config.scan_batch_tokens,
+                        config.concurrency.llm,
+                        allowed_node_ids=allowed_node_ids,
+                        candidate_instruction=step.candidate_instruction,
                     )
-            elif step.method == "region":
-                root_ids = _region_root_ids(index, step)
-                allowed_node_ids = _scope_node_ids(index, root_ids)
-                scope = step.regions[0] if step.regions else "section"
-                if step.coverage == "complete":
-                    current = _complete_scope_matches(index, root_ids)
-                else:
+                elif step.method == "hybrid":
                     current = self._semantic_matches(
                         index,
                         _step_query(query, step.terms),
-                        allowed_node_ids,
-                        scope=scope,
+                        None,
+                        scope="global",
                     )
-            elif step.method == "scan":
-                allowed_node_ids = None
-                if step.regions:
-                    root_ids = _region_root_ids(index, step)
-                    allowed_node_ids = _scope_node_ids(index, root_ids)
-                current = scan_matches(
-                    index,
-                    query,
-                    self.llm_client,
-                    config.scan_batch_tokens,
-                    config.concurrency.llm,
-                    allowed_node_ids=allowed_node_ids,
-                    candidate_instruction=step.candidate_instruction,
+                else:
+                    raise ValueError(f"Unsupported docxindex route method: {step.method}")
+                current = _add_route_source(current, step.method)
+                step_groups.append(current)
+                _route_event(
+                    "step",
+                    step=step_index,
+                    method=step.method,
+                    regions=step.regions,
+                    anchor_terms=step.anchor_terms,
+                    coverage=step.coverage,
+                    match_count=len(current),
+                    node_ids=[item.get("node_id") for item in current],
                 )
-            elif step.method == "hybrid":
-                current = self._semantic_matches(
-                    index,
-                    _step_query(query, step.terms),
-                    None,
-                    scope="global",
-                )
-            else:
-                raise ValueError(f"Unsupported docxindex route method: {step.method}")
-            reset_call_stage(stage_token)
-            current = _add_route_source(current, step.method)
-            step_groups.append(current)
-            _route_event(
-                "step",
-                step=step_index,
-                method=step.method,
-                regions=step.regions,
-                anchor_terms=step.anchor_terms,
-                coverage=step.coverage,
-                match_count=len(current),
-                node_ids=[item.get("node_id") for item in current],
-            )
+            finally:
+                reset_call_stage(stage_token)
 
         fallback_used = _should_use_fallback(
             route_plan,
@@ -348,14 +347,25 @@ class DocxIndexRetriever:
             for step in route_plan.steps
         )
         selected_node_limit = config.semantic.max_selected_nodes
-        limit = (
-            None
-            if has_scan or has_complete
-            else max(selected_node_limit, sum(bool(group) for group in step_groups))
+        ranked_matches = _deduplicate_matches([item for group in step_groups for item in group])
+        candidate_count_before_rerank = len(ranked_matches)
+        full_coverage = has_scan or has_complete or any(
+            step.method == "title" and step.all_titles for step in route_plan.steps
         )
-        ranked_matches = _interleave_groups(step_groups, limit=limit)
-        if complete_title_matches:
-            ranked_matches = _deduplicate_matches(complete_title_matches + ranked_matches)
+        rerank_triggered = config.rerank.enabled and len(ranked_matches) > 1 and not full_coverage
+        stage_token = set_call_stage("route.result")
+        try:
+            if rerank_triggered:
+                ranked_matches = rerank_matches(
+                    index, query, ranked_matches, self.llm_client,
+                    config.input_tokens, cache_dir=None,
+                    concurrency=config.concurrency.reranker,
+                    max_selected_nodes=selected_node_limit,
+                )
+            if not full_coverage:
+                ranked_matches = ranked_matches[:selected_node_limit]
+        finally:
+            reset_call_stage(stage_token)
 
         content_budget = (
             config.scan_batch_tokens
@@ -382,7 +392,11 @@ class DocxIndexRetriever:
                 source_counts[source] = source_counts.get(source, 0) + 1
         _route_event(
             "result",
-            candidate_count=len(ranked_matches),
+            candidate_count_before_rerank=candidate_count_before_rerank,
+            rerank_enabled=config.rerank.enabled,
+            rerank_triggered=rerank_triggered,
+            selected_node_count=len(ranked_matches),
+            selected_node_ids=[item.get("node_id") for item in ranked_matches],
             source_counts=source_counts,
             content_parts=len(content_pages),
             has_more=False if has_scan or return_metadata else context["pagination"]["has_more"],
@@ -421,14 +435,8 @@ class DocxIndexRetriever:
         )[: config.semantic.structure_candidate_limit]
         vector_matches: list[dict[str, Any]] = []
         max_selected_nodes = config.semantic.max_selected_nodes
-        if not config.vector.enabled:
-            vector_trigger_reason = "disabled"
-        elif self._vector_index is None:
-            vector_trigger_reason = "index_unavailable"
-        elif len(structure_matches) >= max_selected_nodes:
-            vector_trigger_reason = "structure_sufficient"
-        else:
-            vector_trigger_reason = "structure_below_limit"
+        vector_triggered = config.vector.enabled and self._vector_index is not None and len(structure_matches) < max_selected_nodes
+        if vector_triggered:
             vector_matches = vector_search(
                 index,
                 self._vector_index,
@@ -440,43 +448,22 @@ class DocxIndexRetriever:
                 concurrency=config.concurrency.embedding,
                 allowed_node_ids=allowed_node_ids,
             )
-        matches, vector_duplicate_count, vector_added_count = _merge_semantic_matches(
+        matches, _, vector_added_count = _merge_semantic_matches(
             structure_matches,
             vector_matches,
             max_unique_nodes=max_selected_nodes if vector_matches else None,
         )
         candidate_count_before_rerank = len(matches)
-        # Vector supplementation and deduplication must finish before this check.
-        rerank_triggered = config.rerank.enabled and len(matches) > 1
-        if rerank_triggered:
-            matches = rerank_matches(
-                index,
-                query,
-                matches,
-                self.llm_client,
-                config.input_tokens,
-                cache_dir=None,
-                concurrency=config.concurrency.reranker,
-            )
-        selected = matches[:max_selected_nodes]
         _route_event(
             "semantic_retrieval",
             scope=scope,
             structure_candidate_count=len(structure_matches),
             vector_enabled=config.vector.enabled,
-            vector_triggered=vector_trigger_reason == "structure_below_limit",
-            vector_trigger_reason=vector_trigger_reason,
-            vector_probe_limit=config.vector.probe_limit,
-            vector_probe_count=len(vector_matches),
-            vector_duplicate_count=vector_duplicate_count,
+            vector_triggered=vector_triggered,
             vector_added_count=vector_added_count,
             candidate_count_before_rerank=candidate_count_before_rerank,
-            rerank_triggered=rerank_triggered,
-            single_candidate_rerank_skipped=config.rerank.enabled and candidate_count_before_rerank == 1,
-            selected_node_count=len(selected),
-            selected_node_ids=[item.get("node_id") for item in selected],
         )
-        return selected
+        return matches
 
 
 def _should_use_fallback(
@@ -584,37 +571,6 @@ def _add_route_source(
     return result
 
 
-def _interleave_groups(
-    groups: list[list[dict[str, Any]]],
-    limit: int | None = None,
-) -> list[dict[str, Any]]:
-    result: list[dict[str, Any]] = []
-    by_id: dict[str, dict[str, Any]] = {}
-    position = 0
-    while True:
-        added = False
-        for group in groups:
-            if position >= len(group):
-                continue
-            added = True
-            item = group[position]
-            node_id = str(item.get("node_id") or "")
-            if not node_id:
-                continue
-            existing = by_id.get(node_id)
-            if existing is not None:
-                _merge_duplicate_match(existing, item)
-                continue
-            copied = dict(item)
-            by_id[node_id] = copied
-            result.append(copied)
-            if limit is not None and len(result) >= limit:
-                return result
-        if not added:
-            return result
-        position += 1
-
-
 def _deduplicate_matches(matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     by_id: dict[str, dict[str, Any]] = {}
@@ -647,7 +603,12 @@ def _merge_duplicate_match(existing: dict[str, Any], incoming: dict[str, Any]) -
 
 
 def _route_event(event: str, **payload: Any) -> None:
-    append_route_event(event, payload)
+    token = set_call_stage("route.result") if event == "result" else None
+    try:
+        append_route_event(event, payload)
+    finally:
+        if token is not None:
+            reset_call_stage(token)
     _terminal(
         "[DocxIndex][Route] "
         + json.dumps({"event": event, **payload}, ensure_ascii=False, sort_keys=True)

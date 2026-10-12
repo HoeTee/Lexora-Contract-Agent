@@ -6,7 +6,7 @@ from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 
-from config import LOGGING_ENABLED
+from config import LOGGING_ENABLED, LOGGING_DETAILED
 
 
 _CONVERSATION_LOG_DIR: ContextVar[Path | None] = ContextVar(
@@ -68,7 +68,7 @@ def _serialize_messages(messages: list) -> list:
 
 
 def log_conversation(agent_name: str, messages: list) -> Path | None:
-    if not LOGGING_ENABLED:
+    if not LOGGING_ENABLED or not LOGGING_DETAILED:
         return None
 
     log_dir = _CONVERSATION_LOG_DIR.get()
@@ -95,7 +95,7 @@ def log_conversation(agent_name: str, messages: list) -> Path | None:
 
 
 def log_agent_step(agent_name: str, step: dict) -> None:
-    if not LOGGING_ENABLED:
+    if not LOGGING_ENABLED or not LOGGING_DETAILED:
         return
 
     log_dir = _CONVERSATION_LOG_DIR.get()

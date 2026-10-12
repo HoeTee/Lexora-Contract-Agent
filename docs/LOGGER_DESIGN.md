@@ -1,74 +1,101 @@
 # 日志设计
 
-## 当前任务日志（2026-09）
-
-新任务的完整模型请求和响应统一写入 `logs/calls/`；文件名包含来源、调用阶段、UTC 时间和 `call_id`，格式见[任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。每条记录在发出请求前先以 `pending` 状态落盘，再更新为 `succeeded` 或 `failed`。记录包含 `operation_id`、`criterion_id`、`component`、`stage`、`model`、请求、响应或异常、`http_status`。超时发生在收到 HTTP 响应前时，`http_status` 为 `null`；`failure_stage=semaphore_wait` 表示等待全局并发许可时失败。这里可能包含合同正文，应按敏感业务数据保护。
-
-`trace.json` 由任务 worker 写入，包含 `criterion.H12`、`mcp.contract_search`、DocxIndex 内部模型调用、`llm.SubAgent_H12` 等节点。节点中的 `call_id` 和 `call_path` 指向完整调用记录。DocxIndex 路线规划、执行步骤、回退和结果写入 `logs/route_events/*.json` 并导入同一 trace；确定性步骤不会伪装成模型调用。DocxIndex MCP 进程只写自身的调用与路线记录，不直接修改 worker 的 `trace.json`。
-
-`state/criteria/H12.error.json` 保留各次失败的 `origin`、`failure_stage`、上游异常类型、`http_status`、`call_id` 和 `call_path`。旧任务文件缺少这些字段时按原格式查询。`events.log` 用于任务生命周期以及每个最终失败要点的一条摘要；高频路线细节不再写入此文件。`task.json.logs.api_events_path` 是 `events_log_path` 的兼容别名。
-
-新任务不再重复写入 `logs/conversations/*.json`；该目录仅供旧任务读取。`logging.enabled=false` 时不写 `calls`、`route_events`、`trace`，但要点错误状态仍保存。API/Web 分区与原有任务目录一致；DocxIndex MCP 服务必须看到同一持久化数据挂载，否则无法写入任务调用记录。
-
-日志是任务级排障数据，不是任务状态源。API 和 Web 都以 `task.json` 保存生命周期状态；只有 `logging.enabled=true` 时才写入 `logs/`。
-
-按单条 API 审查要点定位输入、结果及缺失记录时，见 [API 审查要点记录排查](API_CRITERION_LOG_TROUBLESHOOTING.md)。
-
-## 目录边界
-
-```text
-data/api/<task_id>/
-  task.json
-  logs/
-
-data/web/<tenant_id>/<task_id>/
-  task.json
-  logs/
-```
-
-API 与 Web 日志不能混用。Web 历史按 `tenant_id` 定位任务，再按 `task.json.username` 过滤用户。
-
-请求头、Content-Type、JSON 语法或必填字段错误属于 pre-task error：不生成 `task_id`，也不创建空任务目录。进入任务生命周期后的失败必须保留 `task.json`；开启日志时同时保留排障日志。
-
-## 日志文件
-
-| 文件 | 作用 | 主要实现 |
-| --- | --- | --- |
-| `events.log` | 文件处理、任务状态、模型调用和外部 HTTP 事件 | `loggers/api_event_logger.py` |
-| `trace.json` | workflow、criterion、LLM、MCP 的树状执行轨迹和耗时 | `loggers/trace_logger.py`、`trace_helpers.py` |
-| `review_outputs.json` | 完整结构化审查结果快照 | `loggers/workflow_logger.py` |
-| `mcp.log` | MCP 连接、工具调用与异常 | `loggers/mcp_logger.py` |
-| `conversations/*.json` | Planner、SubAgent、Reflector、Summarizer 的模型上下文 | `loggers/agent_logger.py` |
-
-`trace.json` 只保存摘要化输入输出；完整审查结果放在 `review_outputs.json`。日志不得记录完整 API key、密码或带签名 query string 的 URL。
-
-`phase.summarize` span 会记录 `raw_issue_count`、`confirmed_issue_count`、`presentation_issue_count`、`presentation_anchor_count`、`opening_notices` 和 `semantic_deduplication`。`semantic_deduplication` 包含已应用、跳过及删除的问题数量；Summarizer 只标记重复组，Workflow 校验 issue_key 后执行，不允许模型改变锚点或任意删除独立问题。
-
-事件名称以 `loggers/api_event_logger.py` 和实际调用点为准，不在文档中维护第二份枚举。
-
-## 路径职责
-
-- `endpoints/review/task_store.py`：生成并解析 API/Web 任务、输入、输出、状态和日志路径。
-- `loggers/resolve_review_task_paths.py`：生成 workflow 使用的合同、审查标准、报告和日志路径。
-- `loggers/review_history.py`：读取租户任务的 `task.json`，兼容不带租户上下文的旧 `review_history.json`。
-
-当前租户 Web 新任务只写入：
-
-```text
-data/web/<tenant_id>/<task_id>/
-```
-
-旧的 `data/<username>/records/review_history.json` 和带合同名的日志目录仅用于历史数据兼容，不是新任务写入结构。
-
-## 日志开关
+## 开关与目录
 
 ```yaml
 logging:
   enabled: true
+  detailed: false
 ```
 
-关闭后，任务目录、`task.json`、输入和输出仍会创建，但不会写入 `events.log`、`trace.json`、`review_outputs.json`、`mcp.log` 或 `conversations/`。
+`enabled` 控制日志写入；`detailed` 默认关闭，只控制详细排障资料。配置变化作用于后续执行，不批量删除历史文件。API 任务目录是 `data/api/<task_id>/`；Web 是 `data/web/<tenant_id>/<task_id>/`。MCP 与 worker 必须访问同一持久化数据目录。
 
-## 审查输出质量契约更新
+下表中“关闭”表示 `enabled=true, detailed=false`，“开启”表示 `enabled=true, detailed=true`。
 
-见[审查质量与批注规则](REVIEW_QUALITY.md)：`finding_decisions`、`unresolved_issues` 和 pending 状态保存在任务日志中，不进入用户 DOCX；计划状态记录唯一固定审查配置 `criteria-routes.yaml` 的哈希，用于恢复校验。
+| 目录或文件 | 关闭 | 开启 | 内容与结构 |
+| --- | --- | --- | --- |
+| `task.json` | 保留 | 保留 | 生命周期、要点进度、输出与实际日志路径。新增 `logs.logical_calls_dir`；关闭时详细日志路径和 `state.docxindex_dir` 为 `null`。 |
+| `input/` | 按 `api.keep_input` 保留 | 同左 | 业务输入，与详细日志开关无关。 |
+| `output/` | 保留现有规则 | 同左 | 原合同批注输出；上传后的留存仍按 `api.keep_output` 控制。 |
+| `logs/events.log` | 保留，简短摘要 | 保留 | 任务状态、主要阶段耗时、最终业务统计及最终错误。关闭时不写 traceback、模型正文和重复 token 字段，错误文本最多 200 字符。 |
+| `logs/logical_calls/` | 保留 | 保留 | 每个逻辑模型调用一份 prettified JSON；不包含正文或 attempts 列表。 |
+| `logs/calls/` | 不生成 | 保留并增加字段 | 每次尝试的完整请求、响应或异常。新增逻辑 ID、类别、attempt、is_retry 和三个 token 字段。 |
+| `logs/trace.json` | 不生成 | 保留 | workflow、criterion、LLM、MCP 执行树；调用记录通过 call_id/call_path 关联。 |
+| `logs/route_events/` | 不生成 | 保留，调整字段 | 路由规划、分步检索、扫描批次、回退及最终选中节点。 |
+| `logs/conversations/` | 不生成 | 保留现有行为 | 新任务的完整模型正文已放在 calls，不再重复保存 conversations/*.json；agent_steps.jsonl 只在详细模式写入。 |
+| `logs/mcp.log` | 不生成 | 保留 | MCP 连接、工具调用与错误。 |
+| `logs/review_outputs.json` | 不生成 | 保留 | 审查结果调试快照。 |
+| `logs/annotation_events.json` | 不生成 | 保留 | 批注匹配、跳过和定位细节；批注统计直接返回工作流，不依赖此文件。 |
+| `state/plan.json` | 保留 | 保留 | 完整要点计划与恢复版本。 |
+| `state/criteria/*.output.json` | 保留 | 保留 | 完整要点恢复结果，原有 tokens 字段兼容保留。 |
+| `state/criteria/*.input.json`、`*.error.json` | 不生成 | 保留 | 要点输入及多轮业务执行错误详情。 |
+| `state/docxindex/` | 不生成 | 保留 | 内存索引的调试导出；关闭时检索继续使用内存索引。 |
+| `runtime_input/` | 任务结束清理 | 同左 | 临时业务输入与请求级模型配置。 |
+
+`enabled=false` 时不写上述日志及详细排障资料，但 `task.json`、业务输入输出、plan 和 criterion output 恢复状态仍按业务规则工作。
+
+不生成 `model_usage_summary.json`，也不在其他文件添加 token 平均值、中位值、最小值或最大值汇总。
+
+## 逻辑调用
+
+网络重试、JSON/schema 重试、单个扫描批次重试、层级建树同一批次的结构校验重试，共用一个 logical_call_id。不同批次、不同 agent 模型轮次和要点整体重新执行产生独立逻辑调用。
+
+文件名为 `<来源>__<logical_call_id>.json`，例如 `docxindex-H12__a524...json`。每次请求前先写 pending；调用结束原子更新同一文件。
+
+```json
+{
+  "logical_call_id": "a524...",
+  "category": "docxindex.retrieval.llm",
+  "source": "docxindex_H12",
+  "model": "qwen3.6-35b-a3b",
+  "started_at": "2026-10-12T12:00:00.000+08:00",
+  "finished_at": "2026-10-12T12:00:02.000+08:00",
+  "status": "succeeded",
+  "retry_count": 1,
+  "input_tokens": 1000,
+  "output_tokens": 200,
+  "input_output_tokens": 1200,
+  "error": null
+}
+```
+
+retry_count 是额外实际发出的模型请求数，第一次不算重试；等待并发许可失败不增加已发送次数。token 只采用最终成功响应的 usage，不累加此前被替代的响应；最终失败时三个字段均为 null。成功但上游未提供 usage 时保留 null，不估算。embedding 不存在输出 token，output_tokens 为 null，input_output_tokens 等于已知 input_tokens。
+
+失败 error 仅含 type、http_status、message（最多 200 字符）。本地请求超时而未收到响应时 http_status=null；服务返回 HTTP 错误时记录实际状态；收到 HTTP 成功响应但校验失败仍记为逻辑失败。成功 HTTP 状态也从实际响应读取，无法取得时不默认填写 200。
+
+类别为：
+
+- `agent`
+- `docxindex.indexing.llm`
+- `docxindex.retrieval.llm`
+- `docxindex.indexing.embedding`
+- `docxindex.retrieval.embedding`
+- `docxindex.retrieval.reranker`
+
+source 使用 agent 名称或带要点 ID 的 docxindex 来源。归类按调用上下文和入口定义，不能从文件名推断。当前 DocxIndex 的 rerank 使用检索 LLM 完成重排序，该类别表示用途；不改变当前模型或并发许可类型。
+
+详细 calls 沿用原文件名和完整字段，增加 logical_call_id、category、attempt（从 1 开始）、is_retry、input_tokens、output_tokens、input_output_tokens。失败尝试的标准 token 字段为 null，原始响应仍可用于排障。成功 http_status 位于顶层，失败位于 error.http_status。
+
+## 检索与 route_events
+
+语义步骤先取结构候选；结构结果不足时按现有配置补充向量候选，按 node_id 去重。保留 structure_candidate_limit 和向量补足上限，但不在每步重排或按最终数量截取。所有步骤结果合并、按 node_id 去重并合并 sources 后，统一按同一审查问题重排，再截取 max_selected_nodes。完整区域、全文扫描及全部标题路线保持完整覆盖，跳过最终 TopK 截取。
+
+超出重排输入预算时，各批次先重排保留最多最终 K 个候选，合并幸存候选后再次重排；每个原候选均进入其批次。预算包含问题、提示词和候选信息。若连单个候选都放不下，或分批后不能缩小池子，明确失败并提示调整预算，不能按原顺序静默丢弃候选。模型必须对本批全部候选各评分一次；遗漏、重复或未知节点触发 schema 重试，不回填未经评分的顺序结果。关闭 rerank 时不调用模型，按去重后的合并顺序截取。
+
+每个 route_event 的外层字段仍为 operation_id、criterion_id、stage、event、at、payload。stage 标识实际步骤，如 route.1.region；最终结果为 route.result。
+
+semantic_retrieval 的 payload 只保留：scope、structure_candidate_count、vector_enabled、vector_triggered、vector_added_count、candidate_count_before_rerank。最后一个是单步补充并去重后的候选数。
+
+result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的总池）、rerank_enabled、rerank_triggered、selected_node_count、selected_node_ids、source_counts、content_parts、has_more。
+
+不记录 vector_trigger_reason、vector_probe_limit、vector_probe_count、vector_duplicate_count、single_candidate_rerank_skipped。plan、step、fallback、scan 批次事件维持现有职责。
+
+## 配置与恢复
+
+索引参数、路由方法描述、rerank provider 名单、备用 llamaindex 参数、subagent 工具名单及 worker 禁止预取项从主 YAML 移入代码默认值，仍允许可选覆盖。模型、预算、重试、并发、业务和日志开关继续保留。
+
+model_semaphore 的 enabled、redis_url、wait_timeout_seconds、lease_seconds 共用，limits 分别配置 llm、embedding、reranker；key 按模型类型生成，poll_interval_seconds 默认 0.2。旧的分模型配置和可选覆盖继续兼容。租约仍用于模型并发许可到期释放与请求结束释放，不增加任务执行租约或续租机制。
+
+恢复契约版本升为 6；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。原 criterion output.tokens 和工作流 token_stats 仅保留兼容，不用于准确模型 usage 统计。
+
+具体日志路径、开关和恢复实现分别在 endpoints/review/task_store.py、loggers/call_log.py、endpoints/review/review_state.py。详细 calls 的文件名说明见 [任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。

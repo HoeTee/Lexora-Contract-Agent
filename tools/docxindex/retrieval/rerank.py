@@ -4,13 +4,15 @@ import json
 from pathlib import Path
 from threading import BoundedSemaphore
 from typing import Any
+from pydantic import model_validator
+from loggers.call_log import logical_call
 
 from tools.docxindex.indexing import estimate_tokens
 from tools.docxindex.llm import LLMClient
 from tools.docxindex.llm.cache import JsonlCache, cache_key, text_hash
 from tools.docxindex.llm.schemas import RerankResponse
 
-RERANK_PROMPT_VERSION = "docx_rerank_v2"
+RERANK_PROMPT_VERSION = "docx_rerank_v3"
 
 
 def rerank_matches(
@@ -21,51 +23,69 @@ def rerank_matches(
     input_tokens: int,
     cache_dir: Path | None,
     concurrency: int = 10,
+    max_selected_nodes: int | None = None,
 ) -> list[dict[str, Any]]:
     if not candidates:
         return []
-    candidate_view = _fit_candidates(index, candidates, input_tokens)
-    if not candidate_view:
-        return []
+    keep = max_selected_nodes or len(candidates)
+    remaining = candidates
+    while True:
+        views = _candidate_batches(index, query, remaining, input_tokens)
+        if len(views) == 1:
+            return _rank_batch(query, remaining, views[0], client, cache_dir, concurrency)
+        if all(len(view) <= keep for view in views):
+            raise ValueError("Rerank token budget cannot reduce the candidate pool; increase input_tokens or reduce max_selected_nodes")
+        by_id = {item["node_id"]: item for item in remaining}
+        survivors = []
+        for view in views:
+            batch = [by_id[item["node_id"]] for item in view]
+            ranked = _rank_batch(query, batch, view, client, cache_dir, concurrency) if len(batch) > 1 else batch
+            survivors.extend(ranked[:keep])
+        remaining = survivors
+
+
+def _rank_batch(query, candidates, candidate_view, client, cache_dir, concurrency):
     payload = json.dumps(candidate_view, ensure_ascii=False)
     cache = JsonlCache(cache_dir / "llm_rerank.jsonl" if cache_dir else None)
     key = cache_key(RERANK_PROMPT_VERSION, client.settings.model, query, text_hash(payload))
     cached = cache.get(key)
+    allowed = {item["node_id"] for item in candidate_view}
+    schema = _complete_rerank_schema(allowed)
     if cached is None:
         limiter = BoundedSemaphore(max(1, concurrency))
-        with limiter:
-            response = client.complete_model(_rerank_prompt(query, payload), RerankResponse)
-        cached = response.model_dump(mode="json")
+        with limiter, logical_call("docxindex.reranker", client.settings.model):
+            response = client.complete_model(_rerank_prompt(query, payload), schema)
+            cached = schema.model_validate(response.model_dump(mode="json")).model_dump(mode="json")
         cache.set(key, cached)
-
-    allowed = {item["node_id"] for item in candidate_view}
+    else:
+        cached = schema.model_validate(cached).model_dump(mode="json")
     by_id = {item.get("node_id"): item for item in candidates}
     ranked = []
-    seen = set()
-    for item in cached.get("nodes") or []:
-        node_id = str(item.get("node_id") or "").strip()
-        if not node_id or node_id not in allowed or node_id in seen:
-            continue
+    for item in sorted(cached["nodes"], key=lambda item: item["score"], reverse=True):
+        node_id = item["node_id"]
         merged = dict(by_id[node_id])
         merged["rerank_score"] = float(item.get("score") or 0.0)
         merged["rerank_reason"] = str(item.get("reason") or "").strip()
         ranked.append(merged)
-        seen.add(node_id)
 
-    for item in candidates:
-        node_id = item.get("node_id")
-        if node_id and node_id not in seen:
-            merged = dict(item)
-            merged["rerank_score"] = None
-            merged["rerank_reason"] = ""
-            ranked.append(merged)
     return ranked
 
 
-def _fit_candidates(index: dict[str, Any], candidates: list[dict[str, Any]], input_tokens: int) -> list[dict[str, Any]]:
+def _complete_rerank_schema(allowed: set[str]) -> type[RerankResponse]:
+    class CompleteRerankResponse(RerankResponse):
+        @model_validator(mode="after")
+        def check_candidates(self):
+            ids = [item.node_id for item in self.nodes]
+            if len(ids) != len(allowed) or set(ids) != allowed:
+                raise ValueError(f"Score each candidate exactly once; required node_ids: {sorted(allowed)}")
+            return self
+    return CompleteRerankResponse
+
+
+def _candidate_batches(index: dict[str, Any], query: str, candidates: list[dict[str, Any]], input_tokens: int) -> list[list[dict[str, Any]]]:
     nodes = {node.get("node_id"): node for node in index.get("nodes") or []}
     result = []
-    used = 0
+    batches = []
     for candidate in candidates:
         node_id = candidate.get("node_id")
         node = nodes.get(node_id) or {}
@@ -78,12 +98,16 @@ def _fit_candidates(index: dict[str, Any], candidates: list[dict[str, Any]], inp
             "token_estimate": node.get("token_estimate") or candidate.get("token_estimate"),
             "vector_score": candidate.get("vector_score") or candidate.get("score"),
         }
-        tokens = estimate_tokens(json.dumps(item, ensure_ascii=False))
-        if result and used + tokens > input_tokens:
-            break
+        proposed = json.dumps([*result, item], ensure_ascii=False)
+        if result and estimate_tokens(_rerank_prompt(query, proposed)) > input_tokens:
+            batches.append(result)
+            result = []
+        if estimate_tokens(_rerank_prompt(query, json.dumps([item], ensure_ascii=False))) > input_tokens:
+            raise ValueError(f"Rerank candidate {node_id} exceeds input_tokens including the query and prompt")
         result.append(item)
-        used += tokens
-    return result
+    if result:
+        batches.append(result)
+    return batches
 
 
 def _rerank_prompt(query: str, candidates_json: str) -> str:
@@ -97,6 +121,7 @@ def _rerank_prompt(query: str, candidates_json: str) -> str:
 
 重排序规则：
 - 只允许返回候选列表中真实存在的 node_id。
+- 必须对每个候选 node 评分，返回全部候选，不能遗漏或重复；按 score 从高到低排列。
 - 优先选择能够直接支撑审查问题判断的 node。
 - 如果父 node 和更具体的子 node 都相关，优先选择更具体的子 node。
 - 可以保留跨章节判断所需的多个 node。

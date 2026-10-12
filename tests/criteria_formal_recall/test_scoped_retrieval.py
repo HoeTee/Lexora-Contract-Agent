@@ -7,6 +7,7 @@ from threading import Lock
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from loggers.call_log import reset_call_context, set_call_context
 from endpoints.review.task_store import docxindex_state_dir
@@ -23,7 +24,6 @@ from tools.docxindex.retriever import (
     DocxIndexRetriever,
     _complete_scope_matches,
     _deduplicate_matches,
-    _interleave_groups,
     _region_node_ids,
     _region_root_ids,
     _route_event,
@@ -88,16 +88,6 @@ class ScopedRegionTests(unittest.TestCase):
 
         self.assertEqual(compact[0]["node_id"], "body")
         self.assertEqual([node["node_id"] for node in compact[0]["nodes"]], ["body/payment"])
-
-    def test_interleave_preserves_first_result_from_each_region_step(self) -> None:
-        groups = [
-            [{"node_id": "body/a"}, {"node_id": "body/b"}],
-            [{"node_id": "attachments/a"}, {"node_id": "attachments/b"}],
-        ]
-
-        matches = _interleave_groups(groups, limit=2)
-
-        self.assertEqual([item["node_id"] for item in matches], ["body/a", "attachments/a"])
 
     def test_region_heading_locator_selects_section_root(self) -> None:
         index = {
@@ -275,6 +265,7 @@ class ScopedRegionTests(unittest.TestCase):
         self.assertEqual(matches[0]["start_anchor"], "p_0002")
         self.assertEqual(matches[0]["rule_match_count"], 3)
 
+    @patch("loggers.call_log.LOGGING_DETAILED", True)
     def test_route_event_is_persisted_without_contract_text(self) -> None:
         with TemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / "events.log"
@@ -370,6 +361,7 @@ class FullScanTests(unittest.TestCase):
 
 
 class _ScanClient:
+    settings = SimpleNamespace(model="fake")
     def __init__(self) -> None:
         self.call_count = 0
         self._lock = Lock()
@@ -386,6 +378,7 @@ class _ScanClient:
 
 
 class _RetryingScanClient:
+    settings = SimpleNamespace(model="fake")
     def __init__(self) -> None:
         self.calls_by_anchor: dict[str, int] = {}
 

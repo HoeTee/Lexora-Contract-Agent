@@ -113,6 +113,7 @@ class ReportGenerator:
         output_path: str | Path | None = None,
         annotation_events_path: str | Path | None = None,
         region_boundaries: dict[str, dict[str, str]] | None = None,
+        annotation_summary: dict | None = None,
     ) -> str | None:
         """Generate only the annotated original-contract DOCX."""
         if output_path:
@@ -131,6 +132,7 @@ class ReportGenerator:
             output_path=str(output_path),
             summary_sections=summary_sections,
             region_boundaries=region_boundaries,
+            annotation_summary=annotation_summary,
             annotation_events_path=(
                 str(annotation_events_path) if annotation_events_path is not None else None
             ),

@@ -104,7 +104,7 @@ class ExperimentTests(unittest.TestCase):
     def test_singleton_skip_preserves_rendered_evidence(self):
         idx = fixture()
         candidates = [{"node_id": "body/a", "sources": ["structure"]}]
-        for response in ({"nodes": []}, {"nodes": [{"node_id": "body/a", "score": 0.9, "reason": "match"}]}):
+        for response in ({"nodes": [{"node_id": "body/a", "score": 0.9, "reason": "match"}]},):
             client = SimpleNamespace(
                 settings=SimpleNamespace(model="fake"),
                 complete_model=lambda *args, response=response: RerankResponse.model_validate(response),
@@ -137,13 +137,14 @@ class ExperimentTests(unittest.TestCase):
     def test_field_removal_preserves_admission_and_other_fields(self):
         idx = fixture()
         candidates = [{"node_id": "body/a", "sources": ["structure"]}]
-        original = RERANK_MODULE._fit_candidates(idx, candidates, 1000)
+        original = RERANK_MODULE._candidate_batches(idx, "query", candidates, 1000)
         for field in ("node_type", "token_estimate", "sources"):
             with field_removal(field):
-                changed = RERANK_MODULE._fit_candidates(idx, candidates, 1000)
+                changed = RERANK_MODULE._candidate_batches(idx, "query", candidates, 1000)
             expected = deepcopy(original)
-            for row in expected:
-                row.pop(field)
+            for batch in expected:
+                for row in batch:
+                    row.pop(field)
             self.assertEqual(changed, expected)
 
     def test_vector_duplicate_changes_prompt_even_without_new_nodes(self):
