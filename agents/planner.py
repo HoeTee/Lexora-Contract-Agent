@@ -45,6 +45,7 @@ class PlannerAgent(Agent):
             name="Planner",
             **kwargs,
         )
+        self.call_stage = "plan-strategies"
 
     async def extract_strategies(self, skeletons: list[dict]) -> dict[str, dict]:
         """Infer route/placement for every criterion in one batched LLM call.

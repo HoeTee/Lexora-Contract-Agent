@@ -5,7 +5,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass, replace
 from pathlib import Path
-from loggers.call_log import logical_call
+from loggers.call_log import call_stage, logical_call
 
 from tools.docxindex.detection import heading_level, heading_score, is_plain_label, is_visual_title
 from tools.docxindex.llm import LLMClient
@@ -406,7 +406,8 @@ def _infer_profile_batch(
         validated, errors = _apply_profile(candidates, response, max_levels)
         return validated if not errors else None
 
-    with logical_call("docxindex.llm", client.settings.model) as logical:
+    stage = f"index-hierarchy-{node.node_id}-{candidates[0].anchor}-{candidates[-1].anchor}"
+    with call_stage(stage), logical_call("docxindex.llm", client.settings.model) as logical:
         return _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, retry_count, logical)
 
 
@@ -425,8 +426,7 @@ def _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, 
             cache.set(key, response.model_dump(mode="json"))
             return validated
         last_error = ValueError("；".join(errors))
-        if logical.last_record:
-            logical.last_record.failed(last_error, stage="output_validation")
+        logical.reject_response(last_error, reason="层级结构校验未通过")
         current_prompt = (
             f"{prompt}\n\n上一次输出存在结构冲突：{'；'.join(errors)}。"
             "请重新核对 anchor、required 候选、原文顺序和层级。"

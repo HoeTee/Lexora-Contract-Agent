@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError, APIStatusError
 from redis.exceptions import RedisError
 from loggers.agent_logger import agent_call_log_dir, log_agent_step, log_conversation
-from loggers.call_log import logical_call, new_call, request_model_async
+from loggers.call_log import LogicalCall, current_events_path, logical_call, new_call, request_model_async
 from loggers.trace_helpers import llm_inputs, llm_outputs
 from loggers.trace_logger import get_current_trace
 from config import (
@@ -29,6 +29,7 @@ from endpoints.runtime.llm_semaphore import LLMGlobalSemaphoreTimeout, llm_globa
 import json
 import asyncio
 import random
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import tiktoken
@@ -86,6 +87,7 @@ class Agent:
         max_context_tokens: int = MAX_CONTEXT_TOKENS,
         max_prompt_tokens: int = MAX_PROMPT_TOKENS,
         max_result_tokens: int = MAX_RESULT_TOKENS,
+        criterion_id: str | None = None,
     ) -> None:
         """
         Initialize the Agent.
@@ -109,6 +111,11 @@ class Agent:
             max_retries=0,
         )
         self.name = name
+        self.criterion_id = criterion_id
+        self.call_stage = "model"
+        self.call_reason: str | None = None
+        self._validation_group_enabled = False
+        self._validation_call: LogicalCall | None = None
         self.mcp_client = mcp_client
         self.tools = tools or (mcp_client.tools if mcp_client else [])
         self.messages: list = []
@@ -210,6 +217,15 @@ class Agent:
         if args_dict is None:
             return "Failed to parse tool arguments."
 
+        if function_name in {"contract_search", "docxindex_search"}:
+            criterion_id = getattr(self, "criterion_id", None)
+            if criterion_id:
+                args_dict["criterion_id"] = criterion_id
+            events_path = current_events_path()
+            if events_path:
+                args_dict["api_events_path"] = events_path
+            tool_call.function.arguments = json.dumps(args_dict, ensure_ascii=False)
+
         if self.mcp_client:
             tool_msg = await self.mcp_client.tool_message_from_call(tool_call)
             result = tool_msg["content"]
@@ -246,18 +262,58 @@ class Agent:
 
     # ==================== Main Loop ====================
 
-    async def _request_completion(self, request_kwargs, span):
+    @contextmanager
+    def validation_requests(self):
+        """Keep schema repairs together, closing each tool request before tool execution."""
+        self._validation_group_enabled = True
+        self._validation_call = None
+        try:
+            yield
+        except BaseException as exc:
+            if self._validation_call is not None:
+                self._validation_call.finish(exc)
+                record = self._validation_call.last_record
+                if record is not None and not getattr(exc, "call_id", None):
+                    exc.call_id = record.reference_id
+                    exc.call_path = str(record.reference_path) if record.reference_path else None
+            raise
+        else:
+            self._finish_validation_call()
+        finally:
+            self._validation_group_enabled = False
+            self._validation_call = None
+
+    def _finish_validation_call(self):
+        record = getattr(self, "_validation_call", None)
+        if record is not None:
+            record.finish()
+            self._validation_call = None
+
+    def reject_schema_response(self, exc):
+        record = getattr(self, "_validation_call", None)
+        if record is not None:
+            record.reject_response(exc)
+
+    async def _request_completion(self, request_kwargs, span, *, stage=None, reason=None):
+        grouped = getattr(self, "_validation_group_enabled", False)
         with logical_call("agent", self.settings.model,
-                          directory=agent_call_log_dir(), source=self.name):
+                          directory=agent_call_log_dir(), source=self.name,
+                          stage=stage or getattr(self, "call_stage", "model"),
+                          reason=reason if reason is not None else getattr(self, "call_reason", None),
+                          record=getattr(self, "_validation_call", None) if grouped else None,
+                          finalize=not grouped) as logical:
+            if grouped:
+                self._validation_call = logical
             for attempt in range(MODEL_CALL_MAX_RETRIES + 1):
                 record = new_call(
                     component="agent", model=self.settings.model,
                     request=request_kwargs, directory=agent_call_log_dir(),
-                    criterion_id=self.name.removeprefix("SubAgent_") if self.name.startswith("SubAgent_") else None,
+                    criterion_id=getattr(self, "criterion_id", None) or (
+                        self.name.split("_", 1)[1] if self.name.startswith(("SubAgent_", "Reflector_")) else None),
                     stage="agent_model_call", source=self.name,
                 )
-                span.set_metadata({"call_id": record.call_id,
-                                   "call_path": str(record.path) if record.path else None})
+                span.set_metadata({"call_id": record.reference_id,
+                                   "call_path": str(record.reference_path) if record.reference_path else None})
                 request_started = False
                 try:
                     async with llm_global_semaphore(agent_name=self.name, model=self.settings.model) as lease:
@@ -297,6 +353,7 @@ class Agent:
         return result
 
     async def execute(self) -> str:
+        tool_continuations = 0
         while True:
             prompt_token_estimate = self._check_context_limits()
             self.step_count += 1
@@ -336,7 +393,12 @@ class Agent:
                         "seed": self.settings.seed,
                     },
                 ) as span:
-                    completion = await self._request_completion(request_kwargs, span)
+                    stage = getattr(self, "call_stage", "model")
+                    completion = await self._request_completion(
+                        request_kwargs, span,
+                        stage=f"{stage}-tool-result{tool_continuations}" if tool_continuations else stage,
+                        reason="根据工具返回结果继续生成审查结论" if tool_continuations else None,
+                    )
                     span.set_outputs(llm_outputs(completion))
             except MODEL_API_ERRORS as exc:
                 error = ModelCallError(
@@ -394,6 +456,8 @@ class Agent:
             )
 
             if tool_calls:
+                self._finish_validation_call()
+                tool_continuations += 1
                 self.messages.append(response_message.model_dump(exclude_unset=True)) # Append tool calls onto history
                 log_conversation(self.name, self.messages)
                 forced = await self._process_tool_calls(tool_calls)

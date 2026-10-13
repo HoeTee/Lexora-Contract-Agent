@@ -5,7 +5,7 @@ from pathlib import Path
 from threading import BoundedSemaphore
 from typing import Any
 from pydantic import model_validator
-from loggers.call_log import logical_call
+from loggers.call_log import call_stage, logical_call
 
 from tools.docxindex.indexing import estimate_tokens
 from tools.docxindex.llm import LLMClient
@@ -29,22 +29,26 @@ def rerank_matches(
         return []
     keep = max_selected_nodes or len(candidates)
     remaining = candidates
+    pass_number = 1
     while True:
         views = _candidate_batches(index, query, remaining, input_tokens)
         if len(views) == 1:
-            return _rank_batch(query, remaining, views[0], client, cache_dir, concurrency)
+            return _rank_batch(query, remaining, views[0], client, cache_dir, concurrency,
+                               stage=f"rerank-pass{pass_number}-batch1")
         if all(len(view) <= keep for view in views):
             raise ValueError("Rerank token budget cannot reduce the candidate pool; increase input_tokens or reduce max_selected_nodes")
         by_id = {item["node_id"]: item for item in remaining}
         survivors = []
-        for view in views:
+        for batch_number, view in enumerate(views, 1):
             batch = [by_id[item["node_id"]] for item in view]
-            ranked = _rank_batch(query, batch, view, client, cache_dir, concurrency) if len(batch) > 1 else batch
+            ranked = _rank_batch(query, batch, view, client, cache_dir, concurrency,
+                                 stage=f"rerank-pass{pass_number}-batch{batch_number}") if len(batch) > 1 else batch
             survivors.extend(ranked[:keep])
         remaining = survivors
+        pass_number += 1
 
 
-def _rank_batch(query, candidates, candidate_view, client, cache_dir, concurrency):
+def _rank_batch(query, candidates, candidate_view, client, cache_dir, concurrency, *, stage):
     payload = json.dumps(candidate_view, ensure_ascii=False)
     cache = JsonlCache(cache_dir / "llm_rerank.jsonl" if cache_dir else None)
     key = cache_key(RERANK_PROMPT_VERSION, client.settings.model, query, text_hash(payload))
@@ -53,7 +57,7 @@ def _rank_batch(query, candidates, candidate_view, client, cache_dir, concurrenc
     schema = _complete_rerank_schema(allowed)
     if cached is None:
         limiter = BoundedSemaphore(max(1, concurrency))
-        with limiter, logical_call("docxindex.reranker", client.settings.model):
+        with limiter, call_stage(stage), logical_call("docxindex.reranker", client.settings.model):
             response = client.complete_model(_rerank_prompt(query, payload), schema)
             cached = schema.model_validate(response.model_dump(mode="json")).model_dump(mode="json")
         cache.set(key, cached)

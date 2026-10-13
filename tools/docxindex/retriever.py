@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from loggers.call_log import append_route_event, reset_call_stage, set_call_stage
+from loggers.call_log import append_route_event, call_stage, reset_call_stage, set_call_stage
 from routing.schemas import RoutePlan
 from tools.docxindex import build_document_index
 from tools.docxindex.indexing.config import IndexingConfig
@@ -327,11 +327,12 @@ class DocxIndexRetriever:
             route_plan,
             fallback_enabled=route.fallback_enabled,
         )
-        fallback_matches = (
-            self._semantic_matches(index, query, None, scope="global")
-            if fallback_used
-            else []
-        )
+        with call_stage("fallback"):
+            fallback_matches = (
+                self._semantic_matches(index, query, None, scope="global")
+                if fallback_used
+                else []
+            )
         if fallback_matches:
             step_groups.append(_add_route_source(fallback_matches, "fallback"))
         _route_event(

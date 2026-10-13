@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from loggers.call_log import call_stage
 
 from routing.config import RouteConfig
 from routing.criteria import split_criteria_from_docx
@@ -38,13 +39,14 @@ def plan_route(
     )
     cached = cache.get(key)
     if cached is None:
-        response = plan_dynamic_route(
-            query=query,
-            criterion=criterion,
-            titles=titles,
-            methods=config.methods,
-            client=client,
-        )
+        with call_stage("route-plan"):
+            response = plan_dynamic_route(
+                query=query,
+                criterion=criterion,
+                titles=titles,
+                methods=config.methods,
+                client=client,
+            )
         cached = response.model_dump(mode="json")
         cache.set(key, cached)
     return RoutePlan.model_validate(cached)

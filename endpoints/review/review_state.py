@@ -115,6 +115,7 @@ class ReviewStateStore:
     def save_criterion_output(self, result: dict[str, Any], *, attempt: int) -> Path:
         criterion_id = _safe_criterion_id(str(result.get("criterion_id", "")))
         payload = dict(result)
+        payload.pop("tokens", None)
         payload["review_contract_version"] = REVIEW_CONTRACT_VERSION
         payload.update(
             {

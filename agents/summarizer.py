@@ -209,6 +209,7 @@ class SummarizerAgent(Agent):
             name="Summarizer",
             **kwargs,
         )
+        self.call_stage = "summary"
 
     async def compile_summary_comment(self, results: list[dict]) -> dict:
         """Generate overall_comment and priority_comments from canonical issues."""

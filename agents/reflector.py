@@ -27,10 +27,11 @@ REFLECTOR_EXPECTED_JSON = """
 class ReflectorAgent(Agent):
     """Reviews sub-agent output and returns PASS/REJECT with feedback."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, criterion_id: str | None = None, **kwargs):
         super().__init__(
             system_prompt=REFLECTOR_SYSTEM_PROMPT,
-            name="Reflector",
+            name=f"Reflector_{criterion_id}" if criterion_id else "Reflector",
+            criterion_id=criterion_id,
             **kwargs,
         )
 

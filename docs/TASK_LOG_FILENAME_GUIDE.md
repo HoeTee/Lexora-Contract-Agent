@@ -6,20 +6,22 @@
 
 | 目录 | 新任务的格式 | 示例 |
 | --- | --- | --- |
-| `logs/logical_calls/` | `<来源>__<logical_call_id>.json` | `docxindex-H12__a524...json` |
-| `logs/calls/`（详细模式） | `<来源>__<调用阶段>__<UTC时间>__<call_id>.json` | `H12__docxindex-scan__20260923T034500123Z__a524...json` |
+| `logs/logical_calls/` | `<来源>__<调用阶段>__<logical_call_id>.json` | `docxindex_H12__scan-step1-batch2__a524...json` |
+| `logs/calls/`（详细模式） | `<来源>__<调用阶段>__<UTC时间>__<call_id>.json` | `Reflector_H12__reflection-round1__20260923T034500123Z__a524...json` |
 | `logs/route_events/` | `<要点>__<事件>__<UTC时间>__<event_id>.json` | `H12__plan__20260923T034500123Z__b715...json` |
 
-四段以双下划线 `__` 分隔，扩展名均为 `.json`。末段是完整的 32 位随机 UUID；示例中的 `...` 仅为排版省略，实际文件名不会省略。UUID 用于避免并发写入重名，**不是合同或日志内容的 hash**。文件名中的时间使用 UTC：`20260923T034500123Z` 表示 2026 年 9 月 23 日 03:45:00.123 UTC；JSON 内的 `started_at`、`at` 按运行环境显示时区，两者可相差八小时。
+各段以双下划线 `__` 分隔，logical_calls 为三段，详细 calls 和 route_events 为四段，扩展名均为 `.json`。末段是完整的 32 位随机 UUID；示例中的 `...` 仅为排版省略，实际文件名不会省略。UUID 用于避免并发写入重名，**不是合同或日志内容的 hash**。文件名中的时间使用 UTC：`20260923T034500123Z` 表示 2026 年 9 月 23 日 03:45:00.123 UTC；JSON 内的 `started_at`、`at` 按运行环境显示时区，两者可相差八小时。
 
 ### 来源和调用阶段
 
-- `H12`、`H15`：该调用或路线属于对应审查要点。`H12__docxindex-scan` 是 DocxIndex 在 H12 的 `scan` 路线内调用模型；`H12__agent-model` 是后续 SubAgent 的模型调用。两者是不同阶段。
-- `Index`：建立合同索引时的调用，没有单个要点编号，例如 `Index__embedding`、`Index__llm`。
-- `Summarizer`、`Planner`、`Reflector`：任务级 Agent 调用，例如 `Summarizer__model`。这些记录的 `criterion_id` 为 `null`；没有 MCP 检索操作时 `operation_id` 也为 `null`，这不表示日志缺失。
+- `docxindex_H12`、`SubAgent_H12`、`Reflector_H12`：分别是该要点的检索、审查、反思。Reflector 的 stage 如 reflection-round1；SubAgent 的 stage 如 review-initial、review-initial-output-repair1、review-reflection-revision1。
+- `docxindex_indexing_llm`、`docxindex_indexing_embedding`：建结构树索引与建向量索引，没有单个要点编号。stage 标明摘要批次、层级节点与锚点范围或 embedding 批次。
+- `Summarizer`、`Planner`：任务级 Agent 调用，stage 分别为 summary、plan-strategies。这些详细记录的 criterion_id 为 null。
 - `Task`：没有要点或更具体角色的任务级记录。实际来源以 JSON 内的 `source`、`component`、`stage` 为准。
 
-`logical_calls` 在日志开启时始终保留，一个逻辑调用一份 prettified JSON，记录 retry_count 和最终成功 token。`calls`、`route_events`、`trace` 和 criterion input/error 只在 detailed=true 时生成。详细 calls 增加 logical_call_id、category、attempt、is_retry 和输入/输出/合计 token；失败尝试的标准 token 字段为 null。
+`logical_calls` 在日志开启时始终保留，一个逻辑调用一份 prettified JSON，记录 source、stage、reason、retry_count 和最终成功 token。stage 中的 scan-step1-batch2 表示第 1 个检索步骤的第 2 批，结构树检索用 structure-step1-part2，重排用 rerank-pass1-batch2。reason 为追加修订的原因摘要，正常请求为 null，最多 200 字符。JSON/schema 修正与网络重试增加同一逻辑调用的 retry_count；内容修订及工具后续请求分别生成新逻辑调用。
+
+`calls`、`route_events`、`trace` 和 criterion input/error 只在 detailed=true 时生成。详细 calls 保存 logical_call_id、category、attempt、is_retry、reason 和输入/输出/合计 token；失败尝试的标准 token 字段为 null。
 
 `calls` 文件在发出外部请求前创建，初始 `status=pending`，完成后改为 `succeeded` 或 `failed`。完整请求、响应或异常在文件内。`call_id` 与文件名末段相同；错误中的 `call_path` 在详细模式指向 calls，在默认模式指向 logical_calls，应优先直接打开实际路径。
 
@@ -33,7 +35,8 @@ Windows PowerShell（本地开发机）：
 
 ```powershell
 $taskDir = 'C:\Users\lenovo\desktop\contract_agent\data\api\<task_id>'
-Get-ChildItem "$taskDir\logs\calls\H12__*.json" | Sort-Object Name
+Get-ChildItem "$taskDir\logs\logical_calls\*H12__*.json" | Sort-Object Name
+Get-ChildItem "$taskDir\logs\calls\*H12__*.json" | Sort-Object Name
 Get-ChildItem "$taskDir\logs\route_events\H12__*.json" | Sort-Object Name
 Get-Content -LiteralPath '<实际文件路径>' -Raw -Encoding UTF8 | ConvertFrom-Json
 ```
@@ -43,7 +46,8 @@ PowerShell 中的 `cat` 是 `Get-Content` 的别名。对于无 BOM 的 UTF-8 JS
 Linux 宿主机或容器中，先把 `TASK_DIR` 设为**该执行位置**实际看到的挂载目录；例如宿主机可能是 `/data/api/<task_id>`，示例服务容器内是 `/app/data/api/<task_id>`：
 
 ```sh
-find "$TASK_DIR/logs/calls" -maxdepth 1 -type f -name 'H12__*.json' | sort
+find "$TASK_DIR/logs/logical_calls" -maxdepth 1 -type f -name '*H12__*.json' | sort
+find "$TASK_DIR/logs/calls" -maxdepth 1 -type f -name '*H12__*.json' | sort
 find "$TASK_DIR/logs/route_events" -maxdepth 1 -type f -name 'H12__*.json' | sort
 ```
 
@@ -51,4 +55,4 @@ find "$TASK_DIR/logs/route_events" -maxdepth 1 -type f -name 'H12__*.json' | sor
 
 ## 旧任务
 
-改动前的 `calls`、`route_events` 文件名只有 UUID，例如 `ec284f5bead84093829a9551bbf6ff23.json`。旧文件不会批量改名，因为已有 trace 和错误状态中的 `call_path` 指向原路径。查旧任务时按 `call_id`、`criterion_id` 或 `operation_id` 搜索 JSON 内容；新旧文件均可按 UTF-8 读取。要点排查顺序见 [API 审查要点记录排查](API_CRITERION_LOG_TROUBLESHOOTING.md)。
+历史文件有纯 UUID、Index__UUID、Reflector__UUID 或不含 stage 的命名。旧文件不会批量改名，因为已有 trace 和错误状态中的 call_path 指向原路径；旧 Reflector 没有要点归属，不能可靠补回 H 编号。查旧任务时按 call_id、criterion_id、source 或 operation_id 搜索 JSON 内容；新旧文件均可按 UTF-8 读取。要点排查顺序见 [API 审查要点记录排查](API_CRITERION_LOG_TROUBLESHOOTING.md)。

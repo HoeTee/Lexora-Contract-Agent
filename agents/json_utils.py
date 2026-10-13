@@ -3,12 +3,23 @@ Helpers for extracting, validating, and repairing JSON agent outputs.
 """
 
 import json
+from contextlib import contextmanager, nullcontext
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+@contextmanager
+def agent_call_purpose(agent, stage: str, reason: str | None = None):
+    previous = (getattr(agent, "call_stage", "model"), getattr(agent, "call_reason", None))
+    agent.call_stage, agent.call_reason = stage, reason
+    try:
+        yield
+    finally:
+        agent.call_stage, agent.call_reason = previous
 
 
 class AgentOutputValidationError(ValueError):
@@ -69,6 +80,18 @@ async def chat_until_valid_json(
     final_attempt_schema: type[BaseModel] | None = None,
 ) -> tuple[dict, str]:
     """Validate agent JSON, optionally relaxing only the final parsed response."""
+    scope = agent.validation_requests() if hasattr(agent, "validation_requests") else nullcontext()
+    with scope:
+        return await _chat_until_valid_json(
+            agent, initial_prompt, schema, expected_format,
+            max_attempts=max_attempts, final_attempt_schema=final_attempt_schema,
+        )
+
+
+async def _chat_until_valid_json(
+    agent, initial_prompt: str, schema: type[ModelT], expected_format: str, *,
+    max_attempts: int, final_attempt_schema: type[BaseModel] | None,
+) -> tuple[dict, str]:
     prompt = initial_prompt
     last_error: Exception | None = None
     raw_output = ""
@@ -89,7 +112,11 @@ async def chat_until_valid_json(
                         return fallback.model_dump(), raw_output
                     except (ValidationError, ValueError) as fallback_exc:
                         last_error = fallback_exc
+                if hasattr(agent, "reject_schema_response"):
+                    agent.reject_schema_response(last_error)
                 break
+            if hasattr(agent, "reject_schema_response"):
+                agent.reject_schema_response(exc)
             prompt = _repair_prompt(exc, expected_format)
 
     raise AgentOutputValidationError(

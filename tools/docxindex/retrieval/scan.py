@@ -10,10 +10,12 @@ from tools.docxindex.llm.prompts import scan_prompt
 from tools.docxindex.llm.schemas import ScanResponse
 from loggers.call_log import (
     append_route_event,
+    call_stage,
     logical_call,
     map_with_context,
     reset_call_stage,
     set_call_stage,
+    retrieval_call_stage,
 )
 
 from .title import _candidate
@@ -37,7 +39,8 @@ def scan_matches(
         return []
 
     def inspect(entry: tuple[int, list[tuple[str, dict[str, Any], dict[str, Any], str]]]) -> list[dict[str, Any]]:
-        with logical_call("docxindex.llm", client.settings.model):
+        stage = f"{retrieval_call_stage('scan')}-batch{entry[0]}"
+        with call_stage(stage), logical_call("docxindex.llm", client.settings.model):
             return inspect_batch(entry)
 
     def inspect_batch(entry: tuple[int, list[tuple[str, dict[str, Any], dict[str, Any], str]]]) -> list[dict[str, Any]]:

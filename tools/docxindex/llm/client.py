@@ -194,8 +194,7 @@ class LLMClient:
                 return schema.model_validate(payload)
             except (json.JSONDecodeError, ValidationError, ValueError) as exc:
                 last_error = exc
-                if logical.last_record:
-                    logical.last_record.failed(exc, stage="output_validation")
+                logical.reject_response(exc)
                 current_prompt = retry_prompt(prompt, schema, last_content, exc)
         error = LLMResponseValidationError(
             f"LLM response failed {schema.__name__} validation after {retries + 1} attempts: "

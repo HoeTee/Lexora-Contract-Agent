@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from loggers.call_log import map_with_context
+from loggers.call_log import call_stage, current_call_stage, map_with_context
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -45,8 +45,13 @@ def summarize_nodes(
 
     tasks = _prepare_tasks(nodes, client, cache)
     batches = _pack_tasks(tasks, batch_max_nodes, batch_max_tokens)
+    def summarize(entry):
+        number, batch = entry
+        with call_stage(f"index-summary-batch{number}"):
+            return _summarize_batch(batch, client, cache)
+
     with ThreadPoolExecutor(max_workers=max(1, concurrency)) as executor:
-        fallback_nodes = sum(map_with_context(executor, lambda batch: _summarize_batch(batch, client, cache), batches))
+        fallback_nodes = sum(map_with_context(executor, summarize, list(enumerate(batches, 1))))
     return {
         "eligible_nodes": len(tasks),
         "batches": len(batches),
@@ -144,12 +149,15 @@ def _summarize_batch(tasks: list[_SummaryTask], client: LLMClient, cache: JsonlC
             _store_summary(task, summary, cache)
         else:
             fallback_nodes += 1
-            _apply_individual_summary(task, client, cache)
+            _apply_individual_summary(task, client, cache, reason="批量摘要未返回该节点的有效摘要，改为逐节点生成")
     return fallback_nodes
 
 
-def _apply_individual_summary(task: _SummaryTask, client: LLMClient, cache: JsonlCache) -> None:
-    generated = _generate_summary(client, task.node, task.content)
+def _apply_individual_summary(task: _SummaryTask, client: LLMClient, cache: JsonlCache,
+                              *, reason: str | None = None) -> None:
+    stage = f"{current_call_stage() or 'index-summary'}-node-{task.node.node_id}"
+    with call_stage(stage, reason):
+        generated = _generate_summary(client, task.node, task.content)
     _store_summary(task, generated["summary"].strip(), cache)
 
 
@@ -165,7 +173,12 @@ def _generate_summary(client: LLMClient, node: DocumentNode, content: str) -> di
     prompt = summary_prompt(node.title, node.node_type, content, max_tokens=SUMMARY_OUTPUT_MAX_TOKENS)
     last_summary = ""
     for _attempt in range(3):
-        response = client.complete_model(prompt, SummaryResponse)
+        if _attempt:
+            stage = f"{current_call_stage() or 'index-summary'}-compress{_attempt}"
+            with call_stage(stage, f"摘要超过 {SUMMARY_OUTPUT_MAX_TOKENS} token 预算，要求压缩"):
+                response = client.complete_model(prompt, SummaryResponse)
+        else:
+            response = client.complete_model(prompt, SummaryResponse)
         summary = response.summary.strip()
         last_summary = summary
         if estimate_tokens(summary) <= SUMMARY_OUTPUT_MAX_TOKENS:

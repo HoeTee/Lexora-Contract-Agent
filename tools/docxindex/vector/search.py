@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 from threading import BoundedSemaphore
 from typing import Any
+from loggers.call_log import call_stage, retrieval_call_stage
 
 from .client import EmbeddingClient
 from .schema import VectorIndex
@@ -24,7 +25,7 @@ def vector_search(
     allowed_node_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     limiter = BoundedSemaphore(max(1, concurrency))
-    with limiter:
+    with limiter, call_stage(retrieval_call_stage("vector-query")):
         query_embedding = client.embed([query])[0]
     nodes = {node.get("node_id"): node for node in document_index.get("nodes") or []}
     scored = []

@@ -53,7 +53,7 @@ class CallLoggingTests(unittest.TestCase):
             self.assertEqual(record["stage"], "route.1.scan")
             self.assertEqual(record["request"]["messages"][0]["content"], "contract excerpt")
             self.assertIsNone(record["error"]["http_status"])
-            self.assertRegex(Path(error.call_path).name, rf"^H12__docxindex-scan__\d{{8}}T\d{{9}}Z__{error.call_id}\.json$")
+            self.assertRegex(Path(error.call_path).name, rf"^docxindex_H12__route-1-scan__\d{{8}}T\d{{9}}Z__{error.call_id}\.json$")
 
     def test_nested_workers_keep_criterion_context_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -68,13 +68,13 @@ class CallLoggingTests(unittest.TestCase):
             self.assertEqual({record.payload["criterion_id"] for record in records}, {"H15"})
             self.assertEqual(len({record.call_id for record in records}), 2)
             self.assertTrue(all(record.path.is_file() for record in records))
-            self.assertTrue(all(record.path.name.startswith("H15__docxindex-scan__") for record in records))
+            self.assertTrue(all(record.path.name.startswith("H15__route-1-scan__") for record in records))
 
     def test_task_level_agent_uses_role_in_filename(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             record = new_call(component="agent", model="fake", request={"messages": []},
                               directory=Path(temp_dir), stage="agent_model_call", source="Summarizer")
-            self.assertTrue(record.path.name.startswith("Summarizer__model__"))
+            self.assertTrue(record.path.name.startswith("Summarizer__agent_model_call__"))
             self.assertEqual(record.payload["source"], "Summarizer")
             self.assertIsNone(record.payload["criterion_id"])
 

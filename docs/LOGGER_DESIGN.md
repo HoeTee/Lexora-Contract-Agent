@@ -27,7 +27,7 @@ logging:
 | `logs/review_outputs.json` | 不生成 | 保留 | 审查结果调试快照。 |
 | `logs/annotation_events.json` | 不生成 | 保留 | 批注匹配、跳过和定位细节；批注统计直接返回工作流，不依赖此文件。 |
 | `state/plan.json` | 保留 | 保留 | 完整要点计划与恢复版本。 |
-| `state/criteria/*.output.json` | 保留 | 保留 | 完整要点恢复结果，原有 tokens 字段兼容保留。 |
+| `state/criteria/*.output.json` | 保留 | 保留 | 完整要点恢复结果和逐轮反思历史；不再持久化混入证据文本估算量的 tokens 字段。 |
 | `state/criteria/*.input.json`、`*.error.json` | 不生成 | 保留 | 要点输入及多轮业务执行错误详情。 |
 | `state/docxindex/` | 不生成 | 保留 | 内存索引的调试导出；关闭时检索继续使用内存索引。 |
 | `runtime_input/` | 任务结束清理 | 同左 | 临时业务输入与请求级模型配置。 |
@@ -38,15 +38,17 @@ logging:
 
 ## 逻辑调用
 
-网络重试、JSON/schema 重试、单个扫描批次重试、层级建树同一批次的结构校验重试，共用一个 logical_call_id。不同批次、不同 agent 模型轮次和要点整体重新执行产生独立逻辑调用。
+网络重试、JSON/schema 重试（包括 Agent）、单个扫描批次重试、层级建树同一批次的结构校验重试，共用一个 logical_call_id。不同批次、内容校验修订、反思反馈修订、工具请求与工具结果后的继续生成，以及要点整体重新执行，产生独立逻辑调用。工具执行期间不继承 Agent 的逻辑调用，工具内部模型请求独立记录。
 
-文件名为 `<来源>__<logical_call_id>.json`，例如 `docxindex-H12__a524...json`。每次请求前先写 pending；调用结束原子更新同一文件。
+文件名为 `<source>__<stage>__<logical_call_id>.json`，例如 `docxindex_H12__scan-step1-batch2__a524...json`。保留下划线，其他不适合文件名的字符替换为连字符；每段最多 64 字符，完整 source/stage 仍在 JSON 中。每次请求前先写 pending；调用结束原子更新同一文件。
 
 ```json
 {
   "logical_call_id": "a524...",
   "category": "docxindex.retrieval.llm",
   "source": "docxindex_H12",
+  "stage": "scan-step1-batch2",
+  "reason": null,
   "model": "qwen3.6-35b-a3b",
   "started_at": "2026-10-12T12:00:00.000+08:00",
   "finished_at": "2026-10-12T12:00:02.000+08:00",
@@ -72,9 +74,13 @@ retry_count 是额外实际发出的模型请求数，第一次不算重试；�
 - `docxindex.retrieval.embedding`
 - `docxindex.retrieval.reranker`
 
-source 使用 agent 名称或带要点 ID 的 docxindex 来源。归类按调用上下文和入口定义，不能从文件名推断。当前 DocxIndex 的 rerank 使用检索 LLM 完成重排序，该类别表示用途；不改变当前模型或并发许可类型。
+source 使用 SubAgent_H12、Reflector_H12 等角色加要点名称；Planner、Summarizer 是任务级角色。索引 LLM 和 Embedding 分别使用 docxindex_indexing_llm、docxindex_indexing_embedding；检索使用 docxindex_H12。归类按调用上下文和入口定义。当前 DocxIndex 的 rerank 使用检索 LLM 完成重排序，该类别表示用途；不改变当前模型或并发许可类型。
 
-详细 calls 沿用原文件名和完整字段，增加 logical_call_id、category、attempt（从 1 开始）、is_retry、input_tokens、output_tokens、input_output_tokens。失败尝试的标准 token 字段为 null，原始响应仍可用于排障。成功 http_status 位于顶层，失败位于 error.http_status。
+stage 标识请求用途：route-plan、scan-step1-batch2、structure-step1-part2、vector-query-step1、rerank-pass1-batch2、index-summary-batch1、index-embedding-batch1、index-hierarchy-节点和锚点范围等。SubAgent 使用 review-initial、review-initial-output-repair1、review-reflection-revision1；工具返回后的请求追加 tool-result1。Reflector 使用 reflection-round1。step 是检索动作，不是模型请求数；一个 step 的多个分批分别记录。
+
+reason 正常请求为 null；内容校验修订时写实际校验错误摘要，反思修订时写反馈摘要，工具后续请求写继续处理工具结果的说明。JSON/schema 重试在原逻辑调用的 reason 中补充校验原因。reason 最多 200 字符，不保存完整输入输出正文。
+
+详细 calls 文件名为 `<source>__<stage>__<UTC时间>__<call_id>.json`，source/stage 与逻辑调用一致，并保存 criterion_id、reason、logical_call_id、category、attempt（从 1 开始）、is_retry、input_tokens、output_tokens、input_output_tokens。失败尝试的标准 token 字段为 null，原始响应仍可用于排障。成功 http_status 位于顶层，失败位于 error.http_status。
 
 ## 检索与 route_events
 
@@ -96,6 +102,6 @@ result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的�
 
 model_semaphore 的 enabled、redis_url、wait_timeout_seconds、lease_seconds 共用，limits 分别配置 llm、embedding、reranker；key 按模型类型生成，poll_interval_seconds 默认 0.2。旧的分模型配置和可选覆盖继续兼容。租约仍用于模型并发许可到期释放与请求结束释放，不增加任务执行租约或续租机制。
 
-恢复契约版本升为 6；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。原 criterion output.tokens 和工作流 token_stats 仅保留兼容，不用于准确模型 usage 统计。
+恢复契约版本为 6；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。新写入的 criterion output 删除 tokens；工作流内存结果和返回值中的 token_stats 保留兼容，不用于准确模型 usage 统计。准确用量读取 logical_calls。旧任务文件不改名、不补写字段；旧 Reflector 日志缺少要点归属，不能可靠补回 H 编号。
 
 具体日志路径、开关和恢复实现分别在 endpoints/review/task_store.py、loggers/call_log.py、endpoints/review/review_state.py。详细 calls 的文件名说明见 [任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。

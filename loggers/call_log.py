@@ -22,6 +22,7 @@ def set_call_context(events_path: str | Path | None, *, operation_id: str | None
                      criterion_id: str | None = None, stage: str = "indexing"):
     path = Path(events_path).parent / "calls" if events_path and LOGGING_ENABLED else None
     return _CONTEXT.set({"directory": path, "operation_id": operation_id,
+                         "events_path": str(events_path) if events_path else None,
                          "criterion_id": criterion_id, "stage": stage,
                          "phase": "indexing" if stage == "indexing" else "retrieval"})
 
@@ -37,6 +38,31 @@ def set_call_stage(stage: str):
 
 def reset_call_stage(token) -> None:
     _CONTEXT.reset(token)
+
+
+@contextmanager
+def call_stage(stage: str, reason: str | None = None):
+    context = _CONTEXT.get() or {}
+    token = _CONTEXT.set({**context, "stage": stage, "reason": reason})
+    try:
+        yield
+    finally:
+        _CONTEXT.reset(token)
+
+
+def current_call_stage() -> str | None:
+    return (_CONTEXT.get() or {}).get("stage")
+
+
+def current_events_path() -> str | None:
+    return (_CONTEXT.get() or {}).get("events_path")
+
+
+def retrieval_call_stage(action: str) -> str:
+    parts = (current_call_stage() or "").split(".")
+    if len(parts) >= 2 and parts[0] == "route" and parts[1].isdigit():
+        return f"{action}-step{parts[1]}"
+    return action
 
 
 def map_with_context(executor, function, items):
@@ -92,10 +118,11 @@ class CallRecord:
             request = {**request, "attempt": logical.sent_count + 1}
         self.call_id = uuid.uuid4().hex
         instant = datetime.now(timezone.utc)
-        call_source = criterion_id or source or ("Index" if stage == "indexing" else "Task")
+        call_source = logical.payload["source"] if logical else source or criterion_id or "Task"
+        stage = logical.payload["stage"] if logical else stage
         filename = "__".join((
             _filename_part(call_source),
-            _filename_part(_call_stage_label(component, stage, criterion_id)),
+            _filename_part(stage or _call_stage_label(component, stage, criterion_id)),
             _file_timestamp(instant),
             self.call_id,
         ))
@@ -104,6 +131,7 @@ class CallRecord:
             "call_id": self.call_id, "operation_id": operation_id,
             "criterion_id": criterion_id, "source": call_source,
             "component": component, "stage": stage,
+            "reason": logical.payload["reason"] if logical else None,
             "model": model, "status": "pending",
             "started_at": instant.astimezone().isoformat(timespec="milliseconds"),
             "request": request, "response": None, "error": None,
@@ -192,7 +220,8 @@ async def request_model_async(resource, **kwargs):
 
 
 class LogicalCall:
-    def __init__(self, component: str, model: str, directory: Path | None, source: str | None):
+    def __init__(self, component: str, model: str, directory: Path | None, source: str | None,
+                 stage: str | None = None, reason: str | None = None):
         context = _CONTEXT.get() or {}
         directory = directory or context.get("directory")
         self.logical_call_id = uuid.uuid4().hex
@@ -204,11 +233,15 @@ class LogicalCall:
             phase = "retrieval"
         category = "agent" if component == "agent" else f"docxindex.{phase}.{component.rsplit('.', 1)[-1]}"
         criterion_id = context.get("criterion_id")
-        call_source = source or (f"docxindex_{criterion_id}" if criterion_id else "Index" if phase == "indexing" else "docxindex")
-        self.path = directory.parent / "logical_calls" / f"{_filename_part(call_source)}__{self.logical_call_id}.json" if directory and LOGGING_ENABLED else None
+        call_source = source or (f"docxindex_{criterion_id}" if criterion_id else f"docxindex_indexing_{component.rsplit('.', 1)[-1]}" if phase == "indexing" else "docxindex")
+        stage = stage or context.get("stage") or "model"
+        reason = reason if reason is not None else context.get("reason")
+        filename = "__".join((_filename_part(call_source), _filename_part(stage), self.logical_call_id))
+        self.path = directory.parent / "logical_calls" / f"{filename}.json" if directory and LOGGING_ENABLED else None
         self.payload = {
             "logical_call_id": self.logical_call_id, "category": category,
-            "source": call_source, "model": model, "started_at": _now(),
+            "source": call_source, "stage": stage, "reason": str(reason)[:200] if reason else None,
+            "model": model, "started_at": _now(),
             "finished_at": None, "status": "pending", "retry_count": 0,
             **self.tokens, "error": None,
         }
@@ -216,6 +249,24 @@ class LogicalCall:
 
     def _write(self) -> None:
         _atomic_write(self.path, self.payload)
+
+    def reject_response(self, exc: BaseException, *, reason: str = "JSON/schema 校验未通过") -> None:
+        if self.last_record:
+            self.last_record.failed(exc, stage="output_validation")
+        original = self.payload["reason"]
+        reason = f"{reason}：{exc}"
+        self.payload["reason"] = f"{original}; {reason}"[:200] if original else reason[:200]
+        self._write()
+
+    def finish(self, exc: BaseException | None = None) -> None:
+        if exc is not None:
+            if self.last_record and self.last_record.payload["status"] == "succeeded":
+                self.last_record.failed(exc, stage="output_validation")
+            self.failed(exc)
+        elif self.payload["status"] != "failed":
+            self.payload.update(status="succeeded", **self.tokens)
+        self.payload["finished_at"] = _now()
+        self._write()
 
     def failed(self, exc: BaseException) -> None:
         http_status = _error_http_status(exc)
@@ -230,13 +281,15 @@ class LogicalCall:
 
 @contextmanager
 def logical_call(component: str, model: str, *, directory: Path | None = None,
-                 source: str | None = None):
+                 source: str | None = None, stage: str | None = None,
+                 reason: str | None = None, record: LogicalCall | None = None,
+                 finalize: bool = True):
     """Nested transport/schema retries belong to the same logical request."""
     current = _LOGICAL.get()
     if current is not None:
         yield current
         return
-    record = LogicalCall(component, model, directory, source)
+    record = record or LogicalCall(component, model, directory, source, stage, reason)
     token = _LOGICAL.set(record)
     try:
         yield record
@@ -245,13 +298,10 @@ def logical_call(component: str, model: str, *, directory: Path | None = None,
             record.last_record.failed(exc, stage="output_validation")
         record.failed(exc)
         raise
-    else:
-        if record.payload["status"] != "failed":
-            record.payload.update(status="succeeded", **record.tokens)
     finally:
         _LOGICAL.reset(token)
-        record.payload["finished_at"] = _now()
-        record._write()
+        if finalize or record.payload["status"] == "failed":
+            record.finish()
 
 
 def _atomic_write(path: Path | None, payload: dict[str, Any]) -> None:
@@ -280,7 +330,7 @@ def _file_timestamp(instant: datetime) -> str:
 
 
 def _filename_part(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9-]+", "-", str(value)).strip("-")[:64] or "Task"
+    return re.sub(r"[^A-Za-z0-9_-]+", "-", str(value)).strip("-")[:64] or "Task"
 
 
 def _call_stage_label(component: str, stage: str | None, criterion_id: str | None) -> str:

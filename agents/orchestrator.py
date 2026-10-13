@@ -19,7 +19,7 @@ from config import (
     SUBAGENT_ALLOWED_TOOLS,
 )
 from agents.base_agent import Agent
-from agents.json_utils import AgentOutputValidationError, chat_until_valid_json
+from agents.json_utils import AgentOutputValidationError, agent_call_purpose, chat_until_valid_json
 from agents.reflector import ReflectorAgent
 from agents.prompts.cn_prompts import SUB_AGENT_BASE_PROMPT
 from agents.schemas import SubAgentOutput
@@ -845,15 +845,17 @@ class OrchestratorAgent:
                 )
 
             previous_opinion = parsed_opinion
-            parsed_opinion, raw_output = await self._revise_subagent_output(
-                sub_agent,
-                "输出未通过结构与锚点校验：\n- "
-                + "\n- ".join(grouped_errors)
-                + "\n请返回完整修正后的 JSON。保留原有正确问题；"
-                "无法唯一定位的锚点应重新选择直接包含缺陷的最小连续原文；"
-                "一个 issue 最多只能有一个 edit，多个批注位置必须拆成多个 issue。",
-                previous_opinion,
-            )
+            stage = f"{getattr(sub_agent, 'call_stage', 'review-initial')}-output-repair{revision + 1}"
+            with agent_call_purpose(sub_agent, stage, "; ".join(grouped_errors)):
+                parsed_opinion, raw_output = await self._revise_subagent_output(
+                    sub_agent,
+                    "输出未通过结构与锚点校验：\n- "
+                    + "\n- ".join(grouped_errors)
+                    + "\n请返回完整修正后的 JSON。保留原有正确问题；"
+                    "无法唯一定位的锚点应重新选择直接包含缺陷的最小连续原文；"
+                    "一个 issue 最多只能有一个 edit，多个批注位置必须拆成多个 issue。",
+                    previous_opinion,
+                )
 
         raise AssertionError("unreachable output validation state")
 
@@ -1014,11 +1016,13 @@ class OrchestratorAgent:
         sub_agent = Agent(
             system_prompt=SUB_AGENT_BASE_PROMPT,
             name=f"SubAgent_{cid}",
+            criterion_id=cid,
             mcp_client=self.mcp_client,
             tools=tools,
             settings=self.settings,
         )
 
+        sub_agent.call_stage = "review-initial"
         task_prompt = (
             f"审查标准：{criterion_text}\n"
             f"检查要点：\n{check_points_text}\n\n"
@@ -1129,7 +1133,8 @@ class OrchestratorAgent:
                 missing_text_review_notes = "强制路由已提供当前标准的完整检索证据，不再重复执行缺失文本补充检索。"
             else:
                 missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion, cid)
-            reflector = ReflectorAgent(settings=self.settings)
+            reflector = ReflectorAgent(criterion_id=cid, settings=self.settings)
+            reflector.call_stage = f"reflection-round{round_num + 1}"
             reflector_input = self._build_reflector_input(
                 criterion_text,
                 check_points,
@@ -1179,22 +1184,23 @@ class OrchestratorAgent:
                 print(f"[Orchestrator] {cid}: REJECT round {round_num+1}, refining...")
                 previous_opinion = parsed_opinion
                 try:
-                    parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
-                        sub_agent,
-                        f"请根据以下质量审查反馈，补充和完善你的审查结果：\n\n{review.get('feedback', '')}",
-                        previous_opinion,
-                    )
-                    parsed_opinion, sub_agent_opinion, review_context, anchor_validation = (
-                        await self._validate_and_revise_output(
+                    with agent_call_purpose(sub_agent, f"review-reflection-revision{round_num + 1}", review.get("feedback")):
+                        parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                             sub_agent,
-                            parsed_opinion,
-                            sub_agent_opinion,
-                            criterion,
-                            context,
-                            coverage_audit=coverage_audit,
-                            anchor_validation=anchor_validation,
+                            f"请根据以下质量审查反馈，补充和完善你的审查结果：\n\n{review.get('feedback', '')}",
+                            previous_opinion,
                         )
-                    )
+                        parsed_opinion, sub_agent_opinion, review_context, anchor_validation = (
+                            await self._validate_and_revise_output(
+                                sub_agent,
+                                parsed_opinion,
+                                sub_agent_opinion,
+                                criterion,
+                                context,
+                                coverage_audit=coverage_audit,
+                                anchor_validation=anchor_validation,
+                            )
+                        )
                     ledger.observe(parsed_opinion)
                 except (AgentOutputValidationError, ModelCallError) as exc:
                     print(

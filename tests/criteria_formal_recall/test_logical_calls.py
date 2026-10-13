@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -18,9 +19,11 @@ from pydantic import BaseModel
 
 import config
 from agents.base_agent import Agent, Settings
+from agents.json_utils import AgentOutputValidationError, agent_call_purpose, chat_until_valid_json
+from agents.reflector import ReflectorAgent
 from endpoints.review import task_store
 from endpoints.review.review_state import ReviewStateStore
-from loggers.call_log import logical_call, map_with_context, new_call, reset_call_context, set_call_context
+from loggers.call_log import call_stage, logical_call, map_with_context, new_call, reset_call_context, set_call_context
 from loggers.trace_logger import NOOP_TRACE
 from routing.config import RouteConfig
 from tools.docxindex.indexing.config import IndexingConfig
@@ -28,6 +31,7 @@ from tools.docxindex.indexing.token_budget import estimate_tokens
 from tools.docxindex.llm.client import LLMClient, LLMClientError, LLMResponseValidationError, LLMSettings
 from tools.docxindex.llm.schemas import RerankResponse
 from tools.docxindex.retrieval.config import RetrievalConfig
+from tools.docxindex.retrieval.llm_query import llm_query
 from tools.docxindex.retrieval.rerank import _candidate_batches, _rerank_prompt, rerank_matches
 from tools.docxindex.retrieval.scan import scan_matches
 from tools.docxindex.retriever import DocxIndexRetriever
@@ -98,7 +102,7 @@ class LogicalCallTests(unittest.TestCase):
                 self.assertEqual(record["source"], "docxindex_C1")
                 self.assertEqual(record["category"], "docxindex.retrieval.llm")
                 self.assertIsNone(record["error"])
-                self.assertEqual(set(record), {"logical_call_id", "category", "source", "model", "started_at", "finished_at", "status", "retry_count", "input_tokens", "output_tokens", "input_output_tokens", "error"})
+                self.assertEqual(set(record), {"logical_call_id", "category", "source", "stage", "reason", "model", "started_at", "finished_at", "status", "retry_count", "input_tokens", "output_tokens", "input_output_tokens", "error"})
                 attempts = sorted(self.records("calls"), key=lambda r: r["attempt"])
                 if detailed:
                     self.assertEqual([r["attempt"] for r in attempts], [1, 2, 3])
@@ -184,6 +188,42 @@ class LogicalCallTests(unittest.TestCase):
         record, = self.records()
         self.assertEqual((record["status"], record["retry_count"], record["input_output_tokens"]), ("succeeded", 1, 22))
 
+    def test_one_scan_step_records_each_batch_and_preserves_thread_context(self):
+        client = self.client(lambda request: httpx.Response(200, json=chat_response('{"findings":[]}')))
+        index = {"nodes": [{"node_id": "body/a"}], "anchor_map": {
+            f"p_{number}": {"node_id": "body/a", "text": "contract paragraph " * 3, "body_child_index": number}
+            for number in range(1, 4)}}
+        token = set_call_context(self.logs / "events.log", criterion_id="H03", stage="route.2.scan")
+        try:
+            scan_matches(index, "query", client, batch_tokens=1, concurrency=3)
+        finally:
+            reset_call_context(token)
+        records = self.records()
+        self.assertEqual({r["stage"] for r in records}, {f"scan-step2-batch{i}" for i in range(1, 4)})
+        self.assertEqual({r["source"] for r in records}, {"docxindex_H03"})
+        self.assertEqual({r["retry_count"] for r in records}, {0})
+
+    def test_structure_parts_are_distinguishable_in_logical_calls(self):
+        client = self.client(lambda request: httpx.Response(200, json=chat_response('{"nodes":[]}')))
+        index = {"nodes": [], "structure_tree": [
+            {"node_id": f"body/{i}", "title": f"section {i}", "summary": "summary", "children": []}
+            for i in range(2)]}
+        llm_query(index, ["query"], client, None, input_tokens=1)
+        self.assertEqual({r["stage"] for r in self.records()}, {"structure-step1-part1", "structure-step1-part2"})
+
+    def test_index_call_names_distinguish_model_purpose(self):
+        token = set_call_context(self.logs / "events.log", stage="indexing")
+        try:
+            for kind in ("llm", "embedding"):
+                with call_stage(f"index-{kind}-batch1"), logical_call(f"docxindex.{kind}", "fake"):
+                    record = new_call(component=f"docxindex.{kind}", model="fake", request={})
+                    record.sent()
+                    record.succeeded({"usage": {"prompt_tokens": 2, "completion_tokens": 1}})
+        finally:
+            reset_call_context(token)
+        self.assertEqual({r["source"] for r in self.records()}, {"docxindex_indexing_llm", "docxindex_indexing_embedding"})
+        self.assertTrue(all(p.name.startswith("docxindex_indexing_") for p in (self.logs / "logical_calls").glob("*.json")))
+
     def test_embedding_records_input_only(self):
         sdk = OpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
                      http_client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={
@@ -254,7 +294,7 @@ class MinimalLoggingTests(unittest.TestCase):
             store.save_criterion_input({"id": "C1"}, attempt=1, max_attempts=2)
             store.save_criterion_error({"id": "C1"}, TimeoutError(), attempt=1, max_attempts=2)
             store.save_criterion_output({"criterion_id": "C1", "tokens": 42, "issues": []}, attempt=1)
-            self.assertEqual(store.load_criterion_output("C1")["tokens"], 42)
+            self.assertNotIn("tokens", store.load_criterion_output("C1"))
             self.assertIsNotNone(store.load_plan())
             self.assertFalse(store.criterion_input_path("C1").exists())
             self.assertFalse(store.criterion_error_path("C1").exists())
@@ -370,6 +410,134 @@ class GlobalRankingTests(unittest.TestCase):
 
 
 class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
+    @asynccontextmanager
+    async def harness(self, responses, *, detailed=False, criterion_id="H03", mcp_client=None):
+        @asynccontextmanager
+        async def semaphore(**kwargs):
+            yield SimpleNamespace(enabled=False)
+
+        sequence = iter(responses)
+        async def handler(request):
+            await asyncio.sleep(0)
+            return httpx.Response(200, json=next(sequence))
+
+        sdk = AsyncOpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
+                          http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+        with tempfile.TemporaryDirectory() as tmp, patch("agents.base_agent.AsyncOpenAI", return_value=sdk), patch("agents.base_agent.llm_global_semaphore", semaphore), patch("loggers.call_log.LOGGING_DETAILED", detailed):
+            logs = Path(tmp) / "logs"
+            token = set_call_context(logs / "events.log", stage="agent")
+            agent = Agent(name=f"SubAgent_{criterion_id}", criterion_id=criterion_id,
+                          settings=Settings(api_key="fake", model="fake"), mcp_client=mcp_client)
+            agent.call_stage = "review-initial"
+            try:
+                yield agent, logs
+            finally:
+                reset_call_context(token)
+                await sdk.close()
+
+    def read_records(self, logs, directory="logical_calls"):
+        return [json.loads(p.read_text(encoding="utf-8")) for p in (logs / directory).glob("*.json")]
+
+    async def test_agent_schema_repairs_keep_one_call_and_only_final_usage_in_both_modes(self):
+        for detailed in (False, True):
+            responses = [chat_response("not JSON", {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}),
+                         chat_response(usage={"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9})]
+            with self.subTest(detailed=detailed):
+                async with self.harness(responses, detailed=detailed) as (agent, logs):
+                    result, _ = await chat_until_valid_json(agent, "review", Answer, '{"answer":"ok"}')
+                    self.assertEqual(result, {"answer": "ok"})
+                    records = self.read_records(logs)
+                    self.assertEqual(len(records), 1)
+                    record = records[0]
+                    self.assertEqual((record["source"], record["stage"], record["retry_count"], record["input_output_tokens"]),
+                                     ("SubAgent_H03", "review-initial", 1, 9))
+                    self.assertIn("JSON/schema", record["reason"])
+                    self.assertLessEqual(len(record["reason"]), 200)
+                    self.assertIsNone(record["error"])
+                    self.assertTrue(next((logs / "logical_calls").glob("*.json")).name.startswith("SubAgent_H03__review-initial__"))
+                    attempts = sorted(self.read_records(logs, "calls"), key=lambda x: x["attempt"])
+                    if detailed:
+                        self.assertEqual([r["is_retry"] for r in attempts], [False, True])
+                        self.assertEqual(attempts[0]["error"]["http_status"], 200)
+                        self.assertIsNone(attempts[0]["input_tokens"])
+                        self.assertEqual({r["logical_call_id"] for r in attempts}, {record["logical_call_id"]})
+                        self.assertEqual({r["criterion_id"] for r in attempts}, {"H03"})
+                    else:
+                        self.assertFalse((logs / "calls").exists())
+
+    async def test_exhausted_schema_repairs_have_null_usage_and_preserve_http_status(self):
+        responses = [chat_response("invalid", {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9})] * 2
+        async with self.harness(responses) as (agent, logs):
+            with self.assertRaises(AgentOutputValidationError) as caught:
+                await chat_until_valid_json(agent, "review", Answer, '{}', max_attempts=2)
+            record, = self.read_records(logs)
+            self.assertEqual((record["status"], record["retry_count"], record["error"]["http_status"]), ("failed", 1, 200))
+            self.assertIsNone(record["input_output_tokens"])
+            self.assertEqual(caught.exception.call_id, record["logical_call_id"])
+            self.assertTrue(Path(caught.exception.call_path).is_file())
+
+    async def test_content_revision_remains_a_separate_call_with_reason(self):
+        async with self.harness([chat_response(), chat_response()]) as (agent, logs):
+            await chat_until_valid_json(agent, "initial", Answer, '{}')
+            with agent_call_purpose(agent, "review-initial-output-repair1", "覆盖校验：遗漏原文 p1"):
+                await chat_until_valid_json(agent, "repair", Answer, '{}')
+            records = self.read_records(logs)
+            self.assertEqual(len(records), 2)
+            self.assertEqual({r["retry_count"] for r in records}, {0})
+            repair = next(r for r in records if r["stage"].endswith("output-repair1"))
+            self.assertEqual(repair["reason"], "覆盖校验：遗漏原文 p1")
+
+    async def test_tool_and_followup_requests_do_not_share_schema_group(self):
+        tool_response = chat_response(None, {"prompt_tokens": 5, "completion_tokens": 1, "total_tokens": 6})
+        tool_response["choices"][0]["message"]["tool_calls"] = [{"id": "tool1", "type": "function", "function": {"name": "contract_search", "arguments": '{"query":"test","criterion_id":"wrong"}'}}]
+        tool_response["choices"][0]["finish_reason"] = "tool_calls"
+        async def tool_message(tool):
+            args = json.loads(tool.function.arguments)
+            self.assertEqual(args["criterion_id"], "H03")
+            self.assertIn("events.log", args["api_events_path"])
+            token = set_call_context(args["api_events_path"], criterion_id=args["criterion_id"], stage="route.1.region")
+            try:
+                with logical_call("docxindex.llm", "fake"):
+                    request = new_call(component="docxindex.llm", model="fake", request={})
+                    request.sent()
+                    request.succeeded({"usage": {"prompt_tokens": 2, "completion_tokens": 1}})
+            finally:
+                reset_call_context(token)
+            return {"content": "contract evidence"}
+        mcp = SimpleNamespace(tools=[{"type": "function", "function": {"name": "contract_search", "parameters": {"type": "object", "properties": {}}}}], tool_message_from_call=tool_message)
+        responses = [tool_response, chat_response("invalid"), chat_response(usage={"prompt_tokens": 9, "completion_tokens": 2, "total_tokens": 11})]
+        async with self.harness(responses, mcp_client=mcp) as (agent, logs):
+            result, _ = await chat_until_valid_json(agent, "initial", Answer, '{}')
+            self.assertEqual(result, {"answer": "ok"})
+            records = self.read_records(logs)
+            self.assertEqual(len(records), 3)
+            self.assertEqual(len({r["logical_call_id"] for r in records}), 3)
+            followup = next(r for r in records if r["stage"].endswith("tool-result1"))
+            self.assertEqual((followup["retry_count"], followup["input_output_tokens"]), (1, 11))
+            self.assertEqual({r["category"] for r in records}, {"agent", "docxindex.retrieval.llm"})
+
+    async def test_concurrent_reflectors_keep_criterion_and_round_separate(self):
+        responses = [chat_response('{"status":"PASS","feedback":"","finding_decisions":[],"coverage_gaps":[]}')] * 2
+        async with self.harness(responses, detailed=True) as (agent, logs):
+            with patch("agents.base_agent.AsyncOpenAI", return_value=agent.client):
+                reflectors = [ReflectorAgent(criterion_id=cid, settings=agent.settings) for cid in ("H01", "H02")]
+            for reflector in reflectors:
+                reflector.call_stage = "reflection-round2"
+            await asyncio.gather(*(reflector.review("evidence") for reflector in reflectors))
+            records = self.read_records(logs)
+            self.assertEqual({r["source"] for r in records}, {"Reflector_H01", "Reflector_H02"})
+            self.assertEqual({r["stage"] for r in records}, {"reflection-round2"})
+            self.assertEqual({r["criterion_id"] for r in self.read_records(logs, "calls")}, {"H01", "H02"})
+
+    async def test_successful_final_schema_fallback_keeps_usage(self):
+        class StrictAnswer(BaseModel):
+            answer: str
+            extra: str
+        async with self.harness([chat_response(usage={"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9})]) as (agent, logs):
+            await chat_until_valid_json(agent, "review", StrictAnswer, '{}', max_attempts=1, final_attempt_schema=Answer)
+            record, = self.read_records(logs)
+            self.assertEqual((record["status"], record["input_output_tokens"]), ("succeeded", 9))
+
     async def test_sdk_retries_are_observable_and_keep_role_source(self):
         @asynccontextmanager
         async def semaphore(**kwargs):
