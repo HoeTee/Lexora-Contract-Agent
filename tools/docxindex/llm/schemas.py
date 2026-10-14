@@ -29,20 +29,6 @@ class SummaryBatchResponse(BaseModel):
     summaries: list[SummaryBatchItem] = Field(default_factory=list)
 
 
-class ExpandSubsection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    anchor: str = Field(min_length=1)
-    title: str = Field(min_length=1)
-    level_hint: int | None = Field(default=None, ge=1, le=6)
-
-
-class ExpandResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    subsections: list[ExpandSubsection] = Field(default_factory=list)
-
-
 class AttachmentHeading(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

@@ -205,10 +205,6 @@ def infer_rerank_provider(model_name: str) -> str:
 
 
 MCP_SERVER_TARGET = "module:mcp_service.server.server"
-MCP_SERVER_URL = "http://localhost:8000/mcp"
-DOCS_DIR = str(PROJECT_ROOT_PATH / "docs")
-REPORTS_DIR = str(PROJECT_ROOT_PATH / "reports")
-LOGS_DIR = str(PROJECT_ROOT_PATH / "logs" / "workflow")
 
 API_REQUIRE_REQUEST_MODEL_CONFIG = _parse_bool(
     cfg_optional("api", "require_request_model_config", False),
@@ -316,13 +312,6 @@ MODEL_SEMAPHORE_CONFIGS = {
     "embedding": _model_semaphore_config("embedding", default_max=5),
     "reranker": _model_semaphore_config("reranker", default_max=5),
 }
-LLM_GLOBAL_SEMAPHORE_ENABLED = MODEL_SEMAPHORE_CONFIGS["llm"]["enabled"]
-LLM_GLOBAL_SEMAPHORE_REDIS_URL = MODEL_SEMAPHORE_CONFIGS["llm"]["redis_url"]
-LLM_GLOBAL_SEMAPHORE_KEY = MODEL_SEMAPHORE_CONFIGS["llm"]["key"]
-LLM_GLOBAL_SEMAPHORE_MAX_REQUESTS = MODEL_SEMAPHORE_CONFIGS["llm"]["max_concurrent_requests"]
-LLM_GLOBAL_SEMAPHORE_WAIT_TIMEOUT_SECONDS = MODEL_SEMAPHORE_CONFIGS["llm"]["wait_timeout_seconds"]
-LLM_GLOBAL_SEMAPHORE_LEASE_SECONDS = MODEL_SEMAPHORE_CONFIGS["llm"]["lease_seconds"]
-LLM_GLOBAL_SEMAPHORE_POLL_INTERVAL_SECONDS = MODEL_SEMAPHORE_CONFIGS["llm"]["poll_interval_seconds"]
 
 EMBED_BASE_URL = _as_str(cfg("embedding", "base_url"), "embedding.base_url")
 EMBED_NAME = (

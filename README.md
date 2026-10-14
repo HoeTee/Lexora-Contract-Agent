@@ -77,6 +77,8 @@ docker exec -it lexora bash
 
 模型密钥放在 `.env`；模型、workflow、API、检索、队列和日志配置放在 `config.yaml`。配置加载入口是 `config.py`。
 
+合同检索保留 DocxIndex 和 LlamaIndex 两种临时索引后端，通过 `retrieval.backend` 选择。
+
 运行数据固定按入口分区：
 
 ```text
@@ -117,6 +119,19 @@ docker exec -it lexora bash
 ## Docker
 
 生产镜像通过 `/app/host` 加载加密代码包，不包含项目 `.py` 或明文项目 `.pyc`。构建机默认从仓库根目录下、被 Git 和主构建上下文忽略的 `vmp-tools/` 读取 VMP 工具；镜像 TAR、远端 Compose 和运行容器均不需要 VMP。构建、部署、挂载和管理命令见 [部署说明](docs/DEPLOYMENT.md)，保护实现与验证边界见 [源码保护方案](docs/SOURCE_PROTECTION.md)。
+
+构建所需的 Python wheel 和 Debian 软件包保存在 `packages/`，Dockerfile 使用这些本地包离线安装依赖。
+
+## 开发验证
+
+现有离线单元测试覆盖路由、检索、日志、审查质量，以及临时合同检索和 Web 历史、认证功能。执行：
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests/criteria_formal_recall -p "test_*.py" -q
+.\.venv\Scripts\python.exe -m unittest discover -s tests/docxindex_ablation -p "test_*.py" -q
+```
+
+真实模型审查和召回评测的运行要求见 [正式召回测试](tests/criteria_formal_recall/README.md) 与 [执行级消融试验](tests/docxindex_ablation/README.md)。
 
 ## 文档导航
 

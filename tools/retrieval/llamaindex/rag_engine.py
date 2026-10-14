@@ -1,18 +1,9 @@
-"""
-LlamaIndex RAG engine.
-
-Supports two uses:
-- temporary in-memory contract indexes for one workflow run
-- persistent institutional-document indexes with incremental updates
-"""
-import os
+"""LlamaIndex retrieval over temporary in-memory contract indexes."""
 
 from llama_index.core import (
     Document,
     Settings,
-    StorageContext,
     VectorStoreIndex,
-    load_index_from_storage,
 )
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.query_engine import RetrieverQueryEngine
@@ -21,8 +12,6 @@ from llama_index.llms.openai_like import OpenAILike
 
 from tools.retrieval.llamaindex.limited_embedding import SemaphoreOpenAILikeEmbedding
 from tools.retrieval.llamaindex.qwen_reranker import QwenRerankPostprocessor
-from transformers import AutoTokenizer
-from pathlib import Path
 from config import (
     MODEL_CALL_MAX_RETRIES,
     MODEL_CALL_TIMEOUT_SECONDS,
@@ -33,12 +22,11 @@ from tools.document.docx_anchor_index import build_docx_anchor_nodes
 
 
 class LlamaIndexRAG:
-    """Vector index engine for temporary contract RAG and persistent institutional RAG."""
+    """Vector index engine for temporary contract retrieval."""
 
     def __init__(
         self,
         *,
-        persist_dir: str,
         llm_api_key: str,
         llm_base_url: str,
         llm_name: str,
@@ -55,7 +43,6 @@ class LlamaIndexRAG:
         chunk_size: int = 512,
         chunk_overlap: int = 100,
     ) -> None:
-        self.persist_dir = persist_dir
         self.embed_name = embed_name
         self.similarity_top_k = similarity_top_k
         self.chunk_size = chunk_size
@@ -141,94 +128,10 @@ class LlamaIndexRAG:
         self._index = VectorStoreIndex(nodes)
         return len(nodes)
 
-    def load_or_create_index(self) -> None:
-        if self._has_persisted_index():
-            self.load_index()
-            return
-        os.makedirs(self.persist_dir, exist_ok=True)
-        self._index = None
-
-    def _has_persisted_index(self) -> bool:
-        required_files = (
-            "docstore.json",
-            "index_store.json",
-            "default__vector_store.json",
-        )
-        return all(
-            os.path.exists(os.path.join(self.persist_dir, filename))
-            for filename in required_files
-        )
-
-    def load_index(self) -> None:
-        storage_context = StorageContext.from_defaults(persist_dir=self.persist_dir)
-        self._index = load_index_from_storage(storage_context)
-
-    def build_nodes_for_text(
-        self,
-        *,
-        content: str,
-        relative_path: str,
-        doc_id: str,
-        source_hash: str,
-        parser: str,
-    ):
-        document = Document(
-            text=content,
-            id_=doc_id,
-            metadata={
-                "source_file": relative_path,
-                "source_hash": source_hash,
-                "doc_id": doc_id,
-                "parser": parser,
-            },
-        )
-
-        tokenizer_path = Path(__file__).resolve().parents[3] / "local_tokenizers" / "Qwen3-Embedding-8B"
-        tokenizer = AutoTokenizer.from_pretrained(str(tokenizer_path), local_files_only=True)
-
-        splitter = SentenceSplitter(
-            chunk_size=self.chunk_size,
-            chunk_overlap=self.chunk_overlap,
-            paragraph_separator="\n\n",
-            tokenizer=lambda text: tokenizer.encode(text)
-        )
-
-        return splitter.get_nodes_from_documents([document])
-
-    def insert_text(
-        self,
-        *,
-        content: str,
-        relative_path: str,
-        doc_id: str,
-        source_hash: str,
-        parser: str,
-    ) -> int:
-        nodes = self.build_nodes_for_text(
-            content=content,
-            relative_path=relative_path,
-            doc_id=doc_id,
-            source_hash=source_hash,
-            parser=parser,
-        )
-        if self._index is None:
-            self._index = VectorStoreIndex(nodes)
-        else:
-            self._index.insert_nodes(nodes)
-        return len(nodes)
-
-    def delete_ref_doc(self, doc_id: str) -> None:
-        self._index.delete_ref_doc(doc_id, delete_from_docstore=True)
-
-    def persist(self) -> None:
-        os.makedirs(self.persist_dir, exist_ok=True)
-        if self._index is not None:
-            self._index.storage_context.persist(persist_dir=self.persist_dir)
-
     def search(self, query: str, result_title: str = "检索结果") -> str:
         """Search the loaded index. Returns text with source metadata."""
         if self._index is None:
-            self.load_index()
+            raise RuntimeError("Build a temporary contract index before searching.")
 
         retriever = self._index.as_retriever(similarity_top_k=self.similarity_top_k)
         postprocessors = [self.reranker] if self.reranker else []
@@ -257,4 +160,4 @@ class LlamaIndexRAG:
                 header += f"\n相关度：{score:.3f}"
             parts.append(f"{header}\n内容：\n{text}")
 
-        return "\n\n---\n\n".join(parts) if parts else "No relevant institutional sections found."
+        return "\n\n---\n\n".join(parts) if parts else "No relevant contract sections found."

@@ -91,10 +91,6 @@ def normalize_role(role: str | None) -> str:
     return value if value in VALID_ROLES else "user"
 
 
-def is_admin_user(user: dict[str, Any] | None) -> bool:
-    return bool(user and normalize_role(user.get("role")) == "admin")
-
-
 def verify_login(
     users_file: str | Path, 
     username: str, 
@@ -107,22 +103,3 @@ def verify_login(
         return None
     user["role"] = normalize_role(user.get("role"))
     return user
-
-
-def sync_session_user(users_file: str | Path, session: dict[str, Any]) -> dict[str, Any] | None:
-    username = session.get("username")
-    if not username:
-        return None
-
-    user = find_user(users_file, username)
-    if not user or not user.get("enabled", True):
-        session.clear()
-        return None
-
-    session["display_name"] = user.get("display_name") or username
-    session["role"] = normalize_role(user.get("role"))
-    return user
-
-
-def require_username(request) -> str | None:
-    return request.session.get("username")

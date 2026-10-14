@@ -83,7 +83,6 @@ build/
 !/tests/docxindex_ablation/
 /tests/docxindex_ablation/results/
 /scripts/docx_retrieval_eval/
-/scripts/docxindex/
 /scripts/api_review_callback_receiver.py
 /packages/*
 !/packages/debian/
@@ -93,7 +92,6 @@ build/
 !/packages/debian/trixie-amd64/README.md
 !/packages/debian/trixie-amd64/protect-builder/
 !/packages/debian/trixie-amd64/runtime/
-/pageindex/
 /deploy/
 
 # Local dependency archives
@@ -120,8 +118,6 @@ build/
 /DEPLOYMENT.md
 /PLAN.md
 /docs/.$BUSINESS_USER_JOURNEY.drawio.bkp
-/docs/portal/
-/docs/superpowers/
 /检索算法.txt
 
 # Local development tool configuration

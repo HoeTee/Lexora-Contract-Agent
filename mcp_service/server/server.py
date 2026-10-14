@@ -48,7 +48,6 @@ from config import (
 
 mcp = FastMCP("docs-server")
 index_retriever = IndexRetriever(
-    project_root=PROJECT_ROOT,
     llm_api_key=LLM_API_KEY,
     llm_base_url=LLM_BASE_URL,
     llm_name=LLM_NAME,

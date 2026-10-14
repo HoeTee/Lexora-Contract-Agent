@@ -58,9 +58,7 @@ build/
 # Development-only trees and files
 /tests/
 /scripts/docx_retrieval_eval/
-/scripts/docxindex/
 /scripts/api_review_callback_receiver.py
-/pageindex/
 /deploy/
 /docs/
 /AGENTS.md
