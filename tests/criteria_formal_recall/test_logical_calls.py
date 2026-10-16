@@ -22,6 +22,8 @@ from agents.json_utils import AgentOutputValidationError, agent_call_purpose, ch
 from agents.reflector import ReflectorAgent
 from endpoints.review import task_store
 from endpoints.review.review_state import ReviewStateStore
+from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout
+from endpoints.runtime.errors import ModelCallError
 from loggers.call_log import call_stage, logical_call, map_with_context, new_call, reset_call_context, set_call_context
 from loggers.trace_logger import NOOP_TRACE
 from routing.config import RouteConfig
@@ -50,6 +52,10 @@ def chat_response(content='{"answer":"ok"}', usage=None):
 
 class LogicalCallTests(unittest.TestCase):
     def setUp(self):
+        # These accounting fixtures exercise a declared two-send allowance.
+        budget = patch("loggers.call_log.ModelCallBudget", side_effect=lambda: ModelCallBudget(max_retries=1))
+        budget.start()
+        self.addCleanup(budget.stop)
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.logs = Path(self.temp.name) / "logs"
@@ -400,15 +406,18 @@ class GlobalRankingTests(unittest.TestCase):
 
 class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
     @asynccontextmanager
-    async def harness(self, responses, *, detailed=False, criterion_id="H03", mcp_client=None):
+    async def harness(self, responses, *, detailed=False, criterion_id="H03", mcp_client=None,
+                      timeout=None, response_delay=0):
         sequence = iter(responses)
         async def handler(request):
-            await asyncio.sleep(0)
+            await asyncio.sleep(response_delay)
             return httpx.Response(200, json=next(sequence))
 
         sdk = AsyncOpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
                           http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-        with tempfile.TemporaryDirectory() as tmp, patch("agents.base_agent.AsyncOpenAI", return_value=sdk), patch("endpoints.runtime.model_calls.model_semaphore", available_slot), patch("loggers.call_log.LOGGING_DETAILED", detailed):
+        def budget_factory():
+            return ModelCallBudget() if timeout is None else ModelCallBudget(timeout_seconds=timeout)
+        with tempfile.TemporaryDirectory() as tmp, patch("agents.base_agent.AsyncOpenAI", return_value=sdk), patch("endpoints.runtime.model_calls.model_semaphore", available_slot), patch("loggers.call_log.LOGGING_DETAILED", detailed), patch("loggers.call_log.ModelCallBudget", side_effect=budget_factory):
             logs = Path(tmp) / "logs"
             token = set_call_context(logs / "events.log", stage="agent")
             agent = Agent(name=f"SubAgent_{criterion_id}", criterion_id=criterion_id,
@@ -422,6 +431,37 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
 
     def read_records(self, logs, directory="logical_calls"):
         return [json.loads(p.read_text(encoding="utf-8")) for p in (logs / directory).glob("*.json")]
+
+    async def test_default_schema_allowance_succeeds_on_third_send(self):
+        async with self.harness([chat_response("invalid"), chat_response("{}"), chat_response()]) as (agent, logs):
+            result, _ = await chat_until_valid_json(agent, "review", Answer, '{}')
+            self.assertEqual(result, {"answer": "ok"})
+            record, = self.read_records(logs)
+            self.assertEqual(record["status"], "succeeded")
+            self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
+            self.assertEqual(record["retry_count"], 2)
+
+    async def test_default_schema_allowance_never_sends_a_fourth_request(self):
+        responses = [chat_response("invalid")] * 3 + [chat_response()]
+        async with self.harness(responses) as (agent, logs):
+            with self.assertRaisesRegex(AgentOutputValidationError, "after 3 attempts"):
+                await chat_until_valid_json(agent, "review", Answer, '{}')
+            record, = self.read_records(logs)
+            self.assertEqual(record["status"], "failed")
+            self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
+
+    async def test_third_schema_request_keeps_the_original_deadline(self):
+        # Each request fits 900 ms alone; three requests cannot fit the shared 900 ms.
+        async with self.harness([chat_response("invalid")] * 2 + [chat_response()],
+                                timeout=0.9, response_delay=0.32) as (agent, logs):
+            with self.assertRaises(ModelCallError) as caught:
+                await chat_until_valid_json(agent, "review", Answer, '{}')
+            self.assertIsInstance(caught.exception.__cause__, ModelCallTimeout)
+            record, = self.read_records(logs)
+            self.assertEqual(record["status"], "failed")
+            self.assertEqual(record["attempts"][-1]["failure_stage"], "request")
+            self.assertEqual(len(record["attempts"]), 3)
+            self.assertLess(record["attempts"][-1]["remaining_seconds"], 0.32)
 
     async def test_agent_schema_repairs_keep_one_call_and_only_final_usage_in_both_modes(self):
         for detailed in (False, True):

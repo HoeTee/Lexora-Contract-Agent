@@ -115,7 +115,7 @@ class SummaryOutput:
 - `asyncio.gather` 负责并发调度：多条 criterion 可以同时进入等待队列，并在外部模型调用、检索或反思等待期间交错推进。
 - `asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)` 负责并发限制：同一时间最多允许指定数量的 criterion 进入 `execute_single_criterion()`；其余 coroutine 会等待 semaphore 释放。
 - 因此，当前并发边界是“多条 criterion / 多个 SubAgent 审查任务并发”，不是单个 SubAgent 内部把同一条标准拆成多个并发步骤。
-- 单条 criterion 不自动整条重跑。模型请求和输出修复共用 `workflow.model_call_timeout_seconds` 与 `model_call_max_retries`；额度耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 降级为该条 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
+- 模型请求和输出修复共用 `workflow.model_call_timeout_seconds` 与 `model_call_max_retries`，当前默认每次操作 60 秒、最多发送 3 次。额度耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 交给要点恢复流程；`workflow.criterion_retry_max_attempts` 默认 2，包含首次，最多重新执行该失败要点一次。整要点尝试耗尽后该条记为 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
 - 未知程序异常保持任务级失败；全部 criterion 都失败时也不生成伪成功结果。部分 criterion 失败时任务为 `succeeded`，同时以 `criteria[].execution_status=error`、`quality.error_criteria` 和 DOCX“未完成审查项”披露缺口。
 
 简化结构如下：
@@ -189,7 +189,7 @@ state/
     <criterion_id>.error.json
 ```
 
-成功的 criterion 输出保留为恢复数据；失败 criterion 不自动整条重跑，`workflow.criterion_retry_max_attempts` 已移除。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败，也不提供硬超时后的自动整合同重投。
+成功的 criterion 输出保留为恢复数据，版本兼容时直接复用。失败 criterion 按 `workflow.criterion_retry_max_attempts` 执行，默认 2 包含首次，即最多整条重跑一次；重跑的模型操作建立新预算，仍受原合同截止时间和同一全局并发上限约束。详细模式下，`error.json` 保留失败尝试，`output.json` 的 `attempt` 记录成功属于哪次执行。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败，也不提供硬超时后的自动整合同重投。
 
 ## 全局模型并发
 

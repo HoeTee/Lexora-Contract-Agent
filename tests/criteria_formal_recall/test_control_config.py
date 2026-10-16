@@ -1,5 +1,8 @@
 """Configuration migration failures must be explicit before serving work."""
 from copy import deepcopy
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
+import runpy
 import unittest
 from unittest.mock import patch
 
@@ -9,7 +12,6 @@ import config
 class ControlConfigurationTests(unittest.TestCase):
     def test_removed_fields_are_rejected_with_a_migration_message(self):
         for section, field in (("workflow", "max_api_concurrent_reviews"),
-                               ("workflow", "criterion_retry_max_attempts"),
                                ("queue", "enabled"), ("queue", "task_soft_time_limit_seconds"),
                                ("embedding", "timeout_seconds"), ("rerank", "max_retries")):
             with self.subTest(field=f"{section}.{field}"):
@@ -17,6 +19,25 @@ class ControlConfigurationTests(unittest.TestCase):
                 raw[section][field] = 1
                 with patch.object(config, "CONFIG", raw), self.assertRaisesRegex(RuntimeError, "Removed configuration"):
                     config._validate_control_config()
+
+    def test_criterion_attempts_are_configurable_and_default_to_two(self):
+        for value in (None, 2, 3):
+            raw = deepcopy(config.CONFIG)
+            if value is None:
+                raw["workflow"].pop("criterion_retry_max_attempts", None)
+            else:
+                raw["workflow"]["criterion_retry_max_attempts"] = value
+            with self.subTest(value=value), patch("yaml.safe_load", return_value=raw), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                loaded = runpy.run_path(config.__file__)
+                self.assertEqual(loaded["CRITERION_RETRY_MAX_ATTEMPTS"], value or 2)
+
+    def test_criterion_attempts_must_be_a_positive_integer(self):
+        for value in (0, -1, 1.5, True):
+            raw = deepcopy(config.CONFIG)
+            raw["workflow"]["criterion_retry_max_attempts"] = value
+            with self.subTest(value=value), patch("yaml.safe_load", return_value=raw), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                with self.assertRaisesRegex(RuntimeError, "workflow.criterion_retry_max_attempts"):
+                    runpy.run_path(config.__file__)
 
     def test_legacy_shared_semaphore_and_retrieval_limits_are_not_silently_accepted(self):
         raw = deepcopy(config.CONFIG)

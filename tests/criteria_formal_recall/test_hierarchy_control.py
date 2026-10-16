@@ -51,7 +51,7 @@ class HierarchyFallbackTests(TestCase):
                                             split_threshold_tokens=30, chunk_target_tokens=20)
                 finally:
                     reset_call_context(token)
-                self.assertEqual(len(sends), 2)
+                self.assertEqual(len(sends), 3)
                 self.assertIn("JSON 必须符合以下 schema", sends[1]["messages"][0]["content"])
                 self.assertTrue(root.children)
                 self.assertEqual({child.node_type for child in root.children}, {"chunk"})
@@ -59,8 +59,8 @@ class HierarchyFallbackTests(TestCase):
                 records = list((Path(directory) / "logs" / "logical_calls").glob("*.json"))
                 self.assertEqual(len(records), 1)
                 record = json.loads(records[0].read_text(encoding="utf-8"))
-                self.assertEqual((record["status"], record["retry_count"]), ("failed", 1))
-                self.assertEqual(len(record["attempts"]), 2)
+                self.assertEqual((record["status"], record["retry_count"]), ("failed", 2))
+                self.assertEqual(len(record["attempts"]), 3)
                 self.assertEqual({attempt["failure_stage"] for attempt in record["attempts"]}, {"output_validation"})
                 self.assertFalse((Path(directory) / "cache" / "llm_hierarchy.jsonl").exists())
 

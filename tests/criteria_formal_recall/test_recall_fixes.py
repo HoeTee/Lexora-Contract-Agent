@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import xml.etree.ElementTree as ET
 import zipfile
 
@@ -29,6 +29,7 @@ from agents.summarizer import (
     conservative_message_token_upper_bound,
     normalize_summary_output,
 )
+from endpoints.review.review_state import ReviewStateStore
 from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
@@ -1152,7 +1153,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 1)
+            self.assertEqual(max_attempts, 2)
             if criterion["id"] == "H11":
                 raise AgentOutputValidationError("invalid user-facing output")
             return {
@@ -1177,7 +1178,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(_criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 1)
+            self.assertEqual(max_attempts, 2)
             raise AgentOutputValidationError("invalid user-facing output")
 
         orchestrator._execute_criterion_with_recovery = execute  # type: ignore[method-assign]
@@ -1189,7 +1190,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 1)
+            self.assertEqual(max_attempts, 2)
             if criterion["id"] == "H01":
                 raise ValueError("post-revision validation failed")
             return {
@@ -1208,6 +1209,75 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual([result["status"] for result in results], ["ERROR", "COMPLIANT"])
         self.assertEqual(results[0]["error_type"], "ValueError")
+
+
+class CriterionRetryRecoveryTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        temporary = TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        for replacement in (
+            patch("endpoints.review.task_store.DATA_DIR", temporary.name),
+            patch("endpoints.review.review_state.LOGGING_ENABLED", True),
+            patch("endpoints.review.review_state.LOGGING_DETAILED", True),
+        ):
+            replacement.start()
+            self.addCleanup(replacement.stop)
+        event = patch("agents.orchestrator.write_task_log_event")
+        self.event = event.start()
+        self.addCleanup(event.stop)
+        self.store = ReviewStateStore("api", "20261016-200000-c001")
+        self.orchestrator = OrchestratorAgent(state_store=self.store)
+        self.criterion = {"id": "H18", "section": "附件", "criterion": "校验附件名称。"}
+        self.result = {
+            "criterion_id": "H18", "criterion": self.criterion["criterion"],
+            "section": "附件", "issues": [], "status": "COMPLIANT",
+            "quality_status": "not_required", "tokens": 7,
+        }
+
+    async def test_first_schema_failure_retries_and_saves_second_attempt_success(self) -> None:
+        execute = AsyncMock(side_effect=[AgentOutputValidationError("unpaired evidence"), self.result])
+        self.orchestrator.execute_single_criterion = execute
+
+        results = await self.orchestrator.execute_criteria([self.criterion])
+
+        self.assertEqual(results, [self.result])
+        self.assertEqual(execute.await_count, 2)
+        saved = self.store.load_criterion_output("H18")
+        self.assertEqual(saved["attempt"], 2)
+        self.assertEqual(saved["status"], "COMPLIANT")
+        history = json.loads(self.store.criterion_error_path("H18").read_text(encoding="utf-8"))
+        self.assertEqual(history["max_attempts"], 2)
+        self.assertEqual([attempt["attempt"] for attempt in history["attempts"]], [1])
+        self.assertEqual(history["attempts"][0]["message"], "unpaired evidence")
+
+        # A worker recovery must reuse the valid saved result without reviewing again.
+        execute.reset_mock()
+        resumed = await self.orchestrator.execute_criteria([self.criterion])
+        execute.assert_not_awaited()
+        self.assertTrue(resumed[0]["recovered_from_state"])
+        self.assertEqual(resumed[0]["attempt"], 2)
+        self.assertEqual(resumed[0]["status"], "COMPLIANT")
+
+    async def test_second_failure_stops_and_preserves_both_error_attempts(self) -> None:
+        execute = AsyncMock(side_effect=[
+            AgentOutputValidationError("first invalid response"),
+            AgentOutputValidationError("second invalid response"),
+            self.result,
+        ])
+        self.orchestrator.execute_single_criterion = execute
+
+        with self.assertRaisesRegex(RuntimeError, "All criteria failed"):
+            await self.orchestrator.execute_criteria([self.criterion])
+
+        self.assertEqual(execute.await_count, 2)
+        self.assertIsNone(self.store.load_criterion_output("H18"))
+        history = json.loads(self.store.criterion_error_path("H18").read_text(encoding="utf-8"))
+        self.assertEqual(history["attempt"], 2)
+        self.assertEqual(history["max_attempts"], 2)
+        self.assertEqual([attempt["attempt"] for attempt in history["attempts"]], [1, 2])
+        self.assertEqual(history["latest_error"]["message"], "second invalid response")
+        self.event.assert_called_once()
+        self.assertEqual(self.event.call_args.args[2], "criterion_failed")
 
 
 class SummarizerPromptBudgetTests(unittest.TestCase):

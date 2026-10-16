@@ -42,7 +42,7 @@ DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存
 
 仓库的 `config.example.yaml`、`docker-compose.example.yaml` 是提交到版本库的模板。真实的 `config.yaml`、`docker-compose.yaml` 在 `.gitignore` 中。本次已更新开发目录的真实控制配置，但不会因此更新内网宿主机文件或运行镜像。
 
-启动日志的 `[config] execution-control` 输出有效配置和下文列出的内部值。Redis 地址中的用户名、密码被去除。`deployment_contract` 表示部署预期为三个 worker、每个并发 1；实际实例数仍由 Compose/启动命令决定。
+启动日志的 `[config] execution-control` 输出有效配置和下文列出的内部值。`workflow` 中的 `criterion_retry_max_attempts=2` 表示要点总尝试次数，`model_extra_send_limit=2` 表示每次模型操作的额外发送上限。Redis 地址中的用户名、密码被去除。`deployment_contract` 表示部署预期为三个 worker、每个并发 1；实际实例数仍由 Compose/启动命令决定。
 
 ## 3. 并发配置
 
@@ -64,7 +64,7 @@ DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存
 | `max_reflection_rounds` | 内网值 10 保留 | 每个要点的业务反思轮数，不是网络错误重试次数 |
 | `subagent_allowed_tools` | 保留 `contract_search` | 子 Agent 的可用工具列表，不控制网络并发 |
 | `max_api_concurrent_reviews` | 移除 | 合同执行数量统一由三个 worker 决定 |
-| `criterion_retry_max_attempts` | 移除 | 失败要点不自动整要点重跑；保留已写入的成功结果和进度 |
+| `criterion_retry_max_attempts` | 恢复，默认 2 | 每个要点的总尝试次数，包含首次；首次执行抛出异常后，最多重新执行该失败要点一次。已保存且版本兼容的成功结果直接复用 |
 
 ### 3.3 `model_semaphore.<类型>`
 
@@ -99,7 +99,7 @@ DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存
 | 配置 | 本次值或决定 | 含义 |
 | --- | --- | --- |
 | `workflow.model_call_timeout_seconds` | 保留 60，统一语义 | 一次模型操作的总时间预算，作用于 LLM、embedding、reranker |
-| `workflow.model_call_max_retries` | 5 改为 1 | 首次发送之外最多再发送一次；网络重试、输出修复共用次数 |
+| `workflow.model_call_max_retries` | 当前默认 2 | 首次发送之外最多再发送两次，即每次操作最多发送 3 次；网络重试、JSON/schema 修复共用次数 |
 
 一次操作从进入模型调度开始，包含：
 
@@ -109,7 +109,11 @@ DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存
 
 等待 45 秒后获得名额，只剩 15 秒。第一次请求已经用完时间，就不能重试。网络错误和输出错误不能分别再获得一份次数或时间预算。
 
-一个 scan 批次的一次判断是一次模型操作；不同独立批次分别计时。Agent 正常进入下一步、工具结果续写或业务反思时产生新的操作。同一结果的 JSON/结构修复继续使用原操作预算。正常业务步骤不等于网络重试，失败后也不能通过重跑整个要点来重置预算。
+一个 scan 批次的一次判断是一次模型操作；不同独立批次分别计时。Agent 正常进入下一步、工具结果续写或业务反思时产生新的操作。同一结果的 JSON/结构修复继续使用原操作预算。
+
+当前恢复每个失败要点最多两次执行，第二次执行中的模型操作建立新的 60 秒预算和最多 3 次发送额度，但仍使用相同的 Redis 并发上限，且截止时间不超过原合同的任务截止时间。其他已经成功的要点不重跑。取消及合同硬时限不会因此获得新的一份执行时间。
+
+这次恢复的是默认发送上限和整要点尝试次数，未恢复旧版各层独立叠加重试。若首次请求出现一次网络错误，已经使用 2 次发送，随后 JSON/schema 修复只剩 1 次发送；若剩余时间不足，即使还剩次数也不能发送。无网络错误且时间足够时，JSON/schema 允许首次生成加两次修复，共 3 次发送。
 
 各入口的边界如下。同一行中的所有请求仍使用同一类 Redis 全局名额；“独立操作”只表示有自己的截止时间和发送次数，不增加并发上限。
 
@@ -122,7 +126,7 @@ DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存
 | DocxIndex 独立 reranker | 一次候选批次重排及其传输/输出重试 | 下一候选批次或下一轮合并重排 |
 | LlamaIndex LLM、embedding、reranker | 每次适配器请求及其传输/输出重试 | 下一次独立适配器请求 |
 
-还有一类业务修订：模型回答已经通过 JSON/schema 校验，但确定性的证据、锚点、覆盖范围或路由检查发现结论不符合要求时，Orchestrator 会把具体反馈交给 SubAgent 生成新的完整结论。每次检查最多触发 2 次新结论修订，由内部 `max_revisions=2` 控制。这两次是正常业务操作，各自建立模型预算；不是网络或 schema 修复次数。初次结论和每次业务反思后的结论都可以进入这项检查，因此整个要点不只允许两次业务修订。网络、schema 或确定性检查最终失败后，不自动重跑整个要点。
+还有一类业务修订：模型回答已经通过 JSON/schema 校验，但确定性的证据、锚点、覆盖范围或路由检查发现结论不符合要求时，Orchestrator 会把具体反馈交给 SubAgent 生成新的完整结论。每次检查最多触发 2 次新结论修订，由内部 `max_revisions=2` 控制。这两次是正常业务操作，各自建立模型预算；不是网络或 schema 修复次数。初次结论和每次业务反思后的结论都可以进入这项检查，因此整个要点不只允许两次业务修订。网络、schema 或确定性检查最终失败并抛出异常时，外层再按 `criterion_retry_max_attempts` 决定是否重新执行这个要点；不是重新执行整份合同。
 
 **60 秒限制一次模型操作，不是整个要点的总时长。**一个要点可以经历检索、初次结论、上述业务修订和反思等多个操作；全部要点和操作仍受合同任务的 1800 秒硬时限约束。
 
@@ -278,7 +282,6 @@ rerank:
 
 ```text
 workflow.max_api_concurrent_reviews
-workflow.criterion_retry_max_attempts
 queue.enabled
 queue.task_soft_time_limit_seconds（此前仅方案中出现，不再实现）
 model_semaphore.<类型>.enabled
@@ -289,7 +292,7 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 
 旧共享格式 `model_semaphore.limits`、共享的 Redis/lease 等字段需要迁到逐类型结构；旧 `llm.global_semaphore_*` 和 `llm.max_global_concurrent_requests` 不再接收。单独的模型 timeout、rerank 重试退避字段也不再接收。配置加载明确报迁移错误，防止旧字段被静默忽略。
 
-已移除内部独立次数：DocxIndex 限流错误额外重试、`complete_model()` 独立修复次数、scan 整批重试、整要点失败自动重跑。HTTP 时限统一从剩余预算派生，不再沿用 DocxIndex 默认 120 秒。
+已移除内部独立次数：DocxIndex 限流错误额外重试、`complete_model()` 独立修复次数、scan 整批重试。HTTP 时限统一从剩余预算派生，不再沿用 DocxIndex 默认 120 秒。`workflow.criterion_retry_max_attempts` 已恢复为有效配置，不再属于迁移时删除的字段；当前默认和示例值均为 2。
 
 | 保留配置 | 作用边界 |
 | --- | --- |
@@ -335,7 +338,8 @@ workflow:
   max_reflection_rounds: 10
   max_orchestrator_concurrency: 2
   model_call_timeout_seconds: 60
-  model_call_max_retries: 1
+  model_call_max_retries: 2
+  criterion_retry_max_attempts: 2
   subagent_allowed_tools:
     - "contract_search"
 
@@ -377,13 +381,14 @@ model_semaphore:
 - `input_usage_complete/output_usage_complete/usage_complete` 表示统计是否完整。LLM 缺输出 usage 时不能标为完整；embedding 不要求输出 token。
 - HTTP 已成功但释放 Redis 失败时，`attempts.http_status` 保留已经收到的 HTTP 状态及 usage，标记 `semaphore_release`，不重复发送。此时 Redis 错误本身没有 HTTP 状态，`error.http_status` 可以为未知，不能把两者混淆。
 - 业务成功与失败读取 `task.json`。Celery 函数正常返回只说明消息处理函数返回，不能替代业务成功判断。
+- 整要点重试产生新的逻辑模型调用，不能仅把单个 `logical_call_id` 的 `retry_count` 当作要点的全部恢复次数。详细模式下，`state/criteria/<ID>.error.json` 保存失败尝试列表；最终成功的 `<ID>.output.json` 中 `attempt=2` 表示第二次要点执行成功，首次失败记录仍保留。
 
 ## 11. 部署迁移
 
 1. 等待或排空旧 worker 的任务后再升级，不混用不同模型控制策略的版本。
-2. 在内网宿主机迁移挂载的 `config.yaml`；依据第 7 节删除旧字段，保留内网地址、凭据和算法配置。
+2. 在内网宿主机迁移挂载的 `config.yaml`；依据第 7 节删除旧字段，保留内网地址、凭据和算法配置。设置 `workflow.model_call_max_retries: 2`、`workflow.criterion_retry_max_attempts: 2`；旧文件若显式保留前轮的 `model_call_max_retries: 1`，升级代码不会覆盖该显式值。
 3. 使用包含本次代码的新镜像，同时更新 API、三个 worker 和配套挂载。
-4. 检查各服务的 `[config] execution-control`，确认 DB 0/DB 2、各上限、预算、重试及硬时限一致，并确认三个 prefork worker 每个并发 1。
+4. 检查各服务的 `[config] execution-control`，确认 DB 0/DB 2、各上限、预算、重试及硬时限一致；其中 `criterion_retry_max_attempts` 和 `model_extra_send_limit` 均应为 2。确认三个 prefork worker 每个并发 1。
 5. 通过 Web/API 做提交、状态查询、历史和下载验证，再用同批合同复测成功率、完整性、等待、重试和总耗时。
 
 旧版活跃任务没有 `execution_deadline`，不能凭 API 重启判断它们已失败。升级前需排空或人工核对旧任务。不能通过清空 DB 0/DB 2 代替状态核对和协调升级。
@@ -428,7 +433,9 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 
 集成测试使用隔离临时 Redis，不操作原有部署服务。测试文件分别为 `test_model_control.py`、`test_celery_hard_timeout_linux.py`；后者需要 Linux/prefork 与显式隔离 broker。
 
-### 13.2 本轮复核和真实合同
+### 13.2 前轮复核和真实合同（模型最多发送 2 次、要点执行 1 次）
+
+本节保留恢复重试策略前的验证结果，不代表第 9 节当前配置的运行结果。
 
 使用当前源码、三个独立 worker、隔离 Redis DB 0/DB 2，经 API 提交 `deploy/test_contract.docx`。任务在 222.532 秒（约 3 分 43 秒）后进入 `succeeded` 并生成 44 条批注；18 个要点中 17 个成功，H18 的 schema 校验失败。因此任务完成和报告生成不等于所有要点审查成功。
 
@@ -438,12 +445,28 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 
 该任务调用本地配置中的阿里云端点，不能据此推断公司内网 BGE 或测试网 Qwen 服务的性能。生产 BGE、测试 Qwen 的适配仅通过 MockTransport 协议回归，没有伪称已访问其真实部署地址。源码审计、清理故障及取消测试、任务记录和报告证据见[本轮审计报告](code-review/model-control-audit-20261016.md)。
 
+### 13.3 恢复重试后的三次真实合同验证
+
+本轮仅恢复发送上限和要点尝试次数：`model_call_max_retries=2`、`criterion_retry_max_attempts=2`。保留三个 worker、60 秒模型操作预算、1800 秒合同硬时限及 LLM/embedding/reranker 的 5/3/10 上限。提示词、schema 和检索逻辑没有修改；与前一轮相同，使用本地配置的阿里云端点，不是公司内网服务，未替换内网部署镜像。
+
+| 次数 | 本轮总耗时 | 本轮完成要点 | 前轮完成要点 | 本轮 H18 |
+| --- | --- | --- | --- | --- |
+| 1 | 322.515 秒 | 18/18 | 16/18 | 完成 |
+| 2 | 约 393.9 秒（状态轮询精度 0.1 秒） | 17/18 | 17/18 | 失败 |
+| 3 | 293.390 秒 | 18/18 | 16/18 | 完成 |
+
+实际有 7 个逻辑调用使用了第 3 次发送，其中 5 个最终成功；整要点第 2 次执行救回 3 项：第 1 遍 H15，以及第 2、3 遍 H01。H18 本轮仍为 2 次完成、1 次失败，与前轮相同，不能据此说 H18 完成率改善。第 2 遍 H18 首次执行耗尽业务修订机会，第二次执行的实际模型请求约 59.961 秒后超时，名额等待约 0.00065 秒，说明新的尝试仍受 60 秒操作预算限制，并非等待名额耗尽时间。
+
+三遍共实际发送 362 次，其中逻辑调用首次发送之外的额外发送为 32 次。观测到三类模型占用峰值为 5/3/1，未超过配置上限；全部任务结束后，三类 Redis 持有者、等待者及等待截止记录均为 0。正式回归 267 项，266 项通过、1 项 Linux 专项在 Windows 跳过；消融兼容测试 22 项通过。
+
+`error.json` 中保留的首次失败不等于该要点最终失败；本表按最终状态及成功 output 判断。附件目录遗漏仍然存在，完成也不代表审查完整。三次样本不能推断长期成功率或内网性能。逐次结果、错误链及控制记录见[恢复重试对照报告](code-review/retry-recovery-comparison-20261016.md)。
+
 ## 14. 代码入口
 
 | 文件与入口 | 输入 → 输出或作用 |
 | --- | --- |
 | [config.py](C:/Users/lenovo/Desktop/contract_agent/config.py:244) | 配置字典 → 拒绝旧字段和冲突格式 |
-| [config.py](C:/Users/lenovo/Desktop/contract_agent/config.py:468) | 已加载配置 → 不含 Redis 密码的运行审计 |
+| [config.py](C:/Users/lenovo/Desktop/contract_agent/config.py:474) | 已加载配置 → 不含 Redis 密码的运行审计 |
 | [task_queue/review_queue.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_queue.py:9) | client_dir、task_id → 持久化消息编号并入 DB 0 |
 | [task_queue/review_tasks.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_tasks.py:21) | 任务参数 → worker 执行及真实业务状态 |
 | [task_queue/review_request.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_request.py:39) | Celery 超时/进程失败事件 → 父进程业务失败处理 |
@@ -452,7 +475,9 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:75) | 类型、key、容量及截止时间 → Lua 原子名额申请/释放 |
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:47) | 外部取消 → 等待同一次有界清理结束后传播取消 |
 | [agents/base_agent.py](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:302) | Agent 生成请求 → 公共 LLM 并发和预算控制 |
+| [agents/json_utils.py](C:/Users/lenovo/Desktop/contract_agent/agents/json_utils.py:74) | JSON/schema 及模型响应 → 在同一操作的最多 3 次发送内生成和修复 |
 | [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:809) | schema 合法的结论及业务反馈 → 最多 2 次新的完整结论修订 |
+| [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:1259) | 要点及总尝试上限 → 复用成功结果，或最多执行该要点 2 次 |
 | [tools/docxindex/llm/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/llm/client.py:95) | DocxIndex 提示及校验函数 → 公共 LLM 并发和预算控制 |
 | [tools/docxindex/vector/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/vector/client.py:71) | 一批文本 → 公共 embedding 并发和预算控制 |
 | [tools/docxindex/reranker.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/reranker.py:67) | 查询和候选文档 → 独立重排模型的索引及分数 |

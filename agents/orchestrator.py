@@ -12,6 +12,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from config import (
+    CRITERION_RETRY_MAX_ATTEMPTS,
     MAX_REFLECTION_ROUNDS,
     MAX_ORCHESTRATOR_CONCURRENCY,
     RETRIEVAL_BACKEND,
@@ -1317,10 +1318,10 @@ class OrchestratorAgent:
             criteria_list: list[dict],
             progress_callback: Callable[[dict], Awaitable[None] | None] | None = None,
     ) -> list[dict]:
-        """Execute criteria once, with bounded concurrency and saved output recovery."""
+        """Execute criteria with bounded retries, concurrency, and saved output recovery."""
         # execute_tasks = [self.execute_single_criterion(criterion) for criterion in criteria_list]
         semaphore = asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)
-        max_attempts = 1
+        max_attempts = CRITERION_RETRY_MAX_ATTEMPTS
 
         async def execute_with_limit(criterion: dict) -> dict:
             # async with semaphore:

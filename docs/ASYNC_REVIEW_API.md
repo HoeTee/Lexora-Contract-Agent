@@ -337,7 +337,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/status" `
 }
 ```
 
-任务状态为 `succeeded` 表示输出 DOCX 已成功生成。`criteria` 始终展示全部审查项；`execution_status` 为 `not_started / running / completed / incomplete / error`。`incomplete` 仅表示 Reflector 达到最大轮次后仍未完成确认，模型调用超时、结构化输出错误等异常在统一模型预算及重试额度耗尽后记为 `error`；不自动重跑整条要点。`review_result` 仅在执行产生有效审查结果时填写。调用方应同时读取 `quality` 汇总和 `criteria` 明细，不能只根据任务级 `status` 判断所有标准均已完成。
+任务状态为 `succeeded` 表示输出 DOCX 已成功生成。`criteria` 始终展示全部审查项；`execution_status` 为 `not_started / running / completed / incomplete / error`。`incomplete` 仅表示 Reflector 达到最大轮次后仍未完成确认。模型调用超时、结构化输出错误等异常先按统一模型预算处理；该次要点执行仍失败时，按 `workflow.criterion_retry_max_attempts` 再决定是否重跑该要点，默认共执行 2 次（含首次）。两次都失败后记为 `error`，已成功的其他要点不重跑。`review_result` 仅在执行产生有效审查结果时填写。调用方应同时读取 `quality` 汇总和 `criteria` 明细，不能只根据任务级 `status` 判断所有标准均已完成。
 
 | HTTP 状态码 | 返回场景 | 响应 |
 | --- | --- | --- |

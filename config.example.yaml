@@ -32,7 +32,8 @@ workflow:
   max_reflection_rounds: 10
   max_orchestrator_concurrency: 2
   model_call_timeout_seconds: 60
-  model_call_max_retries: 1
+  model_call_max_retries: 2
+  criterion_retry_max_attempts: 2
   subagent_allowed_tools:
   - contract_search
 queue:

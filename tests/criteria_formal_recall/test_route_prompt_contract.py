@@ -176,7 +176,7 @@ class RoutePromptContractTests(unittest.TestCase):
         self.assertIsNone(raised.exception.http_status)
         self.assertEqual(raised.exception.error_type, "response_validation_error")
         self.assertIn("scan route may only be combined", str(raised.exception))
-        self.assertEqual(request.await_count, 2)
+        self.assertEqual(request.await_count, 3)
 
     def test_retrieval_error_fields_survive_model_error_classification(self) -> None:
         error = classify_model_call_error(

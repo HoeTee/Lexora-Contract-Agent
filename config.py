@@ -243,7 +243,7 @@ SEED = _as_int(cfg("llm", "seed"), "llm.seed")
 
 def _validate_control_config() -> None:
     removed = {
-        "workflow": {"max_api_concurrent_reviews", "criterion_retry_max_attempts"},
+        "workflow": {"max_api_concurrent_reviews"},
         "queue": {"enabled", "task_soft_time_limit_seconds", "task_soft_time_limit"},
         "llm": {"timeout_seconds", "global_semaphore_enabled", "max_global_concurrent_requests",
                 "global_semaphore_redis_url", "global_semaphore_key", "global_semaphore_wait_timeout_seconds",
@@ -346,6 +346,12 @@ MODEL_CALL_MAX_RETRIES = _as_int(
     cfg("workflow", "model_call_max_retries"),
     "workflow.model_call_max_retries",
 )
+CRITERION_RETRY_MAX_ATTEMPTS = _as_int(
+    cfg_optional("workflow", "criterion_retry_max_attempts", 2),
+    "workflow.criterion_retry_max_attempts",
+)
+if CRITERION_RETRY_MAX_ATTEMPTS < 1:
+    raise RuntimeError("workflow.criterion_retry_max_attempts must be a positive integer.")
 SUBAGENT_ALLOWED_TOOLS = _as_str_tuple(
     cfg_optional("workflow", "subagent_allowed_tools", ["contract_search"]),
     "workflow.subagent_allowed_tools",
@@ -483,6 +489,7 @@ def control_configuration_summary() -> dict[str, Any]:
             "visibility_timeout_seconds": 3600,
         },
         "workflow": {"criterion_concurrency_per_contract": MAX_ORCHESTRATOR_CONCURRENCY,
+                     "criterion_retry_max_attempts": CRITERION_RETRY_MAX_ATTEMPTS,
                      "model_operation_timeout_seconds": MODEL_CALL_TIMEOUT_SECONDS,
                      "model_extra_send_limit": MODEL_CALL_MAX_RETRIES},
         "model_semaphore": {
