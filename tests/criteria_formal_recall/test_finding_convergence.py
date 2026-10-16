@@ -70,6 +70,25 @@ class FindingConvergenceTests(unittest.TestCase):
         self.assertEqual(history[0]["location"]["xml_anchor_id"], "path:body/p1")
         self.assertIn("compatible", history[0]["decisions"][-1]["reason"])
 
+    def test_removal_does_not_silently_reclassify_a_pairwise_mismatch(self):
+        value = opinion()
+        value["comparison_decisions"] = [{
+            "edit_anchor_type": "paragraph", "edit_anchor_id": "path:body/p1",
+            "evidence_anchor_type": "paragraph", "evidence_anchor_id": "path:body/p2",
+            "decision": "mismatch", "reason": "Different promises",
+        }]
+        ledger = _FindingLedger(value)
+        ledger.review(value, decision(), 1)
+        resolved = ledger.apply_removals(value)
+        context = (
+            "source_region: body\nxml_anchor_type: paragraph\nxml_anchor_id: path:body/p1\n内容：\nThree-year warranty"
+            "\n\n---\n\nsource_region: attachments\nxml_anchor_type: paragraph\nxml_anchor_id: path:body/p2\n内容：\nTwo-year warranty"
+        )
+        self.assertEqual(resolved["comparison_decisions"][0]["decision"], "mismatch")
+        self.assertTrue(OrchestratorAgent._policy_output_errors(
+            resolved, {"comparison_audit": True, "evidence_region": "attachments"}, context,
+        ))
+
 
 class OrchestratorConvergenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_last_round_remove_produces_consistent_completed_result(self):

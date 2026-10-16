@@ -665,9 +665,15 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
         key=lambda item: item[1].get("body_child_index") or 0,
     )
     attachment_contexts = _attachment_contexts(index, anchors)
+    source_records = {
+        f"path:body/{'tbl' if record.get('type') == 'tbl' else 'p'}{record['body_child_index']}": record
+        for _, record in anchors
+        if record.get("body_child_index") is not None
+    }
     parts: list[str] = []
     seen: set[str] = set()
     described_attachments: set[str] = set()
+    attachment_evidence_ids: dict[str, None] = {}
     for node in nodes:
         start_index = node.get("start_index")
         end_index = node.get("end_index")
@@ -711,6 +717,8 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
                 header += f"\nattachment_context_id: {context_id}"
                 if context_id not in described_attachments:
                     described_attachments.add(context_id)
+                    for key in ("attachment_heading_xml_anchor_id", "attachment_title_xml_anchor_id"):
+                        attachment_evidence_ids[attachment[key]] = None
                     for key, value in attachment.items():
                         if key not in {"attachment_context_id", "start_index", "end_index"}:
                             header += f"\n{key}: {value}"
@@ -720,6 +728,22 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
                 header += f"\nsource_region: {source_region}"
             header += f"\nxml_anchor_type: {anchor_type}\nxml_anchor_id: {anchor_id}"
             parts.append(f"{header}\n内容：\n{text}")
+    # Title metadata can be cited by a reviewer. Include its source paragraphs in
+    # the same evidence format as direct hits so the ordinary validator can check
+    # the exact anchor and quote, without granting metadata IDs special trust.
+    for anchor_id in attachment_evidence_ids:
+        record = source_records.get(anchor_id)
+        if anchor_id in seen or record is None:
+            continue
+        text = str(record.get("raw_text") or record.get("text") or "").strip()
+        if not text:
+            continue
+        seen.add(anchor_id)
+        anchor_type = "table" if record.get("type") == "tbl" else "paragraph"
+        parts.append(
+            "## 合同检索证据\nsource_region: attachments"
+            f"\nxml_anchor_type: {anchor_type}\nxml_anchor_id: {anchor_id}\n内容：\n{text}"
+        )
     return "\n\n---\n\n".join(parts) if parts else "未找到相关合同内容。"
 
 
