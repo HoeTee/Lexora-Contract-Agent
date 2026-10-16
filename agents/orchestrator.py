@@ -147,6 +147,26 @@ class _FindingLedger:
             if key not in current_keys and self.decisions.get(entry["finding_id"], {}).get("decision") != "remove"
         ]
 
+    def decision_history(self) -> list[dict]:
+        """Give a fresh reviewer the latest two decisions for every observed finding."""
+        result = []
+        for entry in self.observed.values():
+            finding_id = entry["finding_id"]
+            decisions = [
+                {"round": item["round"], **decision}
+                for item in self.history
+                for decision in item["review"].get("finding_decisions", [])
+                if decision["finding_id"] == finding_id
+            ]
+            if decisions:
+                result.append({
+                    "finding_id": finding_id,
+                    "issue_id": entry["issue"].get("issue_id", ""),
+                    "location": entry["anchor"],
+                    "decisions": decisions[-2:],
+                })
+        return result
+
     def review(self, opinion: dict, review: dict, round_number: int) -> bool:
         current = self.current(opinion)
         missing = self.missing(opinion)
@@ -169,8 +189,8 @@ class _FindingLedger:
             }
         )
         current_ids = {item["finding_id"] for item in current}
-        all_confirmed = all(
-            self.decisions.get(finding_id, decisions.get(finding_id, {})).get("decision") == "confirm"
+        all_resolved = all(
+            self.decisions.get(finding_id, {}).get("decision") in {"confirm", "remove"}
             for finding_id in current_ids
             if finding_id in decisions
         )
@@ -181,11 +201,43 @@ class _FindingLedger:
         )
         return (
             review["status"] == "PASS"
+            and not review.get("coverage_gaps")
             and not unknown_ids
             and not missing_ids
-            and all_confirmed
+            and all_resolved
             and removed_missing
         )
+
+    def apply_removals(self, opinion: dict) -> dict:
+        """Remove rejected findings and reconcile their explicit audit dispositions."""
+        normalized = deepcopy(opinion)
+        entries = _finding_entries(opinion)
+        removed = {
+            key: entry for key, entry in entries.items()
+            if self.decisions.get(self.observed[key]["finding_id"], {}).get("decision") == "remove"
+        }
+        if not removed:
+            return normalized
+        normalized["issues"] = [entry["issue"] for key, entry in entries.items() if key not in removed]
+        retained_anchors = {
+            (anchor.get("xml_anchor_type"), anchor.get("xml_anchor_id"))
+            for issue in normalized["issues"] for anchor in issue.get("anchors", [])
+            if anchor.get("role", "edit") == "edit"
+        }
+        removed_reasons = {
+            (entry["anchor"]["xml_anchor_type"], entry["anchor"]["xml_anchor_id"]):
+                self.decisions[self.observed[key]["finding_id"]]["reason"]
+            for key, entry in removed.items() if entry["anchor"]
+        }
+        for decision in normalized.get("coverage_decisions", []):
+            anchor = (decision.get("xml_anchor_type"), decision.get("xml_anchor_id"))
+            if anchor in removed_reasons and anchor not in retained_anchors and decision["decision"] == "issue":
+                decision.update(decision="compliant", reason=removed_reasons[anchor])
+        # Pairwise comparison outcomes need an explicit revised classification;
+        # removing a finding alone cannot establish matched/not_applicable.
+        if not normalized["issues"]:
+            normalized["status"] = "compliant"
+        return normalized
 
     def confirmed_issues(self, opinion: dict) -> list[dict]:
         confirmed: list[dict] = []
@@ -245,6 +297,19 @@ class OrchestratorAgent:
         previous: dict,
     ) -> tuple[dict, str]:
         """Request a revision and restore IDs for defects that remain at the same source."""
+        task_prompt = getattr(sub_agent, "_review_task_prompt", None)
+        if task_prompt is not None:
+            base_context = sub_agent._review_base_context
+            review_context = sub_agent._review_context
+            if base_context:
+                task_prompt = task_prompt.replace(base_context, review_context, 1)
+            sub_agent.messages = [
+                message for message in sub_agent.messages if message.get("role") == "system"
+            ] + [{"role": "user", "content": task_prompt}]
+        prompt = render_prompt(
+            "ORCHESTRATOR_REVISION_CONTEXT", current_output=json.dumps(previous, ensure_ascii=False),
+            instruction=prompt,
+        )
         revised, _ = await chat_until_valid_json(
             sub_agent,
             prompt + get_prompt("ORCHESTRATOR_REVISION_IDENTITY"),
@@ -418,8 +483,9 @@ class OrchestratorAgent:
 
     def _review_evidence_context(self, base_context: str, sub_agent: Agent) -> str:
         """Include contract-search evidence gathered by the SubAgent itself."""
-        contexts = [base_context]
-        seen = {base_context}
+        retained_context = getattr(sub_agent, "_review_context", base_context)
+        contexts = [retained_context]
+        seen = {retained_context}
         for message in sub_agent.messages:
             if message.get("role") != "tool":
                 continue
@@ -427,7 +493,7 @@ class OrchestratorAgent:
             if "xml_anchor_id:" not in content:
                 continue
             prepared = self._prepare_review_context(content)
-            if prepared not in seen:
+            if prepared not in seen and prepared not in retained_context:
                 seen.add(prepared)
                 contexts.append(prepared)
         return get_prompt("ORCHESTRATOR_SUPPLEMENTAL_EVIDENCE_SEPARATOR").join(contexts)
@@ -798,7 +864,13 @@ class OrchestratorAgent:
         """Run all deterministic output checks and request complete revisions on failure."""
         totals = anchor_validation if anchor_validation is not None else {}
         for revision in range(max_revisions + 1):
+            # Only the criterion can enable audit modes, not unsolicited model fields.
+            if not coverage_audit and "coverage_decisions" in parsed_opinion:
+                parsed_opinion["coverage_decisions"] = []
+            if not criterion.get("comparison_audit") and "comparison_decisions" in parsed_opinion:
+                parsed_opinion["comparison_decisions"] = []
             review_context = self._review_evidence_context(base_context, sub_agent)
+            sub_agent._review_context = review_context
             repair_stats = self._validate_and_repair_anchors(parsed_opinion, review_context)
             for key, value in repair_stats.items():
                 totals[key] = totals.get(key, 0) + value
@@ -906,6 +978,8 @@ class OrchestratorAgent:
         context: str = "",
         missing_findings: list | None = None,
         current_findings: list | None = None,
+        finding_history: list | None = None,
+        audit_mode: dict | None = None,
     ) -> str:
         """Give Reflector the current criterion plus the exact sub-agent output."""
         return json.dumps(
@@ -916,6 +990,8 @@ class OrchestratorAgent:
                 "retrieved_evidence": context,
                 "missing_previous_findings": missing_findings or [],
                 "current_findings": current_findings or [],
+                "finding_history": finding_history or [],
+                "audit_mode": audit_mode or {"coverage": False, "comparison": False},
             },
             ensure_ascii=False,
             indent=2,
@@ -1020,6 +1096,9 @@ class OrchestratorAgent:
             task_prompt += render_prompt(
                 "ORCHESTRATOR_PLACEMENT_INSTRUCTION", directive=placement_directive,
             )
+        sub_agent._review_task_prompt = task_prompt
+        sub_agent._review_base_context = context
+        sub_agent._review_context = context
         parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
             sub_agent,
             task_prompt,
@@ -1089,6 +1168,8 @@ class OrchestratorAgent:
                 context=review_context,
                 missing_findings=ledger.missing(parsed_opinion),
                 current_findings=ledger.current(parsed_opinion),
+                finding_history=ledger.decision_history(),
+                audit_mode={"coverage": coverage_audit, "comparison": comparison_audit},
             )
             review = await self._review_with_fallback(
                 reflector,
@@ -1122,7 +1203,20 @@ class OrchestratorAgent:
                     tokens=reflector.token_usage.get("total_tokens", 0),
                     duration=round(time.time() - start, 2)
                 )
-            if ledger.review(parsed_opinion, review, round_num + 1):
+            passed = ledger.review(parsed_opinion, review, round_num + 1)
+            if passed:
+                resolved_opinion = ledger.apply_removals(parsed_opinion)
+                errors = self._anchor_validation_errors(resolved_opinion, review_context)
+                if coverage_audit:
+                    errors += self._coverage_audit_errors(resolved_opinion, context)
+                errors += self._policy_output_errors(resolved_opinion, criterion, review_context)
+                if errors:
+                    passed = False
+                    ledger.history[-1]["validation_errors"] = errors
+                    review["feedback"] += "\n" + "\n".join(errors)
+                else:
+                    parsed_opinion = resolved_opinion
+            if passed:
                 quality_status = "passed"
                 print(f"[Orchestrator] {cid}: PASS after {round_num+1} round(s)")
                 break
@@ -1139,6 +1233,13 @@ class OrchestratorAgent:
                             sub_agent,
                             render_prompt(
                                 "ORCHESTRATOR_REFLECTION_REVISION", feedback=review.get("feedback", ""),
+                                decisions=json.dumps({
+                                    "finding_decisions": review.get("finding_decisions", []),
+                                    "current_findings": ledger.current(parsed_opinion),
+                                    "missing_previous_findings": ledger.missing(parsed_opinion),
+                                    "coverage_gaps": review.get("coverage_gaps", []),
+                                    "finding_history": ledger.decision_history(),
+                                }, ensure_ascii=False),
                             ),
                             previous_opinion,
                         )
@@ -1180,10 +1281,12 @@ class OrchestratorAgent:
             "issues_found": "ISSUES_FOUND",
             "not_applicable": "NOT_APPLICABLE",
         }
-        final_status = status_map[parsed_opinion["status"]]
-
         confirmed_issues = ledger.confirmed_issues(parsed_opinion)
         unresolved_issues = ledger.unresolved_issues(parsed_opinion)
+        final_status = (
+            "ISSUES_FOUND" if confirmed_issues or unresolved_issues
+            else status_map["not_applicable" if parsed_opinion["status"] == "not_applicable" else "compliant"]
+        )
 
         return {
             "criterion_id": cid,

@@ -12,6 +12,7 @@ from typing import Any
 from loggers.call_log import append_route_event, call_stage, reset_call_stage, set_call_stage
 from routing.schemas import RoutePlan
 from tools.docxindex import build_document_index
+from tools.docxindex.detection.patterns import ATTACHMENT_RE, NAMED_ATTACHMENT_RE
 from tools.docxindex.indexing.config import IndexingConfig
 from tools.docxindex.llm import LLMClient, LLMSettings
 from tools.docxindex.retrieval import (
@@ -663,8 +664,10 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
         (index.get("anchor_map") or {}).items(),
         key=lambda item: item[1].get("body_child_index") or 0,
     )
+    attachment_contexts = _attachment_contexts(index, anchors)
     parts: list[str] = []
     seen: set[str] = set()
+    described_attachments: set[str] = set()
     for node in nodes:
         start_index = node.get("start_index")
         end_index = node.get("end_index")
@@ -693,11 +696,97 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
             if selection_reason:
                 header += f"\n检索候选判定理由：{selection_reason}"
             source_region = str(node.get("node_id") or "").split("/", 1)[0]
+            owner_id = str(record.get("node_id") or node.get("node_id") or "")
+            attachments = [
+                context for context in attachment_contexts
+                if context["start_index"] <= body_index <= context["end_index"]
+            ]
+            if len(attachments) == 1 and (
+                not owner_id
+                or owner_id == attachments[0]["attachment_context_id"]
+                or owner_id.startswith(attachments[0]["attachment_context_id"] + "/")
+            ):
+                attachment = attachments[0]
+                context_id = attachment["attachment_context_id"]
+                header += f"\nattachment_context_id: {context_id}"
+                if context_id not in described_attachments:
+                    described_attachments.add(context_id)
+                    for key, value in attachment.items():
+                        if key not in {"attachment_context_id", "start_index", "end_index"}:
+                            header += f"\n{key}: {value}"
+            elif owner_id.startswith("attachments/") or source_region == "attachments":
+                header += "\nattachment_context_id: unknown\nattachment_label: unknown\nattachment_title: unknown"
             if source_region:
                 header += f"\nsource_region: {source_region}"
             header += f"\nxml_anchor_type: {anchor_type}\nxml_anchor_id: {anchor_id}"
             parts.append(f"{header}\n内容：\n{text}")
     return "\n\n---\n\n".join(parts) if parts else "未找到相关合同内容。"
+
+
+def _attachment_contexts(
+    index: dict[str, Any], anchors: list[tuple[str, dict[str, Any]]]
+) -> list[dict[str, Any]]:
+    """Resolve attachment identity from section boundaries and source headings."""
+    anchor_map = index.get("anchor_map") or {}
+    all_nodes = index.get("nodes") or []
+    contexts: list[dict[str, Any]] = []
+    for section in all_nodes:
+        if section.get("node_type") != "attachment_section":
+            continue
+        heading = anchor_map.get(section.get("start_anchor")) or {}
+        end = anchor_map.get(section.get("end_anchor")) or {}
+        start_index, end_index = heading.get("body_child_index"), end.get("body_child_index")
+        if heading.get("type") != "p" or start_index is None or end_index is None:
+            continue
+        if start_index > end_index:
+            continue
+        heading_text = str(heading.get("raw_text") or heading.get("text") or "").strip()
+        label_match = ATTACHMENT_RE.match(heading_text)
+        if label_match:
+            label = heading_text[:label_match.end(1)]
+            inline_title = heading_text[label_match.end(1):].lstrip(" ：:、\t")
+        elif NAMED_ATTACHMENT_RE.match(heading_text):
+            label = "unknown"
+            inline_title = heading_text.split("：" if "：" in heading_text else ":", 1)[1].strip()
+        else:
+            # A generated section name is not evidence of an original attachment label.
+            continue
+        title = inline_title or "unknown"
+        title_index = start_index if inline_title else None
+        if not inline_title:
+            following = next((
+                (anchor, record) for anchor, record in anchors
+                if start_index < record.get("body_child_index", 0) <= end_index
+                and str(record.get("raw_text") or record.get("text") or "").strip()
+            ), None)
+            if following is not None:
+                title_anchor, title_record = following
+                title_nodes = [
+                    node for node in all_nodes
+                    if node.get("parent_id") == section.get("node_id")
+                    and node.get("start_anchor") == title_anchor
+                    and (
+                        node.get("node_type") == "visual_title"
+                        or (
+                            node.get("node_type") == "attachment_heading"
+                            and "number_family:unnumbered" in (node.get("confidence_evidence") or [])
+                        )
+                    )
+                ]
+                if title_record.get("type") == "p" and title_nodes:
+                    title = str(title_record.get("raw_text") or title_record.get("text") or "").strip()
+                    title_index = title_record["body_child_index"]
+        contexts.append({
+            "attachment_context_id": str(section.get("node_id") or ""),
+            "start_index": start_index,
+            "end_index": end_index,
+            "attachment_label": label,
+            "attachment_heading_text": heading_text,
+            "attachment_heading_xml_anchor_id": f"path:body/p{start_index}",
+            "attachment_title": title,
+            "attachment_title_xml_anchor_id": f"path:body/p{title_index}" if title_index is not None else "unknown",
+        })
+    return contexts
 
 
 def _terminal(message: str) -> None:

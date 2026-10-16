@@ -53,6 +53,21 @@ class PromptCatalogTests(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(Template(prompt).is_valid())
 
+    def test_revision_context_uses_current_result_and_structured_decisions(self):
+        current = '{"issues": [{"issue_id": "11.1", "quoted_text": "原文 $100"}]}'
+        decisions = '{"finding_decisions": [{"finding_id": "F001", "decision": "remove"}]}'
+        instruction = render_prompt(
+            "ORCHESTRATOR_REFLECTION_REVISION", feedback="删除该问题", decisions=decisions,
+        )
+        rendered = render_prompt(
+            "ORCHESTRATOR_REVISION_CONTEXT", current_output=current, instruction=instruction,
+        )
+        self.assertEqual(rendered.count(current), 1)
+        self.assertIn(decisions, rendered)
+        self.assertIn("发生矛盾时以 decisions 为准", rendered)
+        self.assertIn("旧会话中的相反反馈不再有效", rendered)
+        self.assertIn("compliant + issues=[]", rendered)
+
     def test_h01_repeated_field_errors_produce_short_repair_feedback(self):
         output = {
             "status": "compliant", "issues": [],

@@ -96,19 +96,22 @@ async def chat_until_valid_json(
     *,
     max_attempts: int | None = None,
     final_attempt_schema: type[BaseModel] | None = None,
+    validation_context: dict | None = None,
 ) -> tuple[dict, str]:
     """Validate agent JSON, optionally relaxing only the final parsed response."""
     scope = agent.validation_requests() if hasattr(agent, "validation_requests") else nullcontext()
     with scope:
         return await _chat_until_valid_json(
             agent, initial_prompt, schema, expected_format,
-            max_attempts=min(max_attempts or MODEL_CALL_MAX_RETRIES + 1, MODEL_CALL_MAX_RETRIES + 1), final_attempt_schema=final_attempt_schema,
+            max_attempts=min(max_attempts or MODEL_CALL_MAX_RETRIES + 1, MODEL_CALL_MAX_RETRIES + 1),
+            final_attempt_schema=final_attempt_schema, validation_context=validation_context,
         )
 
 
 async def _chat_until_valid_json(
     agent, initial_prompt: str, schema: type[ModelT], expected_format: str, *,
     max_attempts: int, final_attempt_schema: type[BaseModel] | None,
+    validation_context: dict | None,
 ) -> tuple[dict, str]:
     prompt = render_prompt(
         "JSON_INITIAL_REQUEST_PROMPT", initial_prompt=initial_prompt, expected_format=expected_format
@@ -121,14 +124,14 @@ async def _chat_until_valid_json(
         parsed: dict | None = None
         try:
             parsed = extract_json(raw_output)
-            validated = schema.model_validate(parsed)
+            validated = schema.model_validate(parsed, context=validation_context)
             return validated.model_dump(), raw_output
         except (json.JSONDecodeError, ValidationError, ValueError) as exc:
             last_error = exc
             if attempt == max_attempts:
                 if final_attempt_schema is not None and parsed is not None:
                     try:
-                        fallback = final_attempt_schema.model_validate(parsed)
+                        fallback = final_attempt_schema.model_validate(parsed, context=validation_context)
                         return fallback.model_dump(), raw_output
                     except (ValidationError, ValueError) as fallback_exc:
                         last_error = fallback_exc

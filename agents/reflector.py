@@ -2,6 +2,8 @@
 ReflectorAgent validates sub-agent review quality.
 """
 
+import json
+
 from agents.base_agent import Agent
 from agents.json_utils import chat_until_valid_json
 from agents.prompts import get_prompt, render_prompt
@@ -33,10 +35,29 @@ class ReflectorAgent(Agent):
             agent_output=agent_output,
             missing_text_review_notes=missing_text_review_notes,
         )
+        # The orchestrator supplies the finding IDs. Validate model decisions
+        # against them within the existing schema-repair request budget.
+        validation_context = None
+        try:
+            review_input = json.loads(agent_output)
+        except json.JSONDecodeError:
+            review_input = None
+        if isinstance(review_input, dict) and "current_findings" in review_input:
+            current_ids = {
+                item["finding_id"] for item in review_input["current_findings"]
+            }
+            missing_ids = {
+                item["finding_id"] for item in review_input.get("missing_previous_findings", [])
+            }
+            validation_context = {
+                "required_finding_ids": current_ids | missing_ids,
+                "missing_finding_ids": missing_ids,
+            }
         parsed, _ = await chat_until_valid_json(
             self,
             prompt,
             ReflectorOutput,
             REFLECTOR_EXPECTED_JSON,
+            validation_context=validation_context,
         )
         return parsed

@@ -5,7 +5,7 @@ Pydantic schemas for validating structured agent outputs.
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from routing.schemas import RoutePlan
 
@@ -243,12 +243,36 @@ class ReflectorOutput(StrictOutputModel):
     coverage_gaps: list[CoverageGap] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def validate_unique_findings(self):
+    def validate_decisions(self, info: ValidationInfo):
         finding_ids = [item.finding_id for item in self.finding_decisions]
         if len(finding_ids) != len(set(finding_ids)):
             raise ValueError("finding_decisions must contain each finding_id at most once")
-        if self.status == "PASS" and self.coverage_gaps:
-            raise ValueError("PASS must not contain coverage_gaps")
+        context = info.context or {}
+        missing_finding_ids = set(context.get("missing_finding_ids", ()))
+        needs_revision = any(item.decision == "revise" for item in self.finding_decisions)
+        needs_restoration = any(
+            item.finding_id in missing_finding_ids and item.decision == "confirm"
+            for item in self.finding_decisions
+        )
+        if self.status == "PASS" and (self.coverage_gaps or needs_revision):
+            raise ValueError("PASS accepts the result after confirm/remove and must not contain revise or coverage_gaps")
+        if self.status == "REJECT" and not (needs_revision or needs_restoration or self.coverage_gaps):
+            raise ValueError("REJECT requires a finding_decision=revise, a confirmed missing finding to restore, or a concrete coverage_gap; use PASS when confirm/remove resolves every finding")
+
+        if "required_finding_ids" in context:
+            required_ids = set(context["required_finding_ids"])
+            returned_ids = set(finding_ids)
+            unknown_ids = sorted(returned_ids - required_ids)
+            missing_ids = sorted(required_ids - returned_ids)
+            if unknown_ids or missing_ids:
+                raise ValueError(
+                    f"finding_decisions must cover exactly the input findings; unknown={unknown_ids}; missing={missing_ids}"
+                )
+        if self.status == "PASS" and any(
+            item.finding_id in missing_finding_ids and item.decision != "remove"
+            for item in self.finding_decisions
+        ):
+            raise ValueError("PASS requires remove for missing_previous_findings; use REJECT with confirm/revise if a missing finding must be restored")
         return self
 
 

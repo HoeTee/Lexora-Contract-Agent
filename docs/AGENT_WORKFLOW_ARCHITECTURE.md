@@ -30,6 +30,7 @@
 - “照抄”等编辑指令不作为最终意见，也不能在目标文字不明确时编造提示语。通用提醒返回 `anchors=[]` 进入总结；具体缺陷才锚定问题原文。
 - 字段是否未填写由 LLM 结合字段名称、相邻文字、表格关系和合同语境判断，不由业务正则硬匹配。`[合同中心-合同编码]`、`#乙方合同号#【     】`、字段后的 `XX` 是提示词示例；`【5‰】`、`【5%】` 等已有值和条件性补件说明是反例。批注必须直接引用对应字段和未填写位置。
 - 分公司签约授权与代理人签署授权分别审查。条件句不证明条件成立，未检索到外部授权书不等于未授权。有对应主体事实且仍需外部材料确认时，以待核实事项和空 anchors 进入总结；不将纯假设写成缺陷。
+- H11 只报告正文与附件在同一事项、同一条件、同一指标上的互斥约定。概括与细则互补不直接构成冲突，响应、到场处理和最终修复分别比较。`quoted_text` 定位现有原文，`comment_text` 提供修改建议；附件编号和标题以证据提供的归属为准。
 - Summarizer 必须保留输入中的不确定性，不将“待核实”升级成“授权缺失”或“签署无效”。输出字段和工作流阶段不变。
 
 这些是模型行为约束，不是确定性正确率保证；需要正式审查产物验证，不能以提示词文本测试代替实际准确度评估。
@@ -39,7 +40,7 @@
 | PlannerAgent | `agents/planner.py` | 只为用户上传标准提取五种路线和批注去向 | 用户标准 skeleton | `CriterionStrategy` |
 | OrchestratorAgent | `agents/orchestrator.py` | 逐条派发 SubAgent，串联检索、反思、并发控制 | `criteria_list` | `results` |
 | SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准；配置完整覆盖审计时逐证据返回判断 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues / coverage_decisions） |
-| ReflectorAgent | `agents/reflector.py` | 逐条质量复核 finding，并检查完整覆盖任务是否漏判输入证据 | criterion + subagent_output + 检索证据 | `{ status, feedback, finding_decisions[], coverage_gaps[] }` |
+| ReflectorAgent | `agents/reflector.py` | 逐条质量复核 finding，按明确审计模式检查覆盖，并检查当前标准范围内有证据的实质漏检 | criterion + subagent_output + 检索证据 + finding_history + audit_mode | `{ status, feedback, finding_decisions[], coverage_gaps[] }` |
 | SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；程序只接受 edit anchor 与 placement 完全相同的重复组，不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题 | `{ overall_comment, priority_comments, duplicate_groups }` |
 
 同一审查要点在 Reflector 修订后由程序按原文 edit anchor 恢复已有 `issue_id`；新增问题若占用了已有编号，程序分配无碰撞后缀。Reflector 或修订模型调用失败、修订结果校验失败时抛回 criterion 恢复流程；完整重试耗尽后记录为该要点 `ERROR`。只要仍有至少一个有效要点，工作流继续生成总结和 DOCX；只有全部要点均失败时才终止整份任务。
@@ -87,6 +88,7 @@ class ReflectorOutput:
     status: Literal["PASS", "REJECT"]
     feedback: str = ""
     finding_decisions: list[FindingDecision] = []  # finding_id + confirm/revise/remove + reason
+    coverage_gaps: list[CoverageGap] = []
 
 class SummaryOutput:
     overall_comment: str = ""
@@ -99,15 +101,16 @@ class SummaryOutput:
 
 1. 检索：调用 MCP `contract_search`（query = 标准 + 检查要点），由 `retrieval.backend` 选择 LlamaIndex 或 docxindex，得到合同相关片段 `context`。检索证据不添加展示序号，只提供 `xml_anchor_type/xml_anchor_id` 给 SubAgent 逐字符复用，避免展示序号与真实段落锚点混淆。
 2. SubAgent 审查：以 `SUB_AGENT_BASE_PROMPT` 创建 `SubAgent_<cid>`，只向模型暴露 `workflow.subagent_allowed_tools` 白名单中的 MCP 工具，输出 `SubAgentOutput`，`status` 为 `compliant` / `issues_found` / `not_applicable`，`issues[].anchors` 含 `xml_anchor_type`、`xml_anchor_id`、`quoted_text`、`comment_text` 等字段。
-3. 若 `status == compliant`：短路，跳过反思直接返回。
+3. 若 `status == compliant` 且未启用完整覆盖审计：短路，跳过反思直接返回。
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：
-   - 固定任务直接使用强制路由已提供的证据，不对 `anchors=[]` 问题反复执行缺失文本补充检索；用户上传要点仍可执行该补充检索。每轮 Reflector 使用独立会话，避免完整证据在历史消息中叠加。
-   - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`；一个 finding 需修改不会连带删除同一 criterion 中已经确认的问题。
-   - 全部 finding 决策完整且满足 PASS 才结束；达到轮次上限时标记 `quality_status=incomplete`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。反思调用异常会进入 criterion 恢复流程，重试耗尽后记录为 `ERROR`。
-   - 修订仍指向同一 edit 原文缺陷时，Orchestrator 恢复原 `issue_id`，避免模型改号导致 finding 身份漂移。
+   - 固定任务直接使用强制路由已提供的证据，不对 `anchors=[]` 问题反复执行缺失文本补充检索；用户上传要点仍可执行该补充检索。每轮 Reflector 使用独立会话，并接收每个 finding 最近两次裁决、理由和位置组成的 `finding_history`；改变前轮判断时须说明新增证据或前轮具体错误。
+   - `audit_mode.coverage/comparison` 直接来自当前 criterion 的审计标记。模型自行返回的 `coverage_decisions/comparison_decisions` 不能开启完整审计；当前标准范围内有证据的实质漏检仍须检查。
+   - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`。`PASS` 接受执行 confirm 保留、remove 删除后的结果，允许当轮删除当前问题；不得同时包含 revise、漏检或需要恢复的历史问题。裁决必须完整、编号合法。程序应用删除后再次校验原文锚点、已启用的覆盖要求和标准约束，通过后才结束。
+   - 需要修订时重建 SubAgent 会话，保留系统提示、原任务和最新检索证据，附上当前完整输出及本轮指令；反思修订以结构化裁决和问题映射为准，旧相反反馈不再叠加。修订仍指向同一 edit 原文缺陷时，Orchestrator 恢复原 `issue_id`，避免模型改号导致 finding 身份漂移。
+   - 达到轮次上限时标记 `quality_status=incomplete`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。反思调用异常会进入 criterion 恢复流程，重试耗尽后记录为 `ERROR`。
 
 每次 Planner、SubAgent、Reflector、Summarizer 等 `Agent` 调用在发送前统一计算完整消息及工具 schema 的 token 预算。`llm.max_prompt_tokens` 默认 88k 且配置值必须小于 90k；超限请求不会发送，trace 的 LLM input 记录 `estimated_prompt_tokens` 和 `prompt_token_limit`。
-5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。
+5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。存在已确认或未解决问题时 `status=ISSUES_FOUND`；最后一个问题删除后同步为 `COMPLIANT`（仍不适用时为 `NOT_APPLICABLE`），不沿用删除前的状态。`quality_status` 独立记录复核是否通过，不能仅凭问题数组为空认定审查完整。
 
 并发与容错（`execute_criteria`）：
 
