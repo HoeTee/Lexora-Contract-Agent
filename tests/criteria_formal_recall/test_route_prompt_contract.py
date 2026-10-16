@@ -5,6 +5,10 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
+
+import httpx
 
 from pydantic import ValidationError
 
@@ -14,6 +18,7 @@ from tools.docxindex.llm.prompts import ATTACHMENT_HIERARCHY_PROMPT_VERSION, ROU
 from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.retriever import DocxIndexRetriever
 from tools.docxindex.retrieval.route import ROUTE_PROMPT_VERSION, RouteConfig, plan_route
+from tests.criteria_formal_recall._model_test_support import available_slot, model_transport
 
 
 METHODS = {
@@ -84,12 +89,13 @@ class RoutePromptContractTests(unittest.TestCase):
         ])
         prompts: list[str] = []
 
-        def complete(prompt: str) -> str:
-            prompts.append(prompt)
-            return next(responses)
+        def handler(request):
+            prompts.append(json.loads(request.content)["messages"][0]["content"])
+            return httpx.Response(200, json={"id": "test", "object": "chat.completion", "created": 0,
+                "model": "fake", "choices": [{"index": 0, "message": {"role": "assistant", "content": next(responses)}, "finish_reason": "stop"}]})
 
-        client.complete = complete  # type: ignore[method-assign]
-        result = client.complete_model("首次提示包含期望 JSON", RouteResponse, retries=1)
+        with model_transport("tools.docxindex.llm.client", handler):
+            result = client.complete_model("首次提示包含期望 JSON", RouteResponse)
 
         self.assertEqual(result.steps[0].method, "rule")
         self.assertEqual(len(prompts), 2)
@@ -158,14 +164,19 @@ class RoutePromptContractTests(unittest.TestCase):
     def test_validation_failure_does_not_invent_unavailable_http_status(self) -> None:
         client = LLMClient.__new__(LLMClient)
         client.settings = LLMSettings(model="fake")
-        client.complete = lambda _prompt: '{"steps":[{"method":"scan"},{"method":"hybrid"}]}'  # type: ignore[method-assign]
-
-        with self.assertRaises(LLMResponseValidationError) as raised:
-            client.complete_model("route prompt", RouteResponse, retries=0)
+        content = '{"steps":[{"method":"scan"},{"method":"hybrid"}]}'
+        response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+                                   model_dump=lambda: {"choices": [{"message": {"content": content}}]})
+        request = AsyncMock(return_value=(response, None))
+        with patch("tools.docxindex.llm.client.request_model_async", request), \
+             patch("endpoints.runtime.model_calls.model_semaphore", available_slot):
+            with self.assertRaises(LLMResponseValidationError) as raised:
+                client.complete_model("route prompt", RouteResponse)
 
         self.assertIsNone(raised.exception.http_status)
         self.assertEqual(raised.exception.error_type, "response_validation_error")
         self.assertIn("scan route may only be combined", str(raised.exception))
+        self.assertEqual(request.await_count, 2)
 
     def test_retrieval_error_fields_survive_model_error_classification(self) -> None:
         error = classify_model_call_error(

@@ -8,21 +8,22 @@ import runpy
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import zipfile
 
 from pydantic import ValidationError
 
 from tools.docxindex import retriever as retrieval
-from tools.docxindex.llm.schemas import RerankResponse
 from tools.docxindex.retrieval import content
-from tests.docxindex_ablation.run import anchor_texts
+from tests.docxindex_ablation.run import anchor_texts, capture_query
+from tests.docxindex_ablation.live import request as live_rerank_request
 from tests.docxindex_ablation.judge import new_ai_comments, validated_schema
 from tests.docxindex_ablation.formal import verify_intervention
 from tests.docxindex_ablation.variants import (
     IndexedFormatter,
     ORIGINAL_RERANK,
     RERANK_MODULE,
+    RecordedReranker,
     field_removal,
     skip_single_rerank,
     treatment,
@@ -104,16 +105,12 @@ class ExperimentTests(unittest.TestCase):
     def test_singleton_skip_preserves_rendered_evidence(self):
         idx = fixture()
         candidates = [{"node_id": "body/a", "sources": ["structure"]}]
-        for response in ({"nodes": [{"node_id": "body/a", "score": 0.9, "reason": "match"}]},):
-            client = SimpleNamespace(
-                settings=SimpleNamespace(model="fake"),
-                complete_model=lambda *args, response=response: RerankResponse.model_validate(response),
-            )
-            before = ORIGINAL_RERANK(idx, "query", candidates, client, 1000, None)
-            after = skip_single_rerank(idx, "query", candidates, client, 1000, None)
-            self.assertEqual(
-                content.build_content_context(idx, before, 1000), content.build_content_context(idx, after, 1000)
-            )
+        client = SimpleNamespace(model="fake", rank=lambda query, documents, top_n=None: [(0, 0.9)])
+        before = ORIGINAL_RERANK(idx, "query", candidates, client, 1000, None)
+        after = skip_single_rerank(idx, "query", candidates, client, 1000, None)
+        self.assertEqual(
+            content.build_content_context(idx, before, 1000), content.build_content_context(idx, after, 1000)
+        )
 
     def test_treatments_restore_original_functions(self):
         idx = fixture()
@@ -124,15 +121,54 @@ class ExperimentTests(unittest.TestCase):
                 content.get_node(idx, "absent")
         self.assertIs(content.get_node, original)
 
-    def test_cache_and_local_limiter_preserve_real_reranker(self):
+    def test_cache_treatment_preserves_dedicated_reranker(self):
         idx = fixture()
         candidates = [{"node_id": "body/a"}]
-        response = RerankResponse.model_validate({"nodes": [{"node_id": "body/a", "score": 0.5}]})
-        client = SimpleNamespace(settings=SimpleNamespace(model="fake"), complete_model=lambda *a: response)
+        client = SimpleNamespace(model="fake", rank=lambda query, documents, top_n=None: [(0, 0.5)])
         baseline = ORIGINAL_RERANK(idx, "q", candidates, client, 1000, None)
-        for name in ("E07", "E08"):
-            with treatment(name, idx):
-                self.assertEqual(ORIGINAL_RERANK(idx, "q", candidates, client, 1000, None), baseline)
+        with treatment("E07", idx):
+            self.assertEqual(ORIGINAL_RERANK(idx, "q", candidates, client, 1000, None), baseline)
+
+    def test_removed_local_limiter_treatment_is_explicitly_retired(self):
+        with self.assertRaisesRegex(ValueError, "E08 is retired"):
+            with treatment("E08", fixture()):
+                self.fail("Removed local limiter must not produce a fake treatment measurement.")
+
+    def test_dedicated_reranker_capture_replays_exact_query_and_documents(self):
+        idx = fixture()
+        candidates = [{"node_id": "body/a"}]
+        client = SimpleNamespace(model="fake", rank=Mock(return_value=[(0, 0.7)]))
+        engine = SimpleNamespace(
+            _search_sync=lambda query: retrieval.rerank_matches(
+                idx, query, candidates, client, 1000, None, max_selected_nodes=1
+            )
+        )
+        recorded = capture_query(engine, "query")
+        call = recorded["calls"][0]
+        frozen = RecordedReranker("fake", call["rerank_requests"])
+        replayed = ORIGINAL_RERANK(
+            idx, "query", candidates, frozen, 1000, None, max_selected_nodes=call["max_selected_nodes"]
+        )
+        frozen.assert_consumed()
+        self.assertEqual(replayed, recorded["output"])
+        self.assertEqual(client.rank.call_count, 1)
+        with self.assertRaisesRegex(AssertionError, "differ"):
+            RecordedReranker("fake", call["rerank_requests"]).rank("different", ["different"])
+        with self.assertRaisesRegex(AssertionError, "did not consume"):
+            RecordedReranker("fake", call["rerank_requests"]).assert_consumed()
+
+    def test_live_field_screening_uses_dedicated_scores_and_preserves_input_admission(self):
+        client = SimpleNamespace(
+            model="fake", provider="higress_qwen", instruct="policy", rank=Mock(return_value=[(0, 0.7)])
+        )
+        result = live_rerank_request(client, fixture(), "query", [{"node_id": "body/a"}], 1000, field="node_type")
+        self.assertEqual(result["response"], {"index_scores": [(0, 0.7)]})
+        self.assertEqual(result["ranked"][0]["node_id"], "body/a")
+        self.assertEqual(result["ranked"][0]["rerank_score"], 0.7)
+        self.assertNotIn("node_type", json.loads(result["request"]["documents"][0]))
+        self.assertEqual(result["request"]["query"], "query")
+        self.assertEqual(result["request"]["instruct"], "policy")
+        client.rank.assert_called_once()
 
     def test_field_removal_preserves_admission_and_other_fields(self):
         idx = fixture()

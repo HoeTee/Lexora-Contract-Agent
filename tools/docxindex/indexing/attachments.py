@@ -81,7 +81,6 @@ def build_attachments(
     hierarchy_input_max_tokens: int = 20000,
     hierarchy_batch_target_tokens: int = 16000,
     hierarchy_batch_overlap_tokens: int = 800,
-    hierarchy_retry_count: int = 3,
     attachment_max_levels: int = 6,
     llm_concurrency: int = 10,
 ) -> list[DocumentNode]:
@@ -119,7 +118,6 @@ def build_attachments(
                 batch_target_tokens=hierarchy_batch_target_tokens,
                 batch_overlap_tokens=hierarchy_batch_overlap_tokens,
                 max_levels=attachment_max_levels,
-                retry_count=hierarchy_retry_count,
                 split_long_nodes=split_long_nodes,
                 paragraph_split_threshold_tokens=paragraph_split_threshold_tokens,
                 paragraph_chunk_target_tokens=paragraph_chunk_target_tokens,

@@ -6,8 +6,12 @@ from __future__ import annotations
 
 import os
 import re
+import math
+import json
+import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 from dotenv import load_dotenv
@@ -104,6 +108,8 @@ def _parse_bool(value: Any, field_name: str) -> bool | None:
 
 
 def _as_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or isinstance(value, float) and not value.is_integer():
+        raise RuntimeError(f"{field_name} must be an integer, got {value!r}.")
     try:
         return int(value)
     except (TypeError, ValueError) as exc:
@@ -112,9 +118,12 @@ def _as_int(value: Any, field_name: str) -> int:
 
 def _as_float(value: Any, field_name: str) -> float:
     try:
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError) as exc:
         raise RuntimeError(f"{field_name} must be a number, got {value!r}.") from exc
+    if isinstance(value, bool) or not math.isfinite(result):
+        raise RuntimeError(f"{field_name} must be a finite number, got {value!r}.")
+    return result
 
 
 def _as_str(value: Any, field_name: str) -> str:
@@ -232,86 +241,60 @@ TOP_P = _as_float(cfg("llm", "top_p"), "llm.top_p")
 SEED = _as_int(cfg("llm", "seed"), "llm.seed")
 
 
-def _model_semaphore_section(model_type: str) -> dict[str, Any]:
-    section_data = CONFIG.get("model_semaphore")
-    if isinstance(section_data, dict) and isinstance(section_data.get(model_type), dict):
-        return section_data[model_type]
-    return {}
-
-
-def _model_semaphore_value(model_type: str, key: str, default: Any) -> Any:
-    section_data = _model_semaphore_section(model_type)
-    if key in section_data:
-        return section_data[key]
-    shared = CONFIG.get("model_semaphore") or {}
-    if key == "max_concurrent_requests" and model_type in (shared.get("limits") or {}):
-        return shared["limits"][model_type]
-    if key in shared:
-        return shared[key]
-    if model_type == "llm":
-        legacy_key_map = {
-            "enabled": "global_semaphore_enabled",
-            "max_concurrent_requests": "max_global_concurrent_requests",
-            "redis_url": "global_semaphore_redis_url",
-            "key": "global_semaphore_key",
-            "wait_timeout_seconds": "global_semaphore_wait_timeout_seconds",
-            "lease_seconds": "global_semaphore_lease_seconds",
-            "poll_interval_seconds": "global_semaphore_poll_interval_seconds",
-        }
-        legacy_key = legacy_key_map[key]
-        return cfg_optional("llm", legacy_key, default)
-    return default
+def _validate_control_config() -> None:
+    removed = {
+        "workflow": {"max_api_concurrent_reviews", "criterion_retry_max_attempts"},
+        "queue": {"enabled", "task_soft_time_limit_seconds", "task_soft_time_limit"},
+        "llm": {"timeout_seconds", "global_semaphore_enabled", "max_global_concurrent_requests",
+                "global_semaphore_redis_url", "global_semaphore_key", "global_semaphore_wait_timeout_seconds",
+                "global_semaphore_lease_seconds", "global_semaphore_poll_interval_seconds"},
+        "embedding": {"timeout_seconds"},
+        "rerank": {"timeout", "timeout_seconds", "max_retries", "initial_retry_delay", "max_retry_delay"},
+    }
+    for section, keys in removed.items():
+        for key in keys.intersection(CONFIG.get(section) or {}):
+            raise RuntimeError(f"Removed configuration: {section}.{key}. See docs/CONCURRENCY_TIMEOUT_CONFIGURATION.md")
+    semaphore = CONFIG.get("model_semaphore") or {}
+    if not isinstance(semaphore, dict):
+        raise RuntimeError("model_semaphore must contain per-type mappings.")
+    legacy = set(semaphore) - {"llm", "embedding", "reranker"}
+    if legacy:
+        raise RuntimeError(f"Migrate shared model_semaphore fields {sorted(legacy)} to per-type configuration; remove enabled/wait_timeout_seconds.")
+    docx = (CONFIG.get("retrieval") or {}).get("docxindex") or {}
+    if "concurrency" in docx or "retry_count" in ((docx.get("indexing") or {}).get("hierarchy") or {}):
+        raise RuntimeError("Remove retrieval.docxindex.concurrency and indexing.hierarchy.retry_count; use unified model control.")
 
 
 def _model_semaphore_config(model_type: str, *, default_max: int) -> dict[str, Any]:
-    field_prefix = f"model_semaphore.{model_type}"
-    return {
-        "enabled": bool(
-            _parse_bool(
-                _model_semaphore_value(model_type, "enabled", False),
-                f"{field_prefix}.enabled",
-            )
-        ),
-        "max_concurrent_requests": _as_int(
-            _model_semaphore_value(model_type, "max_concurrent_requests", default_max),
-            f"{field_prefix}.max_concurrent_requests",
-        ),
-        "redis_url": _as_str(
-            _model_semaphore_value(
-                model_type,
-                "redis_url",
-                cfg_optional("queue", "broker_url", "redis://localhost:6379/0"),
-            ),
-            f"{field_prefix}.redis_url",
-        ),
-        "key": _as_str(
-            _model_semaphore_value(
-                model_type,
-                "key",
-                f"contract_agent:model:{model_type}:semaphore",
-            ),
-            f"{field_prefix}.key",
-        ),
-        "wait_timeout_seconds": _as_float(
-            _model_semaphore_value(model_type, "wait_timeout_seconds", 600),
-            f"{field_prefix}.wait_timeout_seconds",
-        ),
-        "lease_seconds": _as_float(
-            _model_semaphore_value(model_type, "lease_seconds", 600),
-            f"{field_prefix}.lease_seconds",
-        ),
-        "poll_interval_seconds": _as_float(
-            _model_semaphore_value(model_type, "poll_interval_seconds", 0.2),
-            f"{field_prefix}.poll_interval_seconds",
-        ),
+    section = (CONFIG.get("model_semaphore") or {}).get(model_type) or {}
+    prefix = f"model_semaphore.{model_type}"
+    if not isinstance(section, dict):
+        raise RuntimeError(f"{prefix} must be a mapping.")
+    allowed = {"max_concurrent_requests", "redis_url", "key", "lease_seconds", "poll_interval_seconds"}
+    if set(section) - allowed:
+        raise RuntimeError(f"Removed/unknown configuration in {prefix}: {sorted(set(section) - allowed)}")
+    result = {
+        "max_concurrent_requests": _as_int(section.get("max_concurrent_requests", default_max), prefix + ".max_concurrent_requests"),
+        "redis_url": _as_str(section.get("redis_url", "redis://redis:6379/2"), prefix + ".redis_url"),
+        "key": _as_str(section.get("key", f"contract_agent:model:{model_type}:semaphore"), prefix + ".key"),
+        "lease_seconds": _as_float(section.get("lease_seconds", 600), prefix + ".lease_seconds"),
+        "poll_interval_seconds": _as_float(section.get("poll_interval_seconds", 0.2), prefix + ".poll_interval_seconds"),
     }
+    timeout = _as_float(cfg("workflow", "model_call_timeout_seconds"), "workflow.model_call_timeout_seconds")
+    if timeout <= 0 or result["lease_seconds"] < timeout + 5:
+        raise RuntimeError(f"{prefix}.lease_seconds must cover model_call_timeout_seconds plus 5 seconds cleanup allowance.")
+    if result["max_concurrent_requests"] < 1 or result["poll_interval_seconds"] <= 0 or not result["key"]:
+        raise RuntimeError(f"{prefix}: concurrency and poll interval must be positive.")
+    return result
 
 
+_validate_control_config()
 MODEL_SEMAPHORE_CONFIGS = {
-    "llm": _model_semaphore_config("llm", default_max=10),
-    "embedding": _model_semaphore_config("embedding", default_max=5),
-    "reranker": _model_semaphore_config("reranker", default_max=5),
+    kind: _model_semaphore_config(kind, default_max=limit)
+    for kind, limit in (("llm", 5), ("embedding", 3), ("reranker", 10))
 }
+if len({(value["redis_url"], value["key"]) for value in MODEL_SEMAPHORE_CONFIGS.values()}) != 3:
+    raise RuntimeError("Each model type must have a distinct Redis semaphore key.")
 
 EMBED_BASE_URL = _as_str(cfg("embedding", "base_url"), "embedding.base_url")
 EMBED_NAME = (
@@ -355,10 +338,6 @@ MAX_ORCHESTRATOR_CONCURRENCY = _as_int(
     cfg("workflow", "max_orchestrator_concurrency"),
     "workflow.max_orchestrator_concurrency",
 )
-MAX_API_CONCURRENT_REVIEWS = _as_int(
-    cfg("workflow", "max_api_concurrent_reviews"),
-    "workflow.max_api_concurrent_reviews",
-)
 MODEL_CALL_TIMEOUT_SECONDS = _as_float(
     cfg("workflow", "model_call_timeout_seconds"),
     "workflow.model_call_timeout_seconds",
@@ -367,16 +346,11 @@ MODEL_CALL_MAX_RETRIES = _as_int(
     cfg("workflow", "model_call_max_retries"),
     "workflow.model_call_max_retries",
 )
-CRITERION_RETRY_MAX_ATTEMPTS = _as_int(
-    cfg_optional("workflow", "criterion_retry_max_attempts", 2),
-    "workflow.criterion_retry_max_attempts",
-)
 SUBAGENT_ALLOWED_TOOLS = _as_str_tuple(
     cfg_optional("workflow", "subagent_allowed_tools", ["contract_search"]),
     "workflow.subagent_allowed_tools",
     allow_empty=True,
 )
-QUEUE_ENABLED = _parse_bool(cfg_optional("queue", "enabled", False), "queue.enabled")
 QUEUE_BROKER_URL = _as_str(
     cfg_optional("queue", "broker_url", "redis://localhost:6379/0"),
     "queue.broker_url",
@@ -397,6 +371,12 @@ QUEUE_WATCHDOG_INTERVAL_SECONDS = _as_float(
     cfg_optional("queue", "watchdog_interval_seconds", 10),
     "queue.watchdog_interval_seconds",
 )
+
+QUEUE_TASK_TIME_LIMIT_SECONDS = _as_int(
+    cfg_optional("queue", "task_time_limit_seconds", 1800), "queue.task_time_limit_seconds",
+)
+if QUEUE_TASK_TIME_LIMIT_SECONDS <= 0 or MODEL_CALL_MAX_RETRIES < 0 or MAX_ORCHESTRATOR_CONCURRENCY < 1:
+    raise RuntimeError("Task time limit and criterion concurrency must be positive; model retries cannot be negative.")
 
 RETRIEVAL_BACKEND = _as_str(cfg("retrieval", "backend"), "retrieval.backend").lower()
 if RETRIEVAL_BACKEND not in {"llamaindex", "docxindex"}:
@@ -483,3 +463,39 @@ print(
     f"(ctx={MAX_CONTEXT_TOKENS:,}  prompt<={MAX_PROMPT_TOKENS:,}  "
     f"out={MAX_RESULT_TOKENS:,}  tools={MAX_TOOL_CALLS})"
 )
+
+
+def control_configuration_summary() -> dict[str, Any]:
+    def safe_redis_url(url):
+        parsed = urlsplit(url)
+        return f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 6379}{parsed.path}"
+    return {
+        "queue": {
+            "broker": safe_redis_url(QUEUE_BROKER_URL),
+            "pending_timeout_seconds": QUEUE_PENDING_TIMEOUT_SECONDS,
+            "queued_timeout_seconds": QUEUE_QUEUED_TIMEOUT_SECONDS,
+            "watchdog_interval_seconds": QUEUE_WATCHDOG_INTERVAL_SECONDS,
+            "task_time_limit_seconds": QUEUE_TASK_TIME_LIMIT_SECONDS,
+            "soft_time_limit": "disabled",
+            "worker_disable_prefetch": QUEUE_WORKER_DISABLE_PREFETCH,
+            "worker_prefetch_multiplier": 1,
+            "task_acks_late": False,
+            "visibility_timeout_seconds": 3600,
+        },
+        "workflow": {"criterion_concurrency_per_contract": MAX_ORCHESTRATOR_CONCURRENCY,
+                     "model_operation_timeout_seconds": MODEL_CALL_TIMEOUT_SECONDS,
+                     "model_extra_send_limit": MODEL_CALL_MAX_RETRIES},
+        "model_semaphore": {
+            kind: {**{key: value for key, value in raw.items() if key != "redis_url"},
+                   "redis_url": safe_redis_url(raw["redis_url"]),
+                   "key_ttl_seconds": int(raw["lease_seconds"]) + 60}
+            for kind, raw in MODEL_SEMAPHORE_CONFIGS.items()
+        },
+        "deployment_contract": {"worker_count": 3, "concurrency_per_worker": 1, "pool": "prefork"},
+        "internal": {"redis_cleanup_timeout_seconds": 2, "minimum_lease_margin_seconds": 5,
+                     "heartbeat_interval_seconds": 10, "task_lock_wait_seconds": 30,
+                     "deadline_reconciliation_margin_seconds": 5},
+    }
+
+
+print("[config] execution-control " + json.dumps(control_configuration_summary(), ensure_ascii=False), file=sys.stderr)

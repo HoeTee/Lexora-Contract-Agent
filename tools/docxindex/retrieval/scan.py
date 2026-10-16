@@ -49,54 +49,22 @@ def scan_matches(
         prompt = scan_prompt(query, items, candidate_instruction=candidate_instruction)
         text_tokens = sum(estimate_tokens(item[3]) for item in batch)
         prompt_tokens = estimate_tokens(prompt)
-        response = None
-        for attempt in range(1, 3):
-            stage_token = set_call_stage(f"scan.batch-{batch_index:03d}")
-            started = time.monotonic()
-            append_route_event(
-                "scan_batch_started",
-                {
-                    "batch_index": batch_index,
-                    "batch_count": len(batches),
-                    "attempt": attempt,
-                    "anchor_count": len(batch),
-                    "text_tokens": text_tokens,
-                    "prompt_tokens": prompt_tokens,
-                },
-            )
-            try:
-                response = client.complete_model(prompt, ScanResponse)
-            except Exception as exc:
-                append_route_event(
-                    "scan_batch_failed",
-                    {
-                        "batch_index": batch_index,
-                        "batch_count": len(batches),
-                        "attempt": attempt,
-                        "duration_seconds": round(time.monotonic() - started, 3),
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    },
-                )
-                if attempt == 2:
-                    raise
-                time.sleep(1)
-            else:
-                append_route_event(
-                    "scan_batch_succeeded",
-                    {
-                        "batch_index": batch_index,
-                        "batch_count": len(batches),
-                        "attempt": attempt,
-                        "duration_seconds": round(time.monotonic() - started, 3),
-                        "finding_count": len(response.findings),
-                    },
-                )
-                break
-            finally:
-                reset_call_stage(stage_token)
-        if response is None:
-            raise RuntimeError(f"Scan batch {batch_index} did not produce a response.")
+        started = time.monotonic()
+        stage_token = set_call_stage(f"scan.batch-{batch_index:03d}")
+        append_route_event("scan_batch_started", {"batch_index": batch_index, "batch_count": len(batches),
+            "anchor_count": len(batch), "text_tokens": text_tokens, "prompt_tokens": prompt_tokens})
+        try:
+            response = client.complete_model(prompt, ScanResponse)
+        except Exception as exc:
+            append_route_event("scan_batch_failed", {"batch_index": batch_index,
+                "duration_seconds": round(time.monotonic()-started, 3),
+                "error_type": type(exc).__name__, "error": str(exc)})
+            raise
+        else:
+            append_route_event("scan_batch_succeeded", {"batch_index": batch_index,
+                "duration_seconds": round(time.monotonic()-started, 3), "finding_count": len(response.findings)})
+        finally:
+            reset_call_stage(stage_token)
         by_anchor = {anchor_id: (record, owner, text) for anchor_id, record, owner, text in batch}
         findings: list[dict[str, Any]] = []
         seen: set[str] = set()

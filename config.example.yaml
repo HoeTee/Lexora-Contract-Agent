@@ -1,51 +1,58 @@
 llm:
-  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  name: "qwen3.6-27b"
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  name: qwen3.6-27b
   enable_thinking: false
   max_context_tokens: 254000
-  # Hard per-request prompt budget; must remain below 90000 for intranet models.
   max_prompt_tokens: 88000
   max_result_tokens: 64000
   max_tool_calls: 25
   temperature: 0.0
   top_p: 0.01
   seed: 42
-
 embedding:
-  base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-  name: "text-embedding-v4"
+  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+  name: text-embedding-v4
   max_input_tokens: 8000
-
 rerank:
-  base_url: "http://higress.llmgateway.dev.qa.zrub.com/v1/rerank"
-  name: "Qwen3-Reranker-8B"
-  instruct: "Given a contract review query, retrieve relevant institutional policy passages."
+  base_url: http://higress.llmgateway.dev.qa.zrub.com/v1/rerank
+  name: Qwen3-Reranker-8B
+  instruct: Given a contract review query, retrieve relevant institutional policy
+    passages.
 workflow:
-  max_reflection_rounds: 3
-  max_orchestrator_concurrency: 5
-  max_api_concurrent_reviews: 1
-  model_call_timeout_seconds: 30
+  max_reflection_rounds: 10
+  max_orchestrator_concurrency: 2
+  model_call_timeout_seconds: 60
   model_call_max_retries: 1
-  criterion_retry_max_attempts: 2
+  subagent_allowed_tools:
+  - contract_search
 queue:
-  enabled: true
-  broker_url: "redis://localhost:6379/0"
+  broker_url: redis://redis:6379/0
   pending_timeout_seconds: 60
   queued_timeout_seconds: 7200
   watchdog_interval_seconds: 10
-
+  worker_disable_prefetch: true
+  task_time_limit_seconds: 1800
 model_semaphore:
-  enabled: false
-  redis_url: "redis://localhost:6379/2"
-  wait_timeout_seconds: 600
-  lease_seconds: 600
-  limits:
-    llm: 5
-    embedding: 3
-    reranker: 5
-
+  llm:
+    max_concurrent_requests: 5
+    redis_url: redis://redis:6379/2
+    key: contract_agent:model:llm:semaphore
+    lease_seconds: 600
+    poll_interval_seconds: 0.2
+  embedding:
+    max_concurrent_requests: 3
+    redis_url: redis://redis:6379/2
+    key: contract_agent:model:embedding:semaphore
+    lease_seconds: 600
+    poll_interval_seconds: 0.2
+  reranker:
+    max_concurrent_requests: 10
+    redis_url: redis://redis:6379/2
+    key: contract_agent:model:reranker:semaphore
+    lease_seconds: 600
+    poll_interval_seconds: 0.2
 retrieval:
-  backend: "llamaindex"
+  backend: llamaindex
   docxindex:
     input_tokens: 20000
     output_tokens: 12000
@@ -61,34 +68,27 @@ retrieval:
       enabled: true
     routing:
       fallback_enabled: true
-    concurrency:
-      llm: 10
-      embedding: 1
-      reranker: 10
-
 api:
   require_request_model_config: false
   keep_input: true
   keep_output: true
-  result_output_default: "file"
+  result_output_default: file
   result_upload_enabled: false
-  result_upload_domain: "http://64.202.33.42:30843"
-  result_upload_path: "/openapi/agentar/v1/attachment/batchUploadAttachmentFile.json"
-  result_upload_authorization: ""
+  result_upload_domain: http://64.202.33.42:30843
+  result_upload_path: /openapi/agentar/v1/attachment/batchUploadAttachmentFile.json
+  result_upload_authorization: ''
   result_upload_timeout_seconds: 60
   meta_required: true
   meta_fields:
-    - "templateCode"
-    - "serialNo"
+  - templateCode
+  - serialNo
   callback_enabled: false
-  callback_url: ""
-  callback_file_field: "file"
+  callback_url: ''
+  callback_file_field: file
   url_download_timeout_seconds: 60
-  url_download_max_size: "50MB"
-
+  url_download_max_size: 50MB
 docx:
   comment_include_criterion: false
-
 logging:
   enabled: false
   detailed: false

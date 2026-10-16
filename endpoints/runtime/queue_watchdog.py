@@ -8,7 +8,7 @@ from config import (
     QUEUE_QUEUED_TIMEOUT_SECONDS,
     QUEUE_WATCHDOG_INTERVAL_SECONDS,
 )
-from endpoints.review.task_store import expire_stale_waiting_tasks
+from endpoints.review.task_store import expire_stale_waiting_tasks, expire_executing_tasks
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,8 @@ async def run_queue_watchdog() -> None:
                 pending_timeout_seconds=QUEUE_PENDING_TIMEOUT_SECONDS,
                 queued_timeout_seconds=QUEUE_QUEUED_TIMEOUT_SECONDS,
             )
+            expired += await asyncio.to_thread(expire_executing_tasks)
             if expired:
-                logger.warning("Marked %s stale waiting review task(s) as failed", len(expired))
+                logger.warning("Marked %s expired review task(s) as failed", len(expired))
         except Exception:
             logger.exception("Queue timeout watchdog failed")

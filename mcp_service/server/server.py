@@ -78,6 +78,9 @@ def _get_docxindex_retriever() -> DocxIndexRetriever:
             embedding_model=EMBED_NAME,
             embedding_base_url=EMBED_BASE_URL,
             embedding_api_key=EMBED_API_KEY,
+            reranker_model=RERANK_NAME,
+            reranker_api_key=RERANK_API_KEY,
+            reranker_base_url=RERANK_BASE_URL,
         )
     return docxindex_retriever
 

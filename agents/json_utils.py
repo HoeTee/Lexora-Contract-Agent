@@ -3,6 +3,7 @@ Helpers for extracting, validating, and repairing JSON agent outputs.
 """
 
 import json
+from config import MODEL_CALL_MAX_RETRIES
 from contextlib import contextmanager, nullcontext
 from typing import TypeVar
 
@@ -76,7 +77,7 @@ async def chat_until_valid_json(
     schema: type[ModelT],
     expected_format: str,
     *,
-    max_attempts: int = 3,
+    max_attempts: int | None = None,
     final_attempt_schema: type[BaseModel] | None = None,
 ) -> tuple[dict, str]:
     """Validate agent JSON, optionally relaxing only the final parsed response."""
@@ -84,7 +85,7 @@ async def chat_until_valid_json(
     with scope:
         return await _chat_until_valid_json(
             agent, initial_prompt, schema, expected_format,
-            max_attempts=max_attempts, final_attempt_schema=final_attempt_schema,
+            max_attempts=min(max_attempts or MODEL_CALL_MAX_RETRIES + 1, MODEL_CALL_MAX_RETRIES + 1), final_attempt_schema=final_attempt_schema,
         )
 
 

@@ -32,14 +32,6 @@ class RerankConfig(BaseModel):
     enabled: bool = True
 
 
-class ConcurrencyConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    llm: int = Field(default=10, ge=1)
-    embedding: int = Field(default=10, ge=1)
-    reranker: int = Field(default=10, ge=1)
-
-
 class RetrievalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -49,7 +41,6 @@ class RetrievalConfig(BaseModel):
     vector: VectorRetrievalConfig = Field(default_factory=VectorRetrievalConfig)
     semantic: SemanticRetrievalConfig = Field(default_factory=SemanticRetrievalConfig)
     rerank: RerankConfig = Field(default_factory=RerankConfig)
-    concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
 
     @classmethod
     def from_sources(
@@ -69,7 +60,8 @@ class RetrievalConfig(BaseModel):
         vector = dict(data.get("vector") or {})
         semantic = dict(data.get("semantic") or {})
         rerank = dict(data.get("rerank") or {})
-        concurrency = dict(section.get("concurrency") or {})
+        if "concurrency" in section:
+            raise ValueError("Remove retrieval.docxindex.concurrency; use model_semaphore limits.")
         routing = dict(section.get("routing") or {})
 
         _migrate_legacy_value(routing, "llm_candidates", semantic, "structure_candidate_limit")
@@ -87,7 +79,6 @@ class RetrievalConfig(BaseModel):
         data["vector"] = vector
         data["semantic"] = semantic
         data["rerank"] = rerank
-        data["concurrency"] = concurrency
         return cls.model_validate(data)
 
 

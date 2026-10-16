@@ -4,6 +4,8 @@ import asyncio
 import json
 import sys
 import time
+from config import MODEL_SEMAPHORE_CONFIGS
+from tools.docxindex.reranker import RerankerClient
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +47,9 @@ class DocxIndexRetriever:
         embedding_model: str | None = None,
         embedding_base_url: str | None = None,
         embedding_api_key: str | None = None,
+        reranker_model: str | None = None,
+        reranker_api_key: str | None = None,
+        reranker_base_url: str | None = None,
     ) -> None:
         self.config_path = Path(config_path).resolve()
         self.retrieval_config = RetrievalConfig.from_sources(self.config_path)
@@ -64,12 +69,12 @@ class DocxIndexRetriever:
         )
         self.llm_client = LLMClient(
             self.llm_settings,
-            max_concurrency=self.retrieval_config.concurrency.llm,
         )
         self.embedding_client = EmbeddingClient(
             self.embedding_settings,
-            max_concurrency=self.retrieval_config.concurrency.embedding,
         )
+        self.reranker_client = RerankerClient.from_sources(self.config_path, model=reranker_model,
+            api_key=reranker_api_key, base_url=reranker_base_url)
         self._index: dict[str, Any] | None = None
         self._vector_index: Any | None = None
 
@@ -187,7 +192,7 @@ class DocxIndexRetriever:
             llm_summary=indexing.enrichment.llm_summary,
             llm_settings=self.llm_settings,
             cache_dir=None,
-            llm_concurrency=retrieval.concurrency.llm,
+            llm_concurrency=MODEL_SEMAPHORE_CONFIGS["llm"]["max_concurrent_requests"],
             paragraph_split_threshold_tokens=indexing.paragraph.split_threshold_tokens,
             paragraph_chunk_target_tokens=indexing.paragraph.chunk_target_tokens,
             table_split_threshold_tokens=indexing.table.split_threshold_tokens,
@@ -198,7 +203,6 @@ class DocxIndexRetriever:
             hierarchy_batch_target_tokens=indexing.hierarchy.batch_target_tokens,
             hierarchy_batch_overlap_tokens=indexing.hierarchy.batch_overlap_tokens,
             hierarchy_max_levels=indexing.hierarchy.max_levels,
-            hierarchy_retry_count=indexing.hierarchy.retry_count,
             attachment_max_levels=indexing.attachment.max_levels,
             summary_batch_max_nodes=indexing.summary.batch_max_nodes,
             summary_batch_max_tokens=indexing.summary.batch_max_tokens,
@@ -210,7 +214,7 @@ class DocxIndexRetriever:
                 document_index,
                 self.embedding_client,
                 source_index=docx_path.name,
-                concurrency=retrieval.concurrency.embedding,
+                concurrency=MODEL_SEMAPHORE_CONFIGS["embedding"]["max_concurrent_requests"],
             )
 
         self._index = document_index
@@ -295,7 +299,7 @@ class DocxIndexRetriever:
                         query,
                         self.llm_client,
                         config.scan_batch_tokens,
-                        config.concurrency.llm,
+                        MODEL_SEMAPHORE_CONFIGS["llm"]["max_concurrent_requests"],
                         allowed_node_ids=allowed_node_ids,
                         candidate_instruction=step.candidate_instruction,
                     )
@@ -358,9 +362,8 @@ class DocxIndexRetriever:
         try:
             if rerank_triggered:
                 ranked_matches = rerank_matches(
-                    index, query, ranked_matches, self.llm_client,
+                    index, query, ranked_matches, self.reranker_client,
                     config.input_tokens, cache_dir=None,
-                    concurrency=config.concurrency.reranker,
                     max_selected_nodes=selected_node_limit,
                 )
             if not full_coverage:
@@ -431,7 +434,6 @@ class DocxIndexRetriever:
             self.llm_client,
             cache_dir=None,
             input_tokens=config.input_tokens,
-            concurrency=config.concurrency.llm,
             allowed_node_ids=allowed_node_ids,
         )[: config.semantic.structure_candidate_limit]
         vector_matches: list[dict[str, Any]] = []
@@ -446,7 +448,6 @@ class DocxIndexRetriever:
                 top_k=config.vector.probe_limit,
                 score_threshold=config.vector.score_threshold,
                 input_tokens=config.input_tokens,
-                concurrency=config.concurrency.embedding,
                 allowed_node_ids=allowed_node_ids,
             )
         matches, _, vector_added_count = _merge_semantic_matches(

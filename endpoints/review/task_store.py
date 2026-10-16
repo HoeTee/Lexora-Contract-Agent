@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager, suppress
 import json
+import errno
 import os
 import re
 import shutil
@@ -17,13 +18,18 @@ from fastapi import UploadFile
 from config import API_KEEP_INPUT, DATA_DIR, LOGGING_ENABLED, LOGGING_DETAILED
 from endpoints.runtime.filenames import safe_upload_filename
 from loggers.api_event_logger import append_api_event
+from endpoints.runtime.model_budget import task_deadline
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 
 TASK_ID_PATTERN = re.compile(r"^[0-9]{8}-[0-9]{6}-[a-f0-9]{4}$")
 BEIJING_TZ = timezone(timedelta(hours=8))
 ACTIVE_STATUSES = {"pending", "queued", "running"}
 TASK_WRITE_LOCK_TIMEOUT_SECONDS = 30
-TASK_WRITE_LOCK_STALE_SECONDS = 300
 TASK_WRITE_LOCK_POLL_SECONDS = 0.05
 
 
@@ -81,38 +87,29 @@ def task_json_path(client_dir: str, task_id: str) -> Path:
 
 @contextmanager
 def task_write_lock(path: Path):
+    """OS-owned file lock: killing a writer releases it without stale-lock delays."""
     lock_path = path.with_name(f"{path.name}.lock")
     deadline = time.monotonic() + TASK_WRITE_LOCK_TIMEOUT_SECONDS
-    fd: int | None = None
-
-    while True:
-        try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            os.write(fd, f"pid={os.getpid()} created_at={time.time()}".encode("utf-8"))
-            break
-        except (FileExistsError, PermissionError):
-            try:
-                age = time.time() - lock_path.stat().st_mtime
-                if age > TASK_WRITE_LOCK_STALE_SECONDS:
-                    try:
-                        lock_path.unlink()
-                        continue
-                    except OSError:
-                        pass
-            except OSError:
-                pass
-
-            if time.monotonic() >= deadline:
-                raise TimeoutError(f"Timed out waiting for task state write lock: {lock_path}") from None
-            time.sleep(TASK_WRITE_LOCK_POLL_SECONDS)
-
+    fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR, 0o600)
     try:
+        while True:
+            try:
+                if os.name == "nt":
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise TimeoutError(f"Timed out waiting for task state write lock: {lock_path}") from None
+                time.sleep(TASK_WRITE_LOCK_POLL_SECONDS)
         yield
     finally:
-        if fd is not None:
-            os.close(fd)
-        with suppress(FileNotFoundError):
-            lock_path.unlink()
+        os.close(fd)
+        # Keep the inode: unlinking can split simultaneous writers across two locks.
 
 
 def input_dir(client_dir: str, task_id: str) -> Path:
@@ -451,11 +448,14 @@ def iter_active_tasks() -> list[dict[str, Any]]:
 
 
 def update_task(client_dir: str, task_id: str, **updates: Any) -> dict[str, Any]:
-    task = read_task(client_dir, task_id)
-    if task is None:
-        raise FileNotFoundError(task_id)
-    task.update(updates)
-    return write_task(task)
+    path = task_json_path(client_dir, task_id)
+    with task_write_lock(path):
+        task = read_task(client_dir, task_id)
+        if task is None:
+            raise FileNotFoundError(task_id)
+        task.update(updates)
+        _write_task_file(path, task)
+        return task
 
 
 def mutate_task_if_status(
@@ -527,32 +527,24 @@ def update_task_criterion(
     review_result: str | None = None,
     error: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    task = read_task(client_dir, task_id)
+    def apply(task: dict[str, Any]) -> bool:
+        criteria = [dict(item) for item in task.get("criteria") or []]
+        for item in criteria:
+            if str(item.get("id")) == str(criterion_id):
+                item.update(execution_status=execution_status, review_result=review_result, error=error)
+                break
+        else:
+            criteria.append({"id": str(criterion_id), "criterion": "", "execution_status": execution_status,
+                             "review_result": review_result, "error": error})
+        task["criteria"] = criteria
+        task["quality"] = summarize_criteria(criteria)
+        return True
+
+    updated = mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
+    task = updated or read_task(client_dir, task_id)
     if task is None:
         raise FileNotFoundError(task_id)
-    criteria = [dict(item) for item in task.get("criteria") or []]
-    for item in criteria:
-        if str(item.get("id")) != str(criterion_id):
-            continue
-        item.update(
-            execution_status=execution_status,
-            review_result=review_result,
-            error=error,
-        )
-        break
-    else:
-        criteria.append(
-            {
-                "id": str(criterion_id),
-                "criterion": "",
-                "execution_status": execution_status,
-                "review_result": review_result,
-                "error": error,
-            }
-        )
-    task["criteria"] = criteria
-    task["quality"] = summarize_criteria(criteria)
-    return write_task(task)
+    return task
 
 
 def copy_contract_to_result(contract_path: Path | str, result_path: Path | str) -> Path:
@@ -666,10 +658,13 @@ def mark_worker_started(client_dir: str, task_id: str, worker_id: str) -> dict[s
 
     def apply(task: dict[str, Any]) -> bool:
         worker = task.get("worker") if isinstance(task.get("worker"), dict) else {}
+        if worker.get("worker_id"):
+            return False
         worker.update(
             {
                 "worker_id": worker_id,
                 "worker_started_at": timestamp,
+                "execution_deadline": task_deadline(),
                 "heartbeat_at": timestamp,
                 "interrupted_at": None,
             }
@@ -681,25 +676,21 @@ def mark_worker_started(client_dir: str, task_id: str, worker_id: str) -> dict[s
 
 
 def mark_worker_heartbeat(client_dir: str, task_id: str, worker_id: str) -> dict[str, Any] | None:
-    task = read_task(client_dir, task_id)
-    if task is None or task.get("status") not in ACTIVE_STATUSES:
-        return None
-    worker = task.get("worker") if isinstance(task.get("worker"), dict) else {}
-    if worker.get("worker_id") != worker_id:
-        return None
-    worker["heartbeat_at"] = now_iso()
-    task["worker"] = worker
-    return write_task(task)
+    def apply(task: dict[str, Any]) -> bool:
+        worker = task.get("worker") or {}
+        if worker.get("worker_id") != worker_id:
+            return False
+        worker["heartbeat_at"] = now_iso()
+        task["worker"] = worker
+        return True
+    return mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
 
 
-def mark_running(client_dir: str, task_id: str) -> dict[str, Any]:
-    return update_task(
-        client_dir,
-        task_id,
-        status="running",
-        started_at=now_iso(),
-        message="Contract review is running.",
-    )
+def mark_running(client_dir: str, task_id: str) -> dict[str, Any] | None:
+    def apply(task: dict[str, Any]) -> bool:
+        task.update(status="running", started_at=now_iso(), message="Contract review is running.")
+        return True
+    return mutate_task_if_status(client_dir, task_id, {"pending", "queued"}, apply)
 
 
 def mark_queued(client_dir: str, task_id: str, queue_task_id: str | None = None) -> dict[str, Any] | None:
@@ -759,7 +750,8 @@ def expire_stale_waiting_tasks(
             else "Review job did not start before the queue timeout."
         )
 
-        def mark_timeout(current: dict[str, Any]) -> bool:
+        def mark_timeout(current: dict[str, Any], code=code, message=message,
+                         timeout_seconds=timeout_seconds) -> bool:
             current_worker = current.get("worker") if isinstance(current.get("worker"), dict) else {}
             if current_worker.get("worker_id"):
                 return False
@@ -815,16 +807,19 @@ def mark_succeeded(
         )
     else:
         message = f"合同审查完成，共{quality['total_count']}项审查项。"
-    return update_task(
-        client_dir,
-        task_id,
-        status="succeeded",
-        finished_at=now_iso(),
-        message=message,
-        criteria=final_criteria,
-        quality=quality,
-        error=None,
-    )
+    def apply(current: dict[str, Any]) -> bool:
+        current.update(
+            status="succeeded",
+            finished_at=now_iso(),
+            message=message,
+            criteria=final_criteria,
+            quality=quality,
+            error=None,
+        )
+        return True
+    updated = mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
+    return updated or task
+
 
 
 def mark_failed(
@@ -840,80 +835,32 @@ def mark_failed(
         error = {"code": code, "message": message}
         if component:
             error["component"] = component
-    return update_task(
-        client_dir,
-        task_id,
-        status="failed",
-        finished_at=now_iso(),
-        message="Contract review failed.",
-        error=error,
-    )
-
-
-def mark_worker_interrupted(
-    client_dir: str,
-    task_id: str,
-    *,
-    reason: str = "service_startup_reconciliation",
-) -> dict[str, Any]:
-    timestamp = now_iso()
-    task = read_task(client_dir, task_id)
+    def apply(task: dict[str, Any]) -> bool:
+        task.update(status="failed", finished_at=now_iso(), message="Contract review failed.", error=error)
+        return True
+    updated = mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
+    task = updated or read_task(client_dir, task_id)
     if task is None:
         raise FileNotFoundError(task_id)
-    worker = task.get("worker") if isinstance(task.get("worker"), dict) else {}
-    worker["interrupted_at"] = timestamp
-    task["worker"] = worker
-    task["status"] = "failed"
-    task["finished_at"] = timestamp
-    task["message"] = "Contract review was interrupted."
-    task["error"] = {
-        "code": "WORKER_INTERRUPTED",
-        "message": "审查任务因服务重启或进程退出中断，请重新提交。",
-        "component": "worker",
-        "reason": reason,
-    }
-    return write_task(task)
-
-
-def reconcile_interrupted_tasks(*, reason: str = "service_startup_reconciliation") -> list[dict[str, Any]]:
-    interrupted: list[dict[str, Any]] = []
-    for task in iter_active_tasks():
-        client_dir = task["client_dir"]
-        task_id = task["task_id"]
-        updated = mark_worker_interrupted(client_dir, task_id, reason=reason)
-        write_task_log_event(
-            client_dir,
-            task_id,
-            "worker_interrupted",
-            previous_status=task.get("status"),
-            reason=reason,
-        )
-        write_task_log_event(
-            client_dir,
-            task_id,
-            "review_failed",
-            error="WORKER_INTERRUPTED",
-            reason=reason,
-        )
-        interrupted.append(updated)
-    return interrupted
+    return task
 
 
 def request_cancel(client_dir: str, task_id: str) -> dict[str, Any]:
-    task = read_task(client_dir, task_id)
-    if task is None:
-        raise FileNotFoundError(task_id)
-
-    status = task["status"]
-    if status in {"pending", "queued"}:
+    def apply(task: dict[str, Any]) -> bool:
+        # Preserve existing API semantics: already running tasks cannot be cancelled here.
+        if (task.get("worker") or {}).get("worker_id"):
+            return False
         task["status"] = "cancelled"
         task["finished_at"] = now_iso()
         task["message"] = "Review job cancelled."
         task["cancel"]["requested"] = True
         task["cancel"]["requested_at"] = task["cancel"]["requested_at"] or now_iso()
         task["cancel"]["cancelled_at"] = now_iso()
-        return write_task(task)
-
+        return True
+    updated = mutate_task_if_status(client_dir, task_id, {"pending", "queued"}, apply)
+    task = updated or read_task(client_dir, task_id)
+    if task is None:
+        raise FileNotFoundError(task_id)
     return task
 
 
@@ -925,14 +872,42 @@ def is_cancel_requested(client_dir: str, task_id: str) -> bool:
 
 
 def mark_cancelled(client_dir: str, task_id: str) -> dict[str, Any]:
-    task = read_task(client_dir, task_id)
+    timestamp = now_iso()
+    def apply(task: dict[str, Any]) -> bool:
+        task.update(status="cancelled", finished_at=timestamp, message="Review job cancelled.")
+        cancel = task.setdefault("cancel", {})
+        cancel.update(requested=True, requested_at=cancel.get("requested_at") or timestamp, cancelled_at=timestamp)
+        return True
+    updated = mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
+    task = updated or read_task(client_dir, task_id)
     if task is None:
         raise FileNotFoundError(task_id)
-    timestamp = now_iso()
-    task["status"] = "cancelled"
-    task["finished_at"] = timestamp
-    task["message"] = "Review job cancelled."
-    task["cancel"]["requested"] = True
-    task["cancel"]["requested_at"] = task["cancel"]["requested_at"] or timestamp
-    task["cancel"]["cancelled_at"] = timestamp
-    return write_task(task)
+    return task
+
+
+def fail_active_task(client_dir: str, task_id: str, *, code: str, detail: str,
+                     queue_id: str | None = None, worker_id: str | None = None) -> dict[str, Any] | None:
+    def apply(task: dict[str, Any]) -> bool:
+        stored_queue_id = (task.get("queue") or {}).get("task_id")
+        if queue_id and queue_id != stored_queue_id:
+            return False
+        if worker_id and worker_id != (task.get("worker") or {}).get("worker_id"):
+            return False
+        task.update(status="failed", finished_at=now_iso(), message="Contract review failed.",
+                    error={"code": code, "message": detail, "component": "worker"})
+        return True
+    return mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
+
+
+def expire_executing_tasks() -> list[dict[str, Any]]:
+    expired = []
+    for task in iter_active_tasks():
+        worker = task.get("worker") or {}
+        deadline = worker.get("execution_deadline")
+        if deadline is not None and time.time() > float(deadline) + 5:
+            updated = fail_active_task(task["client_dir"], task["task_id"],
+                code="TASK_TIME_LIMIT_EXCEEDED", detail="Contract execution deadline expired; worker failure reconciled.",
+                queue_id=(task.get("queue") or {}).get("task_id"), worker_id=worker.get("worker_id"))
+            if updated:
+                expired.append(updated)
+    return expired

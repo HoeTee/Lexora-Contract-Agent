@@ -9,6 +9,7 @@ from loggers.call_log import call_stage, logical_call
 
 from tools.docxindex.detection import heading_level, heading_score, is_plain_label, is_visual_title
 from tools.docxindex.llm import LLMClient
+from tools.docxindex.llm.client import LLMResponseValidationError
 from tools.docxindex.llm.cache import JsonlCache, cache_key, text_hash
 from tools.docxindex.llm.prompts import ATTACHMENT_HIERARCHY_PROMPT_VERSION, attachment_hierarchy_prompt
 from tools.docxindex.llm.schemas import AttachmentHeading, AttachmentHierarchyResponse, AttachmentHierarchySegment
@@ -67,7 +68,6 @@ def infer_attachment_children(
     batch_target_tokens: int = 16000,
     batch_overlap_tokens: int = 800,
     max_levels: int = 6,
-    retry_count: int = 3,
     split_long_nodes: bool = True,
     paragraph_split_threshold_tokens: int = 1000,
     paragraph_chunk_target_tokens: int = 700,
@@ -83,7 +83,6 @@ def infer_attachment_children(
         batch_target_tokens=batch_target_tokens,
         batch_overlap_tokens=batch_overlap_tokens,
         max_levels=max_levels,
-        retry_count=retry_count,
         split_long_nodes=split_long_nodes,
         paragraph_split_threshold_tokens=paragraph_split_threshold_tokens,
         paragraph_chunk_target_tokens=paragraph_chunk_target_tokens,
@@ -101,7 +100,6 @@ def infer_hierarchy_children(
     batch_target_tokens: int = 16000,
     batch_overlap_tokens: int = 800,
     max_levels: int = 6,
-    retry_count: int = 3,
     split_long_nodes: bool = True,
     paragraph_split_threshold_tokens: int = 1000,
     paragraph_chunk_target_tokens: int = 700,
@@ -129,7 +127,6 @@ def infer_hierarchy_children(
         batch_target_tokens,
         batch_overlap_tokens,
         max_levels,
-        retry_count,
         inside_attachment,
     )
     if headings is None or len(headings) < 2:
@@ -325,7 +322,6 @@ def _infer_profile(
     batch_target_tokens: int,
     batch_overlap_tokens: int,
     max_levels: int,
-    retry_count: int,
     inside_attachment: bool,
 ) -> list[ValidatedHeading] | None:
     candidate_text = "\n".join(_candidate_row(candidate) for candidate in candidates)
@@ -344,7 +340,6 @@ def _infer_profile(
             client,
             cache,
             max_levels,
-            retry_count,
             inside_attachment,
         )
 
@@ -365,7 +360,6 @@ def _infer_profile(
             client,
             cache,
             max_levels,
-            retry_count,
             inside_attachment,
         )
         if inferred:
@@ -380,7 +374,6 @@ def _infer_profile_batch(
     client: LLMClient,
     cache: JsonlCache,
     max_levels: int,
-    retry_count: int,
     inside_attachment: bool,
 ) -> list[ValidatedHeading] | None:
     candidate_text = "\n".join(_candidate_row(candidate) for candidate in candidates)
@@ -408,31 +401,26 @@ def _infer_profile_batch(
 
     stage = f"index-hierarchy-{node.node_id}-{candidates[0].anchor}-{candidates[-1].anchor}"
     with call_stage(stage), logical_call("docxindex.llm", client.settings.model) as logical:
-        return _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, retry_count, logical)
+        return _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, logical)
 
 
-def _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, retry_count, logical):
-    current_prompt = prompt
-    last_error = None
-    for _ in range(retry_count):
-        try:
-            response = client.complete_model(current_prompt, AttachmentHierarchyResponse, retries=0)
-        except ValueError as exc:
-            last_error = exc
-            current_prompt = f"{prompt}\n\n上一次输出无法通过 JSON 校验：{exc}\n请严格重新输出。"
-            continue
+def _infer_profile_attempts(prompt, candidates, client, cache, key, max_levels, logical):
+    def validate(response):
         validated, errors = _apply_profile(candidates, response, max_levels)
-        if not errors:
-            cache.set(key, response.model_dump(mode="json"))
-            return validated
-        last_error = ValueError("；".join(errors))
-        logical.reject_response(last_error, reason="层级结构校验未通过")
-        current_prompt = (
-            f"{prompt}\n\n上一次输出存在结构冲突：{'；'.join(errors)}。"
-            "请重新核对 anchor、required 候选、原文顺序和层级。"
-        )
-    logical.failed(last_error or ValueError("Hierarchy validation failed"))
-    return None
+        if errors:
+            raise ValueError("；".join(errors))
+        cache.set(key, response.model_dump(mode="json"))
+        return validated
+
+    try:
+        return client.complete_model(prompt, AttachmentHierarchyResponse, validate=validate)
+    except LLMResponseValidationError as exc:
+        if getattr(exc, "failure_stage", None) != "output_validation":
+            raise
+        # Hierarchy inference is optional enrichment. Preserve the existing
+        # deterministic chunking fallback without starting a new model operation.
+        logical.failed(exc)
+        return None
 
 
 def _candidate_batches(

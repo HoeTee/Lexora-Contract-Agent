@@ -39,22 +39,72 @@ services:
       retries: 3
       start_period: 30s
 
-  review-worker:
+  review-worker-1:
     image: lexora:latest
-    container_name: lexora-worker
+    container_name: lexora-worker-1
     restart: unless-stopped
 
     env_file:
       - .env
 
-    command: ["/app/host", "-m", "celery", "-A", "task_queue.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=3"]
+    command: ["/app/host", "-m", "celery", "-A", "task_queue.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=1", "--pool=prefork"]
 
     depends_on:
       - redis
 
-    cpus: "4"
-    mem_limit: 8g
-    mem_reservation: 4g
+    cpus: "1"
+    mem_limit: 2g
+    mem_reservation: 2g
+
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
+      - ./profiles:/app/profiles
+      - ./data:/app/data
+
+  review-worker-2:
+    image: lexora:latest
+    container_name: lexora-worker-2
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    command: ["/app/host", "-m", "celery", "-A", "task_queue.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=1", "--pool=prefork"]
+
+    depends_on:
+      - redis
+
+    cpus: "1"
+    mem_limit: 2g
+    mem_reservation: 2g
+
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
+      - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
+      - ./profiles:/app/profiles
+      - ./data:/app/data
+
+  review-worker-3:
+    image: lexora:latest
+    container_name: lexora-worker-3
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    command: ["/app/host", "-m", "celery", "-A", "task_queue.celery_app:celery_app", "worker", "--loglevel=info", "--concurrency=1", "--pool=prefork"]
+
+    depends_on:
+      - redis
+
+    cpus: "1"
+    mem_limit: 2g
+    mem_reservation: 2g
 
     volumes:
       - ./.env:/app/.env:ro

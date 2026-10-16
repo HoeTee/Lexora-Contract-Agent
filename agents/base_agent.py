@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError, APIStatusError
 from redis.exceptions import RedisError
 from loggers.agent_logger import agent_call_log_dir, log_agent_step, log_conversation
-from loggers.call_log import LogicalCall, current_events_path, logical_call, new_call, request_model_async
+from loggers.call_log import LogicalCall, current_events_path, logical_call, request_model_async
 from loggers.trace_helpers import llm_inputs, llm_outputs
 from loggers.trace_logger import get_current_trace
 from config import (
@@ -19,19 +19,15 @@ from config import (
     MAX_PROMPT_TOKENS,
     MAX_RESULT_TOKENS,
     MODEL_CALL_TIMEOUT_SECONDS,
-    MODEL_CALL_MAX_RETRIES,
     SEED,
     TEMPERATURE,
     TOP_P,
 )
 from endpoints.runtime.errors import ModelCallError
-from endpoints.runtime.llm_semaphore import LLMGlobalSemaphoreTimeout, llm_global_semaphore
+from endpoints.runtime.model_budget import ModelCallTimeout
+from endpoints.runtime.model_calls import execute_model
 import json
-import asyncio
-import random
 from contextlib import contextmanager
-from datetime import datetime, timezone
-from email.utils import parsedate_to_datetime
 import tiktoken
 
 
@@ -286,6 +282,15 @@ class Agent:
     def _finish_validation_call(self):
         record = getattr(self, "_validation_call", None)
         if record is not None:
+            try:
+                record.budget.remaining()
+            except ModelCallTimeout as exc:
+                if record.last_record is not None:
+                    exc.call_id = record.last_record.reference_id
+                    exc.call_path = str(record.last_record.reference_path) if record.last_record.reference_path else None
+                record.finish(exc)
+                self._validation_call = None
+                raise
             record.finish()
             self._validation_call = None
 
@@ -304,40 +309,22 @@ class Agent:
                           finalize=not grouped) as logical:
             if grouped:
                 self._validation_call = logical
-            for attempt in range(MODEL_CALL_MAX_RETRIES + 1):
-                record = new_call(
-                    component="agent", model=self.settings.model,
-                    request=request_kwargs, directory=agent_call_log_dir(),
-                    criterion_id=getattr(self, "criterion_id", None) or (
-                        self.name.split("_", 1)[1] if self.name.startswith(("SubAgent_", "Reflector_")) else None),
-                    stage="agent_model_call", source=self.name,
-                )
-                span.set_metadata({"call_id": record.reference_id,
-                                   "call_path": str(record.reference_path) if record.reference_path else None})
-                request_started = False
-                try:
-                    async with llm_global_semaphore(agent_name=self.name, model=self.settings.model) as lease:
-                        if lease.enabled:
-                            span.set_metadata({
-                                "llm_global_semaphore_key": lease.key,
-                                "llm_global_semaphore_wait_seconds": lease.wait_seconds,
-                                "llm_global_semaphore_max_requests": lease.max_concurrent_requests,
-                            })
-                        request_started = True
-                        record.sent()
-                        completion, http_status = await request_model_async(self.client.chat.completions, **request_kwargs)
-                except Exception as exc:
-                    record.failed(exc, stage="request" if request_started else "semaphore_wait")
-                    exc.call_id = record.reference_id
-                    exc.call_path = str(record.reference_path) if record.reference_path else None
-                    if request_started and attempt < MODEL_CALL_MAX_RETRIES and _should_retry_model(exc):
-                        await asyncio.sleep(_model_retry_delay(exc, attempt))
-                        continue
-                    conversation_path = log_conversation(self.name, self.messages)
-                    span.set_metadata({"conversation_path": str(conversation_path) if conversation_path else None})
-                    raise
-                record.succeeded(completion.model_dump(), http_status=http_status)
-                return completion
+            async def send(remaining):
+                return await request_model_async(self.client.chat.completions,
+                                                 **{**request_kwargs, "timeout": remaining})
+            try:
+                completion = await execute_model(model_type="llm", model=self.settings.model,
+                    caller="agent", request=request_kwargs, send=send,
+                    budget=logical.budget, serialize=lambda response: response.model_dump(),
+                    record_options={"directory": agent_call_log_dir(), "source": self.name,
+                                    "criterion_id": getattr(self, "criterion_id", None),
+                                    "stage": "agent_model_call"})
+            finally:
+                if logical.last_record is not None:
+                    record = logical.last_record
+                    span.set_metadata({"call_id": record.reference_id,
+                                       "call_path": str(record.reference_path) if record.reference_path else None})
+            return completion
 
     async def chat(self, message="") -> str:
         if message:
@@ -412,7 +399,7 @@ class Agent:
                 error.call_id = getattr(exc, "call_id", None)
                 error.call_path = getattr(exc, "call_path", None)
                 raise error from exc
-            except LLMGlobalSemaphoreTimeout as exc:
+            except ModelCallTimeout as exc:
                 error = ModelCallError(
                     "agent",
                     f"{self.name}: {exc}",
@@ -420,7 +407,7 @@ class Agent:
                     error_type=type(exc).__name__,
                 )
                 error.origin = "agent"
-                error.failure_stage = "semaphore_wait"
+                error.failure_stage = getattr(exc, "failure_stage", "model_budget")
                 error.call_id = getattr(exc, "call_id", None)
                 error.call_path = getattr(exc, "call_path", None)
                 raise error from exc
@@ -430,7 +417,7 @@ class Agent:
                     error_type=type(exc).__name__,
                 )
                 error.origin = "semaphore"
-                error.failure_stage = "semaphore_wait"
+                error.failure_stage = getattr(exc, "failure_stage", "model_budget")
                 error.call_id = getattr(exc, "call_id", None)
                 error.call_path = getattr(exc, "call_path", None)
                 raise error from exc
@@ -470,26 +457,4 @@ class Agent:
                     continue
             else:
                 return response_message.content
-
-
-def _should_retry_model(exc: Exception) -> bool:
-    headers = getattr(getattr(exc, "response", None), "headers", {})
-    override = headers.get("x-should-retry")
-    if override in {"true", "false"}:
-        return override == "true"
-    status = getattr(exc, "status_code", None)
-    return isinstance(exc, APIConnectionError) or status in {408, 409, 429} or (status is not None and status >= 500)
-
-
-def _model_retry_delay(exc: Exception, attempt: int) -> float:
-    headers = getattr(getattr(exc, "response", None), "headers", {})
-    try:
-        retry_after = float(headers["retry-after-ms"]) / 1000 if "retry-after-ms" in headers else float(headers.get("retry-after", 0))
-    except (TypeError, ValueError):
-        try:
-            retry_at = parsedate_to_datetime(headers.get("retry-after", ""))
-            retry_after = (retry_at - datetime.now(timezone.utc)).total_seconds()
-        except (TypeError, ValueError, OverflowError):
-            retry_after = 0
-    return retry_after if 0 < retry_after <= 60 else min(0.5 * 2**attempt, 8) * (1 - 0.25 * random.random())
 

@@ -115,7 +115,7 @@ class SummaryOutput:
 - `asyncio.gather` 负责并发调度：多条 criterion 可以同时进入等待队列，并在外部模型调用、检索或反思等待期间交错推进。
 - `asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)` 负责并发限制：同一时间最多允许指定数量的 criterion 进入 `execute_single_criterion()`；其余 coroutine 会等待 semaphore 释放。
 - 因此，当前并发边界是“多条 criterion / 多个 SubAgent 审查任务并发”，不是单个 SubAgent 内部把同一条标准拆成多个并发步骤。
-- 单条 criterion 最多执行 `workflow.criterion_retry_max_attempts` 次；重试耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 降级为该条 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
+- 单条 criterion 不自动整条重跑。模型请求和输出修复共用 `workflow.model_call_timeout_seconds` 与 `model_call_max_retries`；额度耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 降级为该条 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
 - 未知程序异常保持任务级失败；全部 criterion 都失败时也不生成伪成功结果。部分 criterion 失败时任务为 `succeeded`，同时以 `criteria[].execution_status=error`、`quality.error_criteria` 和 DOCX“未完成审查项”披露缺口。
 
 简化结构如下：
@@ -164,15 +164,17 @@ Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` �
 
 ## API 队列与进程边界
 
-当 `queue.enabled=true` 时，普通 `/api` 任务由 API 写入 `task.json` 后，通过 `task_queue.review_queue` 投递到 Redis；Celery worker 执行 `review.run_job`。Broker 只保存 `client_dir + task_id` 调度消息，不保存合同、审查结果或恢复状态。
+`/web` 和 `/api` 是仅有的服务执行入口，OA 已移除。CLI 也通过 `/api` 提交。Web/API 写入 `task.json` 后，固定通过 `task_queue.review_queue` 投递到 Redis DB 0；Celery worker 执行 `review.run_job`。Broker 只保存 `client_dir + task_id` 调度消息，不保存合同、审查结果或恢复状态。入队失败明确报错，不回退到 API 进程执行。
 
 ```text
-API process -> Redis broker -> Celery worker -> workflow.run()
+Web/API process -> Redis DB 0 broker -> 3 Celery workers -> workflow.run()
 ```
 
-API 进程负责提交、状态和结果响应，worker 负责 workflow、MCP、模型调用和 DOCX 生成。Web 任务目前仍在 Web 应用进程内执行，不经过 Celery。
+Web/API 进程负责提交、状态和结果响应，worker 负责 workflow、MCP、模型调用和 DOCX 生成。Web 完成后同样更新历史、展示结果并支持下载。
 
-整份合同并发由 worker 数量和 Celery `--concurrency` 控制；单份合同内固定任务和上传任务共同受 `workflow.max_orchestrator_concurrency` 控制。这两个限制不是同一层。路由模块不创建新的线程池、进程池或 semaphore。
+整份合同并发由三个 worker 及每个 worker 的 `--pool=prefork --concurrency=1` 控制；单份合同内固定任务和上传任务共同受 `workflow.max_orchestrator_concurrency` 控制，初值 2。模型 HTTP 合计上限由 Redis DB 2 控制，LLM/embedding/reranker 初值为 5/3/10。路由模块不创建新的模型请求限流器。
+
+队列等待上限 `queue.queued_timeout_seconds` 默认为 7200 秒，只适用于尚未被 worker 接手的任务；Celery 整合同硬时限 `queue.task_time_limit_seconds` 默认为 1800 秒，从执行开始计时。不配置软时限；硬终止由 worker 父进程侧记录失败并补充执行进程，不自动重新执行合同。
 
 ## Criterion 恢复状态
 
@@ -187,13 +189,17 @@ state/
     <criterion_id>.error.json
 ```
 
-成功的 criterion 输出可以在同一任务重跑时复用；失败 criterion 按 `workflow.criterion_retry_max_attempts` 重新执行。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败。
+成功的 criterion 输出保留为恢复数据；失败 criterion 不自动整条重跑，`workflow.criterion_retry_max_attempts` 已移除。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败，也不提供硬超时后的自动整合同重投。
 
 ## 全局模型并发
 
-`model_semaphore.limits.llm`、`embedding`、`reranker` 分别控制 Redis 租约的模型 HTTP 总并发；enabled、redis_url、wait_timeout_seconds、lease_seconds 共用，仍兼容旧分模型配置。租约保持到期释放和请求结束释放，不增加任务执行租约。固定任务跳过 Planner/路由 LLM，但其检索、SubAgent 和 Reflector 模型请求仍走现有客户端和同一 Redis 全局限制；路由模块没有旁路模型调用。
+`model_semaphore.llm/embedding/reranker.max_concurrent_requests` 分别控制三个 worker 合计的三类模型请求数。每类保留 `redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`；删除 `enabled` 和 `wait_timeout_seconds`，全局限流固定启用。旧共享格式必须迁移，不能静默忽略旧字段。
 
-每类配置包含 `enabled`、`max_concurrent_requests`、`redis_url`、`key`、`wait_timeout_seconds`、`lease_seconds` 和 `poll_interval_seconds`。实际读取与租约实现位于 `config.py` 和 `endpoints/runtime/llm_semaphore.py`。
+`endpoints/runtime/model_calls.py` 统一处理等待名额、请求、重试退避、输出修复和逐次日志；同一逻辑调用复用 `model_budget.py` 中的截止时间及发送次数。模型预算还服从整合同截止时间。所有 Agent、DocxIndex、LlamaIndex 请求都使用这条入口，SDK 重试关闭；同步调用通过 `run_sync` 等待可取消的异步 HTTP。
+
+`llm_semaphore.py` 使用 DB 2 的 Lua 原子分配 FIFO 名额；正常结束主动释放，进程崩溃后依靠租约回收。租约到期不会取消服务端推理，客户端断开是否停止内网模型服务推理由网关能力决定。DocxIndex 重排已接入配置的独立 reranker，不再占用 LLM 名额；LlamaIndex 同样使用该重排适配器。未被业务使用的 LlamaIndex 流式入口明确拒绝，不能绕过统一控制。
+
+全部配置的含义、默认值、删除项及迁移步骤见 [并发与超时配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
 ## SubAgent 工具白名单
 

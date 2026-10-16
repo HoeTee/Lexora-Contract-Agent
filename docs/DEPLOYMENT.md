@@ -179,23 +179,41 @@ ports:
 
 ## Queue worker
 
-如果 `queue.enabled=true`，必须同时运行 Redis、API 和至少一个 Celery worker：
+Web 和 API 固定通过队列提交审查；OA 入口已移除。部署必须同时运行 Redis、Web/API 服务和三个 Celery worker，每个 worker 使用 `prefork`、`--concurrency=1`：
 
 ```text
 redis
 api
-review-worker
+review-worker-1
+review-worker-2
+review-worker-3
 ```
 
-Redis 是 broker，API 负责请求和状态读取，worker 负责 workflow、MCP、LLM调用、DOCX生成和日志写入。容器配置中的 Redis 地址应使用 Compose service 名称，而不是 `localhost`：
+Redis DB 0 保存 Celery 消息，DB 2 保存模型请求名额。Web/API 负责请求和状态读取，worker 负责 workflow、MCP、模型调用、DOCX 生成和日志写入。API 与三个 worker 必须挂载相同的 `data/`、`profiles/` 和配置文件。容器配置中的 Redis 地址应使用 Compose service 名称，而不是 `localhost`：
 
 ```yaml
 queue:
-  enabled: true
   broker_url: "redis://redis:6379/0"
+  worker_disable_prefetch: true
+  pending_timeout_seconds: 60
+  queued_timeout_seconds: 7200
+  watchdog_interval_seconds: 10
+  task_time_limit_seconds: 1800
 ```
 
-Celery task、broker、worker 与 workflow 内部并发的边界见 [智能体与工作流架构](AGENT_WORKFLOW_ARCHITECTURE.md)。
+`queued_timeout_seconds: 7200` 只限制尚未被 worker 接手的任务；`task_time_limit_seconds: 1800` 从 Celery 开始执行时计算，超时终止执行子进程并补充新的子进程，不自动重跑原合同。不配置软时限。Windows 的 `solo` 池不能提供这里的硬时限保证，部署使用 Linux 容器或 Linux/WSL 测试环境。
+
+所有 worker 和其 MCP 子进程必须使用相同的 DB 2 地址、模型 key、容量及租约设置。不要通过更换 Redis 数据库、key 或关闭限流绕过已有请求上限。Redis 不是合同与报告的存储位置，持久化结果仍写入共享挂载的 `data/`。
+
+变更并发策略或升级信号量脚本时，先停止新提交并等待旧任务结束，再统一更新 API 与全部 worker；保留现有任务、文件和 Redis 数据，不执行清库。Celery task、broker、worker 与 workflow 内部并发的边界见 [智能体与工作流架构](AGENT_WORKFLOW_ARCHITECTURE.md)，各配置含义见 [并发与超时配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
+
+真实链路日志验证脚本在开发机运行，向已部署 API 上传 DOCX；服务通过正常 DB 0 队列和 DB 2 限流执行，不修改服务配置。开发机必须能读取部署共享的 `data/api/`，并在环境变量 `API_KEY` 中提供已注册的 API key。示例中的 `--task-root` 是开发机看见的目录，不是容器内 `/app/data/api`：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/verify_real_contract_logging.py --base-url http://127.0.0.1:5000 --contract deploy/test_contract.docx --task-root .\data\api
+```
+
+执行该命令会提交真实模型任务；仅查看参数使用 `--help`。完整调用文件和路由事件核验要求服务启动前设置 `logging.enabled: true`、`logging.detailed: true`；脚本不自动修改日志设置。
 
 ## 安全和授权边界
 

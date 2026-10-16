@@ -29,7 +29,9 @@ POST /api/review/jobs/result
   -> 仅 succeeded 后可输出结果 DOCX 文件流或 URL
 ```
 
-当 `queue.enabled=true` 时，提交接口只创建任务并投递到队列，审查 workflow 由独立 Celery worker 进程执行。状态查询仍然只读取 `task.json`，外部 API 路径、鉴权方式和请求体不变。这个设计的关键是进程隔离：`/status` 所在的 API 进程不再直接承载 workflow、MCP、LLM 调用和 DOCX 生成。
+Web 和 API 固定将审查任务投递到 Redis DB 0 的 Celery 队列，由三个独立 worker 执行；每个 worker 同时执行一份合同。不存在 `queue.enabled` 或进程内审查回退分支，OA 入口已移除。状态查询仍然读取共享数据目录中的 `task.json`，外部 API 路径、鉴权方式和请求体不变。API 进程不直接承载 workflow、MCP、LLM 调用和 DOCX 生成。
+
+worker 内的模型请求统一经过 Redis DB 2 限流。`workflow.model_call_timeout_seconds` 同时覆盖名额等待、HTTP、退避和同一次调用的输出修复；重试共用原截止时间。`queue.queued_timeout_seconds` 默认 7200 秒，只控制排队等待；`queue.task_time_limit_seconds` 默认 1800 秒，控制 worker 执行整份合同的最长时间。硬超时后任务记录为失败，不自动重新提交；不配置软时限。各项配置及迁移说明见 [并发与超时配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
 Celery task、Redis broker 和 worker 的部署边界见 [部署说明](DEPLOYMENT.md)，workflow 内部并发与恢复边界见 [智能体与工作流架构](AGENT_WORKFLOW_ARCHITECTURE.md)。
 
@@ -37,9 +39,9 @@ Celery task、Redis broker 和 worker 的部署边界见 [部署说明](DEPLOYME
 
 | 状态 | 含义 |
 | --- | --- |
-| `pending` | 任务已被系统接受并写入存储，worker 尚未进入执行资源判断。 |
+| `pending` | 任务已被系统接受并写入存储，尚未完成入队。 |
 | `queued` | 任务已成功写入 Redis 队列，正在等待空闲 Worker 接手。 |
-| `running` | 已获得执行槽位，审查工作流正在运行。 |
+| `running` | worker 已接手任务，审查工作流正在运行。 |
 | `succeeded` | 审查输出已生成，可导出。 |
 | `failed` | 工作流失败，状态查询响应中包含 `error`。 |
 | `cancelled` | 任务在开始前已取消。 |
@@ -335,7 +337,7 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/status" `
 }
 ```
 
-任务状态为 `succeeded` 表示输出 DOCX 已成功生成。`criteria` 始终展示全部审查项；`execution_status` 为 `not_started / running / completed / incomplete / error`。`incomplete` 仅表示 Reflector 达到最大轮次后仍未完成确认，模型调用超时、结构化输出错误等异常在完整重试后记为 `error`。`review_result` 仅在执行产生有效审查结果时填写。调用方应同时读取 `quality` 汇总和 `criteria` 明细，不能只根据任务级 `status` 判断所有标准均已完成。
+任务状态为 `succeeded` 表示输出 DOCX 已成功生成。`criteria` 始终展示全部审查项；`execution_status` 为 `not_started / running / completed / incomplete / error`。`incomplete` 仅表示 Reflector 达到最大轮次后仍未完成确认，模型调用超时、结构化输出错误等异常在统一模型预算及重试额度耗尽后记为 `error`；不自动重跑整条要点。`review_result` 仅在执行产生有效审查结果时填写。调用方应同时读取 `quality` 汇总和 `criteria` 明细，不能只根据任务级 `status` 判断所有标准均已完成。
 
 | HTTP 状态码 | 返回场景 | 响应 |
 | --- | --- | --- |

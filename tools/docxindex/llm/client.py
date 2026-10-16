@@ -2,21 +2,19 @@ from __future__ import annotations
 
 import json
 import re
-import sys
-import time
-from contextlib import nullcontext
-from contextvars import ContextVar
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
 from typing import Any, TypeVar
 
+from openai import AsyncOpenAI
+from endpoints.runtime.model_budget import run_sync
+from endpoints.runtime.model_calls import execute_model
+from endpoints.runtime.model_http import async_http_client
 from pydantic import BaseModel, ConfigDict, ValidationError
-from loggers.call_log import logical_call, new_call, request_model
+from loggers.call_log import logical_call, request_model_async
 
 from .config import env_api_key, find_local_env, find_project_config, load_env_file, load_yaml
 
 
-_LAST_CALL: ContextVar[tuple[str, str | None] | None] = ContextVar("docxindex_last_call", default=None)
 
 
 class LLMClientError(RuntimeError):
@@ -56,7 +54,6 @@ class LLMSettings(BaseModel):
     base_url: str | None = None
     api_key: str = "EMPTY"
     temperature: float = 0.0
-    timeout_seconds: float = 120.0
     enable_thinking: bool | None = None
 
     @classmethod
@@ -80,133 +77,56 @@ class LLMSettings(BaseModel):
 
 
 class LLMClient:
-    def __init__(self, settings: LLMSettings, max_concurrency: int = 10):
-        from openai import OpenAI
-
+    def __init__(self, settings: LLMSettings):
         self.settings = settings
-        self.client = OpenAI(
-            api_key=settings.api_key,
-            base_url=settings.base_url,
-            timeout=settings.timeout_seconds,
-            max_retries=0,
-        )
-        self._limiter = BoundedSemaphore(max(1, max_concurrency))
-        self._start_lock = Lock()
-        self._next_start = 0.0
-        self._start_interval_seconds = 0.15
-        self._rate_limit_retries = 4
 
     def complete(self, prompt: str) -> str:
-        with logical_call("docxindex.llm", self.settings.model):
-            return self._complete(prompt)
-
-    def _complete(self, prompt: str) -> str:
-        extra_body = {}
-        if self.settings.enable_thinking is not None:
-            extra_body["enable_thinking"] = self.settings.enable_thinking
-        for attempt in range(self._rate_limit_retries + 1):
-            record = new_call(component="docxindex.llm", model=self.settings.model,
-                              request={"messages": [{"role": "user", "content": prompt}],
-                                       "temperature": self.settings.temperature,
-                                       "extra_body": extra_body or None, "attempt": attempt + 1})
-            self._wait_for_start_slot()
-            queue_started = time.monotonic()
-            request_started: float | None = None
-            try:
-                with self._limiter:
-                    with _global_model_slot("llm", "DocxIndexLLM", self.settings.model):
-                        request_started = time.monotonic()
-                        record.sent()
-                        response, http_status = request_model(self.client.chat.completions,
-                            model=self.settings.model,
-                            messages=[{"role": "user", "content": prompt}],
-                            temperature=self.settings.temperature,
-                            extra_body=extra_body or None,
-                        )
-                content = response.choices[0].message.content or ""
-            except Exception as exc:
-                finished = time.monotonic()
-                timing = {
-                    "queue_wait_seconds": round(
-                        (request_started or finished) - queue_started,
-                        3,
-                    ),
-                    "request_seconds": round(
-                        finished - request_started,
-                        3,
-                    ) if request_started is not None else 0.0,
-                }
-                record.failed(
-                    exc,
-                    stage="request" if request_started is not None else "semaphore_wait",
-                    timing=timing,
-                )
-                if not _is_rate_limit_error(exc) or attempt >= self._rate_limit_retries:
-                    error = LLMClientError(
-                        str(exc),
-                        http_status=record.payload["error"]["http_status"],
-                        error_type=type(exc).__name__,
-                    )
-                    error.call_id = record.reference_id
-                    error.call_path = str(record.reference_path) if record.reference_path else None
-                    error.failure_stage = record.payload["failure_stage"]
-                    raise error from exc
-                time.sleep(2**attempt)
-                continue
-            finished = time.monotonic()
-            record.succeeded({
-                "content": content,
-                "usage": response.usage.model_dump() if response.usage else None,
-                "timing": {
-                    "queue_wait_seconds": round((request_started or finished) - queue_started, 3),
-                    "request_seconds": round(finished - (request_started or finished), 3),
-                },
-            }, http_status=http_status)
-            _LAST_CALL.set((record.reference_id, str(record.reference_path) if record.reference_path else None))
-            return content
-        raise RuntimeError("unreachable LLM retry state")
-
-    def _wait_for_start_slot(self) -> None:
-        with self._start_lock:
-            now = time.monotonic()
-            start_at = max(now, self._next_start)
-            self._next_start = start_at + self._start_interval_seconds
-        delay = start_at - now
-        if delay > 0:
-            time.sleep(delay)
+        return self._execute(prompt)
 
     def complete_json(self, prompt: str) -> dict[str, Any]:
-        with logical_call("docxindex.llm", self.settings.model):
-            return extract_json_object(self.complete(prompt))
+        return self._execute(prompt, validate=extract_json_object)
 
-    def complete_model(self, prompt: str, schema: type["TModel"], retries: int = 2) -> "TModel":
-        with logical_call("docxindex.llm", self.settings.model) as logical:
-            return self._complete_model(prompt, schema, retries, logical)
+    def complete_model(self, prompt: str, schema: type["TModel"], *, validate=None) -> "TModel":
+        def check(content):
+            parsed = schema.model_validate(extract_json_object(content))
+            return validate(parsed) if validate else parsed
+        return self._execute(prompt, validate=check, schema=schema)
 
-    def _complete_model(self, prompt, schema, retries, logical):
+    def _execute(self, prompt, *, validate=None, schema=None):
         current_prompt = prompt
-        last_error: Exception | None = None
-        last_content = ""
-        for _ in range(retries + 1):
-            last_content = self.complete(current_prompt)
+        request = {"messages": [{"role": "user", "content": prompt}]}
+        async def send(remaining):
+            async with AsyncOpenAI(api_key=self.settings.api_key, base_url=self.settings.base_url,
+                                   max_retries=0, timeout=remaining, http_client=async_http_client(remaining)) as client:
+                kwargs = dict(model=self.settings.model, messages=[{"role": "user", "content": current_prompt}],
+                              temperature=self.settings.temperature)
+                if self.settings.enable_thinking is not None:
+                    kwargs["extra_body"] = {"enable_thinking": self.settings.enable_thinking}
+                return await request_model_async(client.chat.completions, **kwargs)
+
+        def check(response):
+            nonlocal current_prompt
+            content = response.choices[0].message.content or ""
             try:
-                payload = extract_json_object(last_content)
-                return schema.model_validate(payload)
-            except (json.JSONDecodeError, ValidationError, ValueError) as exc:
-                last_error = exc
-                logical.reject_response(exc)
-                current_prompt = retry_prompt(prompt, schema, last_content, exc)
-        error = LLMResponseValidationError(
-            f"LLM response failed {schema.__name__} validation after {retries + 1} attempts: "
-            f"{last_error}; last_content={last_content[:2000]!r}",
-            http_status=logical.last_record.payload.get("http_status") if logical.last_record else None,
-            error_type="response_validation_error",
-        )
-        last_call = _LAST_CALL.get()
-        if last_call:
-            error.call_id, error.call_path = last_call
-        error.failure_stage = "output_validation"
-        raise error
+                return validate(content) if validate else content
+            except (ValueError, ValidationError) as exc:
+                if schema:
+                    current_prompt = retry_prompt(prompt, schema, content, exc)
+                    request["messages"] = [{"role": "user", "content": current_prompt}]
+                raise
+
+        with logical_call("docxindex.llm", self.settings.model):
+            try:
+                return run_sync(execute_model(model_type="llm", model=self.settings.model,
+                    caller="docxindex.llm", request=request, send=send, validate=check,
+                    serialize=lambda response: response.model_dump()))
+            except Exception as exc:
+                error_type = "response_validation_error" if isinstance(exc, ValueError) else type(exc).__name__
+                cls = LLMResponseValidationError if isinstance(exc, ValueError) else LLMClientError
+                error = cls(str(exc), http_status=getattr(exc, "http_status", getattr(exc, "status_code", None)), error_type=error_type)
+                for field in ("call_id", "call_path", "failure_stage"):
+                    setattr(error, field, getattr(exc, field, None))
+                raise error from exc
 
 
 def extract_json_object(content: str) -> dict[str, Any]:
@@ -222,18 +142,6 @@ def extract_json_object(content: str) -> dict[str, Any]:
 
 
 TModel = TypeVar("TModel", bound=BaseModel)
-
-
-def _is_rate_limit_error(exc: Exception) -> bool:
-    return getattr(exc, "status_code", None) == 429 or "429" in str(exc) or "Throttling.BurstRate" in str(exc)
-
-
-def _global_model_slot(model_type: str, caller_name: str, model: str):
-    if "config" not in sys.modules:
-        return nullcontext()
-    from endpoints.runtime.llm_semaphore import model_semaphore_sync
-
-    return model_semaphore_sync(model_type, caller_name, model)
 
 
 def retry_prompt(original_prompt: str, schema: type[BaseModel], previous_content: str, error: Exception) -> str:

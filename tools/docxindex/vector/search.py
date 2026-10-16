@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from threading import BoundedSemaphore
 from typing import Any
 from loggers.call_log import call_stage, retrieval_call_stage
 
@@ -21,11 +20,9 @@ def vector_search(
     top_k: int | None = None,
     score_threshold: float | None = None,
     input_tokens: int | None = None,
-    concurrency: int = 10,
     allowed_node_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
-    limiter = BoundedSemaphore(max(1, concurrency))
-    with limiter, call_stage(retrieval_call_stage("vector-query")):
+    with call_stage(retrieval_call_stage("vector-query")):
         query_embedding = client.embed([query])[0]
     nodes = {node.get("node_id"): node for node in document_index.get("nodes") or []}
     scored = []

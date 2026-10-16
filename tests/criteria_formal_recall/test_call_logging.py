@@ -5,17 +5,21 @@ import asyncio
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import nullcontext
+from contextlib import asynccontextmanager
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from loggers.call_log import map_with_context, new_call, reset_call_context, set_call_context
+import httpx
+from redis.exceptions import ConnectionError as RedisConnectionError
+
+from endpoints.runtime.model_calls import execute_model
+from loggers.call_log import logical_call, map_with_context, new_call, reset_call_context, set_call_context
 from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_trace
 from mcp_service.client.client import MinimalMCPClient
-from tools.docxindex.llm.client import LLMClient, LLMClientError
+from tools.docxindex.llm.client import LLMClient, LLMClientError, LLMSettings
 from tools.docxindex.retriever import DocxIndexRetriever
+from tests.criteria_formal_recall._model_test_support import model_transport
 
 
 class CallLoggingTests(unittest.TestCase):
@@ -29,17 +33,11 @@ class CallLoggingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             events_path = Path(temp_dir) / "logs" / "events.log"
             token = set_call_context(events_path, operation_id="op-1", criterion_id="H12", stage="route.1.scan")
-            client = object.__new__(LLMClient)
-            client.settings = SimpleNamespace(model="fake", temperature=0, enable_thinking=False)
-            raw_response = SimpleNamespace(create=lambda **kwargs: (_ for _ in ()).throw(TimeoutError("request timed out")))
-            client.client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(with_raw_response=raw_response)))
-            client._limiter = BoundedSemaphore(1)
-            client._start_lock = Lock()
-            client._next_start = 0.0
-            client._start_interval_seconds = 0.0
-            client._rate_limit_retries = 0
+            client = LLMClient(LLMSettings(model="fake"))
+            def fail(request):
+                raise httpx.ReadTimeout("request timed out", request=request)
             try:
-                with patch("tools.docxindex.llm.client._global_model_slot", return_value=nullcontext()):
+                with model_transport("tools.docxindex.llm.client", fail):
                     with self.assertRaises(LLMClientError) as captured:
                         client.complete("contract excerpt")
             finally:
@@ -54,6 +52,81 @@ class CallLoggingTests(unittest.TestCase):
             self.assertEqual(record["request"]["messages"][0]["content"], "contract excerpt")
             self.assertIsNone(record["error"]["http_status"])
             self.assertRegex(Path(error.call_path).name, rf"^docxindex_H12__route-1-scan__\d{{8}}T\d{{9}}Z__{error.call_id}\.json$")
+
+    def test_received_usage_survives_slot_release_failure_without_resending(self) -> None:
+        @asynccontextmanager
+        async def failed_release(*args, **kwargs):
+            yield SimpleNamespace(key="test:model:semaphore")
+            raise RedisConnectionError("Redis unavailable while releasing this slot")
+
+        async def execute():
+            sends = []
+
+            async def send(remaining):
+                sends.append(remaining)
+                return {"usage": {"prompt_tokens": 40, "completion_tokens": 5}}, 200
+
+            with patch("endpoints.runtime.model_calls.model_semaphore", failed_release):
+                try:
+                    await execute_model(model_type="llm", model="fake", caller="docxindex.llm",
+                                        request={"messages": []}, send=send)
+                finally:
+                    self.assertEqual(len(sends), 1)
+
+        for detailed in (False, True):
+            with self.subTest(detailed=detailed), tempfile.TemporaryDirectory() as directory, \
+                 patch("loggers.call_log.LOGGING_DETAILED", detailed):
+                with self.assertRaises(RedisConnectionError) as caught:
+                    with logical_call("docxindex.llm", "fake", directory=Path(directory) / "calls") as logical:
+                        asyncio.run(execute())
+                self.assertEqual(caught.exception.failure_stage, "semaphore_release")
+                record = logical.last_record
+                self.assertEqual(record.payload["status"], "failed")
+                self.assertEqual(record.payload["failure_stage"], "semaphore_release")
+                self.assertEqual(record.payload["http_status"], 200)
+                self.assertEqual((record.payload["input_tokens"], record.payload["output_tokens"]), (40, 5))
+                self.assertEqual(logical.payload["retry_count"], 0)
+                self.assertEqual((logical.payload["known_input_tokens"], logical.payload["known_output_tokens"]), (40, 5))
+                self.assertTrue(logical.payload["usage_complete"])
+                persisted = json.loads(logical.path.read_text(encoding="utf-8"))
+                self.assertEqual(persisted["status"], "failed")
+                self.assertEqual(len(persisted["attempts"]), 1)
+                self.assertEqual(persisted["attempts"][0]["failure_stage"], "semaphore_release")
+                self.assertEqual(persisted["attempts"][0]["input_output_tokens"], 45)
+                self.assertEqual(persisted["attempts"][0]["http_status"], 200)
+                self.assertIsNone(persisted["attempts"][0]["error"]["http_status"])
+                self.assertTrue(persisted["attempts"][0]["sent"])
+                self.assertEqual(persisted["send_count"], 1)
+
+    def test_normal_log_mode_persists_success_http_status_without_request_body(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch("loggers.call_log.LOGGING_DETAILED", False):
+            calls = Path(directory) / "calls"
+            with logical_call("agent", "fake", directory=calls) as logical:
+                record = new_call(component="agent", model="fake", request={"messages": [{"content": "contract"}]})
+                record.sent()
+                record.succeeded({"usage": {"prompt_tokens": 4, "completion_tokens": 1}}, http_status=200)
+            persisted = json.loads(logical.path.read_text(encoding="utf-8"))
+            self.assertEqual(list(calls.glob("*.json")), [])
+        self.assertEqual(persisted["status"], "succeeded")
+        self.assertEqual(persisted["send_count"], 1)
+        self.assertEqual(persisted["attempts"][0]["http_status"], 200)
+        self.assertTrue(persisted["attempts"][0]["sent"])
+        self.assertNotIn("request", persisted["attempts"][0])
+
+    def test_llm_input_usage_does_not_make_unknown_output_usage_complete(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with logical_call("agent", "fake", directory=Path(directory) / "calls") as logical:
+                record = new_call(component="agent", model="fake", request={})
+                record.sent()
+                record.succeeded({"usage": {"prompt_tokens": 40}}, http_status=200)
+            persisted = json.loads(logical.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["status"], "succeeded")
+        self.assertTrue(persisted["input_usage_complete"])
+        self.assertFalse(persisted["output_usage_complete"])
+        self.assertFalse(persisted["usage_complete"])
+        self.assertEqual(persisted["known_input_tokens"], 40)
+        self.assertIsNone(persisted["output_tokens"])
+        self.assertIsNone(persisted["attempts"][0]["output_tokens"])
 
     def test_nested_workers_keep_criterion_context_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

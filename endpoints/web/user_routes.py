@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import secrets
 from datetime import datetime
 from pathlib import Path
@@ -13,12 +12,10 @@ from fastapi.templating import Jinja2Templates
 from config import DATA_DIR, PROJECT_ROOT
 from loggers.resolve_review_task_paths import resolve_review_task_paths
 from loggers.review_history import (
-    HISTORY_SCHEMA_VERSION,
     format_file_size,
-    format_timestamp,
     load_history_records,
 )
-from endpoints.review.job_worker import run_async_review_job
+from task_queue.review_queue import enqueue_review_job
 from endpoints.review.task_store import (
     create_task,
     ensure_task_dirs,
@@ -249,52 +246,6 @@ def build_history_display_names(record: dict) -> tuple[str, str]:
             else strip_task_file_prefix(record.get("report_stored_name"))
         )
     return strip_task_file_prefix(contract_name), strip_task_file_prefix(report_name)
-
-
-def build_history_record(paths, output_path: Path, task: dict) -> dict:
-    contract_stat = paths.stored_contract_path.stat()
-    report_stat = output_path.stat() if output_path.exists() else None
-    task_input = task.get("input") if isinstance(task.get("input"), dict) else {}
-    criteria_source = task.get("criteria_source") or task_input.get("criteria_source", "mandatory")
-    return {
-        "schema_version": HISTORY_SCHEMA_VERSION,
-        "tenant_id": paths.tenant_id,
-        "tenant_name": task.get("tenant_name"),
-        "username": paths.username,
-        "display_name": task.get("display_name"),
-        "task_id": paths.task_id,
-        "status": task.get("status", "completed"),
-        "contract_original_name": paths.original_filename,
-        "contract_stored_name": paths.stored_contract_path.name,
-        "contract_size_bytes": contract_stat.st_size,
-        "contract_uploaded_at": task.get("contract_uploaded_at") or task.get("created_at") or format_timestamp(contract_stat.st_mtime),
-        "criteria_source": criteria_source,
-        "criteria_original_name": (
-            task.get("criteria_original_name") or task_input.get("criteria_filename")
-            if criteria_source == "uploaded"
-            else None
-        ),
-        "report_display_name": build_report_display_name(paths.original_filename),
-        "report_stored_name": output_path.name,
-        "report_size_bytes": report_stat.st_size if report_stat else None,
-        "report_created_at": format_timestamp(report_stat.st_mtime) if report_stat else None,
-    }
-
-
-
-async def run_web_review_task(username: str, tenant_id: str, paths) -> None:
-    client_dir = web_client_dir(tenant_id)
-    await run_async_review_job(client_dir, paths.task_id)
-    task = read_task(client_dir, paths.task_id)
-    if task is None:
-        return
-
-    output_path = Path(task["output"]["result_path"])
-    history_record = build_history_record(paths, output_path, task)
-    if task.get("status") == "succeeded":
-        task_updates = history_record.copy()
-        task_updates.pop("task_id", None)
-        update_task(client_dir, paths.task_id, **task_updates)
 
 
 def get_current_username(request: Request) -> str | None:
@@ -735,7 +686,7 @@ async def review_page(
             display_name=user["display_name"],
             contract_uploaded_at=created_at,
         )
-        asyncio.create_task(run_web_review_task(username, tenant_id, paths))
+        enqueue_review_job(client_dir, paths.task_id)
         return RedirectResponse(ctx_path("/web/work", ctx), status_code=303)
 
 

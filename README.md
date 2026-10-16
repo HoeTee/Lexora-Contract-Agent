@@ -2,15 +2,15 @@
 
 审查输出契约见[审查质量与批注规则](docs/REVIEW_QUALITY.md)。根目录 `routing/` 管理固定审查路线和用户标准动态路线；`tools/docxindex/` 只负责索引与检索执行。Reflector 逐条确认 finding，最终 DOCX 只写已确认问题并替换旧 AI 审查总结。
 
-合同审查 Agent 支持三种 DOCX 审查入口：浏览器 `/web`、异步 `/api` 和本地 CLI。系统读取合同与审查标准，执行 agent 工作流，并输出带批注的 DOCX。
+合同审查 Agent 只提供两个服务执行入口：浏览器 `/web` 和异步 `/api`；OA 已移除。Web、API 均通过 Redis DB 0 排队，由三个 Celery worker 执行。CLI 作为 API 客户端提交任务，不在本地直接运行审查。系统读取合同与审查标准，执行 agent 工作流，并输出带批注的 DOCX。
 
 | 使用场景 | 入口 | 结果 |
 | --- | --- | --- |
 | 浏览器审查 | `/web` | 页面历史记录与批注 DOCX |
 | 系统集成 | `/api` | 异步任务状态与 DOCX 文件流或 URL |
-| 单次本地处理 | CLI | 指定位置的批注 DOCX |
+| 命令行提交 | CLI → `/api` | 下载批注 DOCX 到指定位置 |
 
-## 本地启动
+## 本地准备与服务启动
 
 安装依赖并创建配置：
 
@@ -27,28 +27,25 @@ Copy-Item .env.example .env
 .\.venv\Scripts\python.exe scripts/manage_users.py create --tenant-id demo --username testuser --password Test123456
 ```
 
-启动 Web 服务：
+Web、API 都要求 Redis 和三个 Celery worker，不存在关闭队列后在服务进程内执行的模式。每个 worker 必须使用 `prefork` 和 `concurrency=1`，整合同硬时限依赖 Linux 进程池。完整部署优先使用三个 worker 的 Compose 配置：
 
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn app:app --host 0.0.0.0 --port 5000
+```bash
+docker compose up -d
 ```
 
-浏览器访问 `http://127.0.0.1:5000/web/login`，使用 `demo / testuser / Test123456` 登录。
+镜像与挂载文件的准备见 [部署说明](docs/DEPLOYMENT.md)。启动后访问 `http://127.0.0.1:5000/web/login`，使用 `demo / testuser / Test123456` 登录。
 
-如果 `config.yaml` 中 `queue.enabled=true`，异步 API 还需要 Redis 和 Celery worker：
-
-```powershell
-redis-server
-.\.venv\Scripts\python.exe -m celery -A task_queue.celery_app:celery_app worker --loglevel=info --pool=solo
-```
+手动开发部署应在同一 Linux/WSL 项目中启动 `uvicorn app:app --host 0.0.0.0 --port 5000` 和三个 `celery -A task_queue.celery_app:celery_app worker --pool=prefork --concurrency=1` 进程，三个 worker 需使用不同名称。API、worker 和 MCP 使用相同配置、可达的 Redis 地址及共享数据路径；Redis DB 0 存任务消息，DB 2 协调 LLM/embedding/reranker 请求上限。Windows 原生 `solo` 池不提供本方案的硬时限保证。Windows 开发机的 `.venv` 可用于管理、离线测试和 API 客户端，不要与看不到其绝对文件路径的容器 worker 混搭执行任务。
 
 ## 合同 CLI
 
-### 本地 `.venv`
+CLI 需要已运行的 API、三个 worker、Redis，以及环境变量 `API_KEY` 中的已注册 API key。上传的输入来自命令所在机器，审查在服务端执行，结果下载到 `--output` 指定的位置。业务元数据的完整选项以 `--help` 为准。当前 CLI 使用服务端模型配置，需要 `api.require_request_model_config=false`。
+
+### 开发机 `.venv` 客户端
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --contract .\contract.docx
-.\.venv\Scripts\python.exe main.py --contract .\contract.docx --criteria .\criteria.docx --output .\contract_reviewed.docx
+.\.venv\Scripts\python.exe main.py --help
+.\.venv\Scripts\python.exe main.py --base-url http://127.0.0.1:5000 --contract .\contract.docx --criteria .\criteria.docx --output .\contract_reviewed.docx --template-code demo --serial-no cli-test
 ```
 
 ### VMP 受保护容器
@@ -57,10 +54,10 @@ redis-server
 
 ```bash
 docker exec -it lexora bash
-/app/host -m main --contract /app/data/contract.docx --output /app/data/contract_reviewed.docx
+/app/host -m main --base-url http://127.0.0.1:8000 --contract /app/data/contract.docx --output /app/data/contract_reviewed.docx --template-code demo --serial-no cli-test
 ```
 
-输入来自宿主机 `./data/contract.docx`，输出最终写到宿主机 `./data/contract_reviewed.docx`。
+命令在容器内作为 API 客户端运行；输入来自宿主机挂载的 `./data/contract.docx`，服务端通过 Celery 审查，客户端下载的输出最终写到宿主机 `./data/contract_reviewed.docx`。不要把输入或长期结果写入未挂载的容器临时目录。
 
 ## 异步 API
 
@@ -75,7 +72,7 @@ docker exec -it lexora bash
 
 ## 配置与数据
 
-模型密钥放在 `.env`；模型、workflow、API、检索、队列和日志配置放在 `config.yaml`。配置加载入口是 `config.py`。
+模型密钥放在 `.env`；模型、workflow、API、检索、队列和日志配置放在 `config.yaml`。配置加载入口是 `config.py`。各配置作用范围、默认值和旧字段迁移见 [并发与超时配置说明](docs/CONCURRENCY_TIMEOUT_CONFIGURATION.md)。模型限流固定启用，单次调用共享等待、请求和重试预算；整合同只配置 Celery 硬时限。
 
 合同检索保留 DocxIndex 和 LlamaIndex 两种临时索引后端，通过 `retrieval.backend` 选择。
 

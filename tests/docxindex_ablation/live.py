@@ -1,6 +1,7 @@
 """Paired real reranks for changed prompt inputs on a frozen index and route.
 
-Upstream route/structure/vector responses stay frozen. Only reranking uses LLM.
+Upstream route/structure/vector responses stay frozen. Only the configured
+dedicated reranker calls the network, through the shared DB 2 controller.
 Field screening uses the largest rerank payload per contract, not all queries.
 """
 
@@ -9,12 +10,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 from pathlib import Path
 from time import perf_counter
-from types import SimpleNamespace
 
 from tools.docxindex import retriever as retrieval
 from tools.docxindex.indexing import estimate_tokens
+from tools.docxindex.reranker import build_payload
+from config import infer_rerank_provider
 from tests.docxindex_ablation.run import ROOT, read_json, write_json, write_csv, replay, anchor_texts
-from tests.docxindex_ablation.variants import ORIGINAL_MERGE, ORIGINAL_RERANK, RERANK_MODULE
+from tests.docxindex_ablation.variants import ORIGINAL_MERGE, RERANK_MODULE, RecordedReranker
 from tests.docxindex_ablation.quality import require_baseline_quality
 
 
@@ -46,16 +48,25 @@ def request(client, index, query, candidates, budget, field=None):
     view = batches[0]
     if field:
         view = [{k: v for k, v in row.items() if k != field} for row in view]
-    prompt = RERANK_MODULE._rerank_prompt(query, json.dumps(view, ensure_ascii=False))
+    documents = [json.dumps(row, ensure_ascii=False) for row in view]
+    payload = build_payload(
+        client.provider or infer_rerank_provider(client.model),
+        client.model,
+        client.instruct,
+        query,
+        documents,
+        len(documents),
+    )
     start = perf_counter()
-    response = client.complete_model(prompt, RERANK_MODULE._complete_rerank_schema({row["node_id"] for row in view}))
+    scores = client.rank(query, documents)
     seconds = perf_counter() - start
-    frozen = SimpleNamespace(settings=client.settings, complete_model=lambda *a: response)
-    ranked = ORIGINAL_RERANK(index, query, candidates, frozen, budget, None)
+    frozen = RecordedReranker(client.model, [{"query": query, "documents": documents, "scores": scores}])
+    ranked = RERANK_MODULE._rank_batch(query, candidates, view, frozen, None, stage="ablation-live-replay")
+    frozen.assert_consumed()
     return {
-        "prompt": prompt,
-        "input_tokens_estimate": estimate_tokens(prompt),
-        "response": response.model_dump(mode="json"),
+        "request": payload,
+        "input_tokens_estimate": estimate_tokens(json.dumps(payload, ensure_ascii=False)),
+        "response": {"index_scores": scores},
         "ranked": ranked,
         "seconds": seconds,
     }
@@ -83,6 +94,8 @@ def run_pair(task, client, output, budget, repeats):
 
 def live(args):
     require_baseline_quality(args.output)
+    if read_json(args.output / "manifest.json").get("capture_protocol") != "dedicated_reranker_v1":
+        raise ValueError("Old LLM rerank captures cannot validate the dedicated reranker; use a new capture directory.")
     engine = retrieval.DocxIndexRetriever(ROOT / "config.yaml")
     tasks = []
     for directory in sorted(args.output.glob("D[0-9][0-9]")):
@@ -126,7 +139,7 @@ def live(args):
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         pending = [
             pool.submit(
-                run_pair, task, engine.llm_client, args.output, engine.retrieval_config.input_tokens, args.repeats
+                run_pair, task, engine.reranker_client, args.output, engine.retrieval_config.input_tokens, args.repeats
             )
             for task in tasks
         ]

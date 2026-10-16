@@ -1,69 +1,34 @@
 """Measure real reranker local work using captured model responses; no network."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor
 import csv
 import json
 from pathlib import Path
 import re
 from statistics import median
-from threading import Lock
-from time import perf_counter, sleep
-from types import SimpleNamespace
-from unittest.mock import patch
-
-from tools.docxindex.llm.client import LLMClient, LLMSettings
-from tools.docxindex.llm.schemas import RerankResponse
+from time import perf_counter
 from tools.docxindex.retrieval import content
 from tools.docxindex import retriever as retrieval
 from tests.docxindex_ablation.run import ROOT, SUITE, read_json, write_csv, write_json, anchor_texts
-from tests.docxindex_ablation.variants import ORIGINAL_RERANK, treatment
+from tests.docxindex_ablation.variants import ORIGINAL_RERANK, RecordedReranker, treatment
 
 
 def concurrency_check():
-    """Exercise the real LLMClient limiter with a fake HTTP transport only."""
-    index = {"nodes": [{"node_id": "a", "text": "A"}]}
-    candidates = [{"node_id": "a"}]
-    client = LLMClient(LLMSettings(model="offline", api_key="offline"), max_concurrency=2)
-    client._start_interval_seconds = 0
-    active = maximum = 0
-    lock = Lock()
+    """The removed local limiter is no longer a valid ablation target.
 
-    def transport(**kwargs):
-        nonlocal active, maximum
-        with lock:
-            active += 1
-            maximum = max(maximum, active)
-        try:
-            sleep(0.02)
-            message = SimpleNamespace(content='{"nodes":[{"node_id":"a","score":1}]}')
-            return SimpleNamespace(choices=[SimpleNamespace(message=message)])
-        finally:
-            with lock:
-                active -= 1
-
-    results = {}
-    with patch.object(client.client.chat.completions, "create", transport):
-        for variant in ("baseline", "E08"):
-            maximum = 0
-            with treatment(variant, index), ThreadPoolExecutor(max_workers=6) as pool:
-                outputs = list(
-                    pool.map(
-                        lambda _: ORIGINAL_RERANK(index, "q", candidates, client, 1000, None, concurrency=1), range(12)
-                    )
-                )
-            results[variant] = {
-                "requests": len(outputs),
-                "max_transport_concurrency": maximum,
-                "all_outputs_equal": all(r == outputs[0] for r in outputs),
-            }
-            if maximum != 2:
-                raise AssertionError(f"Client concurrency changed: {variant}={maximum}")
-    client.client.close()
-    return results
+    Recorded model responses cannot verify the shared Redis capacity. Do not
+    report synthetic replay concurrency as a measurement of global limits.
+    """
+    return {
+        "E08": {"status": "retired", "reason": "Local rerank semaphore removed."},
+        "global_model_limit": {"status": "not_measured", "requires": "Real Redis multi-process controller tests"},
+    }
 
 
 def analyze(output, repeats):
+    manifest = read_json(output / "manifest.json")
+    if manifest.get("capture_protocol") != "dedicated_reranker_v1":
+        raise ValueError("Old LLM rerank captures cannot validate the dedicated reranker; use a new capture directory.")
     engine = retrieval.DocxIndexRetriever(ROOT / "config.yaml")
     with (SUITE / "expected_cases_10.csv").open(encoding="utf-8-sig", newline="") as handle:
         expected = {row["case_id"]: row for row in csv.DictReader(handle)}
@@ -74,20 +39,14 @@ def analyze(output, repeats):
         index = read_json(directory / "index.json")
         for file in sorted(directory.glob("C[0-9][0-9].json")):
             recorded = read_json(file)
-            responses = [r["response"] for r in recorded["models"] if r.get("schema") == "RerankResponse"]
             calls = [r for r in recorded["calls"] if r["function"] == "rerank_matches"]
-            if len(responses) != len(calls):
-                raise AssertionError(f"Rerank response count mismatch: {file}")
-            for n, (call, response) in enumerate(zip(calls, responses, strict=True)):
-                client = SimpleNamespace(
-                    settings=engine.llm_settings,
-                    complete_model=lambda *a, response=response: RerankResponse.model_validate(response),
-                )
-                for variant in ("E07", "E08"):
+            for n, call in enumerate(calls):
+                for variant in ("E07",):
                     timings = {"baseline": [], variant: []}
                     for repeat in range(repeats):
                         order = ("baseline", variant) if repeat % 2 == 0 else (variant, "baseline")
                         for name in order:
+                            client = RecordedReranker(manifest["reranker_model"], call["rerank_requests"])
                             with treatment(name, index):
                                 start = perf_counter()
                                 result = ORIGINAL_RERANK(
@@ -97,7 +56,9 @@ def analyze(output, repeats):
                                     client,
                                     engine.retrieval_config.input_tokens,
                                     None,
+                                    max_selected_nodes=call.get("max_selected_nodes"),
                                 )
+                                client.assert_consumed()
                                 timings[name].append(perf_counter() - start)
                             if result != call["output"]:
                                 raise AssertionError(f"Real reranker replay mismatch: {file} {variant}")

@@ -20,6 +20,7 @@ from unittest.mock import patch
 
 from tools.docxindex import retriever as retrieval
 from tools.docxindex.llm.client import LLMClient
+from endpoints.runtime import model_calls
 from tools.docxindex.llm.schemas import RouteResponse
 from tools.docxindex.indexing import estimate_tokens
 from routing import load_mandatory_tasks
@@ -33,10 +34,7 @@ ORIGINALS = {name: getattr(retrieval, name) for name in OPERATIONS}
 
 
 def mandatory_criteria() -> dict[int, str]:
-    return {
-        number: f"{number}. {task['criterion']}"
-        for number, task in enumerate(load_mandatory_tasks(), 1)
-    }
+    return {number: f"{number}. {task['criterion']}" for number, task in enumerate(load_mandatory_tasks(), 1)}
 
 
 def write_json(path, value):
@@ -65,6 +63,21 @@ def capture_query(engine, query):
     def wrapper(name):
         def call(*args, **kwargs):
             start = perf_counter()
+            requests = []
+            if name == "rerank_matches":
+                original_client = args[3]
+
+                class CaptureReranker:
+                    model = original_client.model
+
+                    def rank(self, rerank_query, documents, top_n=None):
+                        scores = original_client.rank(rerank_query, documents, top_n)
+                        requests.append(
+                            {"query": rerank_query, "documents": documents, "top_n": top_n, "scores": scores}
+                        )
+                        return scores
+
+                args = (*args[:3], CaptureReranker(), *args[4:])
             result = ORIGINALS[name](*args, **kwargs)
             record = {
                 "function": name,
@@ -73,6 +86,8 @@ def capture_query(engine, query):
             }
             if name == "rerank_matches":
                 record["query"], record["candidates"] = args[1], deepcopy(args[2])
+                record["rerank_requests"] = requests
+                record["max_selected_nodes"] = kwargs.get("max_selected_nodes")
             if name in {"llm_query", "vector_search"}:
                 allowed = kwargs.get("allowed_node_ids")
                 record["allowed_node_ids"] = sorted(allowed) if allowed is not None else None
@@ -109,16 +124,18 @@ def capture(args):
         "contracts": {},
         "started": datetime.now().isoformat(),
         "scope": "docxindex tool calls, not end-to-end review",
+        "capture_protocol": "dedicated_reranker_v1",
+        "reranker_model": engine.reranker_client.model,
     }
     if (out / "manifest.json").exists():
         old = read_json(out / "manifest.json")
-        for key in ("git", "config_sha256", "expected_sha256", "routes_sha256"):
-            if old[key] != manifest[key]:
+        for key in ("git", "config_sha256", "expected_sha256", "routes_sha256", "capture_protocol", "reranker_model"):
+            if old.get(key) != manifest[key]:
                 raise ValueError(f"Resume baseline mismatch: {key}")
         manifest = old
     write_json(out / "manifest.json", manifest)
     original_model = LLMClient.complete_model
-    original_request = engine.llm_client.client.chat.completions.__class__.create
+    original_execute = model_calls.execute_model
     model_rows = []
     lock = Lock()
 
@@ -147,16 +164,32 @@ def capture(args):
         return result
 
     # Capture provider usage as returned, without recording credentials or URLs.
-    def request_call(client, *a, **kw):
-        response = original_request(client, *a, **kw)
-        usage = response.usage.model_dump() if response.usage else None
-        with lock:
-            model_rows.append({"provider_usage": usage, "model": response.model})
-        return response
+    async def execute_with_usage(**kwargs):
+        send = kwargs["send"]
+
+        async def capture_send(remaining):
+            response, status = await send(remaining)
+            usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+            if hasattr(usage, "model_dump"):
+                usage = usage.model_dump()
+            with lock:
+                model_rows.append(
+                    {
+                        "provider_usage": usage,
+                        "model": kwargs["model"],
+                        "model_type": kwargs["model_type"],
+                        "http_status": status,
+                    }
+                )
+            return response, status
+
+        return await original_execute(**{**kwargs, "send": capture_send})
 
     with (
         patch.object(LLMClient, "complete_model", model_call),
-        patch.object(engine.llm_client.client.chat.completions.__class__, "create", request_call),
+        patch("tools.docxindex.llm.client.execute_model", execute_with_usage),
+        patch("tools.docxindex.vector.client.execute_model", execute_with_usage),
+        patch("tools.docxindex.reranker.execute_model", execute_with_usage),
     ):
         for contract in args.contracts:
             doc = SUITE / "cases" / f"{contract}.docx"

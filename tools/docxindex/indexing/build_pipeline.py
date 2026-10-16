@@ -49,7 +49,6 @@ class IndexBuildOptions:
     hierarchy_batch_target_tokens: int
     hierarchy_batch_overlap_tokens: int
     hierarchy_max_levels: int
-    hierarchy_retry_count: int
     attachment_max_levels: int
     summary_batch_max_nodes: int
     summary_batch_max_tokens: int
@@ -124,7 +123,7 @@ def _initialize_llm(options: IndexBuildOptions) -> tuple[LLMClient | None, LLMSe
     with _stage(options.timer, "build.init_llm_client"):
         if llm_settings is None:
             llm_settings = LLMSettings.from_sources()
-        return LLMClient(llm_settings, max_concurrency=options.llm_concurrency), llm_settings
+        return LLMClient(llm_settings), llm_settings
 
 
 def _build_deterministic_roots(
@@ -249,7 +248,6 @@ def _build_attachment_root(
         hierarchy_input_max_tokens=options.hierarchy_input_max_tokens,
         hierarchy_batch_target_tokens=options.hierarchy_batch_target_tokens,
         hierarchy_batch_overlap_tokens=options.hierarchy_batch_overlap_tokens,
-        hierarchy_retry_count=options.hierarchy_retry_count,
         attachment_max_levels=options.attachment_max_levels,
         llm_concurrency=options.llm_concurrency,
     )
@@ -281,7 +279,6 @@ def _apply_llm_enrichment(
                 batch_target_tokens=options.hierarchy_batch_target_tokens,
                 batch_overlap_tokens=options.hierarchy_batch_overlap_tokens,
                 max_levels=options.hierarchy_max_levels,
-                retry_count=options.hierarchy_retry_count,
             )
         with _stage(options.timer, "build.split_long_leaves_after_llm_expand"):
             split_long_leaves(
@@ -340,7 +337,6 @@ def _finalize_index(
             "hierarchy_batch_target_tokens": options.hierarchy_batch_target_tokens,
             "hierarchy_batch_overlap_tokens": options.hierarchy_batch_overlap_tokens,
             "hierarchy_max_levels": options.hierarchy_max_levels,
-            "hierarchy_retry_count": options.hierarchy_retry_count,
             "attachment_max_levels": options.attachment_max_levels,
             "llm_model": llm_settings.model if llm_settings else None,
             "llm_concurrency": options.llm_concurrency,

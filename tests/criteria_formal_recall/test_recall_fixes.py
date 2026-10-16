@@ -1152,7 +1152,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 2)
+            self.assertEqual(max_attempts, 1)
             if criterion["id"] == "H11":
                 raise AgentOutputValidationError("invalid user-facing output")
             return {
@@ -1177,7 +1177,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(_criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 2)
+            self.assertEqual(max_attempts, 1)
             raise AgentOutputValidationError("invalid user-facing output")
 
         orchestrator._execute_criterion_with_recovery = execute  # type: ignore[method-assign]
@@ -1189,7 +1189,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 2)
+            self.assertEqual(max_attempts, 1)
             if criterion["id"] == "H01":
                 raise ValueError("post-revision validation failed")
             return {

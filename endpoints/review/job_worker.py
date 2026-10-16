@@ -17,7 +17,6 @@ from endpoints.review.task_store import (
     is_cancel_requested,
     initialize_task_criteria,
     mark_cancelled,
-    mark_queued,
     mark_failed,
     mark_running,
     mark_succeeded,
@@ -37,7 +36,7 @@ from endpoints.review.task_store import (
     write_task_log_event,
 )
 from endpoints.runtime.errors import ModelCallError
-from endpoints.runtime.review_runtime import review_semaphore
+from endpoints.review.web_history import complete_web_history
 from loggers.agent_logger import reset_conversation_log_dir, set_conversation_log_dir
 from endpoints.review.review_state import ReviewStateStore
 from workflow.workflow import ContractReviewWorkflow
@@ -145,35 +144,18 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
 
         token = set_conversation_log_dir(task_conversation_log_dir(client_dir, task_id))
         try:
-            if review_semaphore is None:
-                if is_cancel_requested(client_dir, task_id):
-                    mark_cancelled(client_dir, task_id)
-                    write_task_log_event(client_dir, task_id, "review_cancelled")
-                    return
-                mark_running(client_dir, task_id)
-                write_task_log_event(client_dir, task_id, "review_started")
-                result = await workflow.run(
-                    contract_path=task["input"]["contract_path"],
-                    criteria_path=task["input"].get("criteria_path"),
-                    output_path=task["output"]["result_path"],
-                    progress_callback=persist_progress,
-                )
-            else:
-                if review_semaphore.locked():
-                    mark_queued(client_dir, task_id)
-                async with review_semaphore:
-                    if is_cancel_requested(client_dir, task_id):
-                        mark_cancelled(client_dir, task_id)
-                        write_task_log_event(client_dir, task_id, "review_cancelled")
-                        return
-                    mark_running(client_dir, task_id)
-                    write_task_log_event(client_dir, task_id, "review_started")
-                    result = await workflow.run(
-                        contract_path=task["input"]["contract_path"],
-                        criteria_path=task["input"].get("criteria_path"),
-                        output_path=task["output"]["result_path"],
-                        progress_callback=persist_progress,
-                    )
+            if is_cancel_requested(client_dir, task_id):
+                mark_cancelled(client_dir, task_id)
+                return
+            if mark_running(client_dir, task_id) is None:
+                return
+            write_task_log_event(client_dir, task_id, "review_started")
+            result = await workflow.run(
+                contract_path=task["input"]["contract_path"],
+                criteria_path=task["input"].get("criteria_path"),
+                output_path=task["output"]["result_path"],
+                progress_callback=persist_progress,
+            )
         finally:
             reset_conversation_log_dir(token)
 
@@ -190,7 +172,13 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
         if not output_path.exists():
             raise RuntimeError("Output DOCX file was not found.")
 
-        mark_succeeded(client_dir, task_id, criteria=result.get("criteria"))
+        completed = mark_succeeded(client_dir, task_id, criteria=result.get("criteria"))
+        if completed.get("status") != "succeeded":
+            return
+        try:
+            complete_web_history(client_dir, task_id)
+        except Exception:
+            logger.exception("Could not populate Web history for task %s", task_id)
         write_task_log_event(client_dir, task_id, "review_completed", result_file=str(output_path),
                              elapsed_seconds=result.get("elapsed_seconds"),
                              criteria_count=result.get("criteria_count"),

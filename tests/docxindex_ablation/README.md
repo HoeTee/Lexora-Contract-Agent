@@ -8,7 +8,7 @@
 
 ## 当前执行顺序：先核验效果，不先比较速度
 
-旧组合 `safe` 尚未证明质量不下降，正式提交入口现已停用；下面的组合配置说明仅为历史记录。
+旧组合 `safe` 尚未证明质量不下降，正式提交入口现已停用；下面的组合配置说明仅为历史记录。当前重排已改为独立 reranker，并统一使用 DB 2 模型控制；旧 LLM 排序响应不能充当当前版本的重排基线。新采集写入 `capture_protocol: dedicated_reranker_v1`，`analyze/live` 会拒绝旧协议目录，旧报告和证据保留用于历史核验。
 不得将 180 次原文/锚点等价转换为 180 条问题全部正确召回。
 
 1. 核验原标准、180 条期望的有效性、基线实际可见批注和总结。
@@ -48,14 +48,14 @@ python -m tests.docxindex_ablation.quality check --output $experiment
 | E05 | `content.get_node` 重复线性扫描 | 替换成节点字典；离线时间包含字典构建成本 |
 | E06 | `_format_anchor_context` 重复排序、全量扫描锚点 | 排序索引加范围查找；复用生产渲染函数保证文本和顺序 |
 | E07 | 单次在线重排的内存缓存、哈希、锁操作 | 保留真实重排函数，只回放模型响应；不删除共享/落盘缓存 |
-| E08 | 每次重排新建局部 semaphore | 保留真实 LLMClient 共享限制；12 请求、6 线程的并发探针 |
+| E08 | 已移除的批次局部 semaphore | 已停用，显式报错；不得把关闭全局模型控制当成对照 |
 | F01–F03 | 重排提示词的 `node_type` / `token_estimate` / `sources` | 各删一个字段，固定候选准入；每合同选一个最大载荷调用，配对 3 次 |
 
 F01–F03 是筛查，不是对全项目字段的删除证明。相同提示词的模型输出也有波动；
 字段使结果改变，不直接等于提高或降低准确率。
 
 `combined` 是离线 E01/E02/E05/E06 组合，固定重排响应；不能拿它代表正式主程序候选。
-正式 `safe` 组合仅含 E01/E05/E06/E07/E08，不含改变候选集合或提示词字段的干预。
+历史 `safe` 组合曾包含 E01/E05/E06/E07/E08，当前不能启动；新版本需要重新验证单项，不能沿用旧组合结论。
 
 ## 运行命令
 
@@ -72,10 +72,10 @@ python -m tests.docxindex_ablation.report --output $experiment
 
 | 命令 | 输入 | 输出 / 外部调用 |
 | --- | --- | --- |
-| `run capture` | 当前配置、DOCX、18 条标准 | 真实建索引和检索；调用 LLM/embedding；保存提示词、响应、节点树和 usage |
+| `run capture` | 当前配置、DOCX、18 条标准 | 真实工具级建索引和检索；调用 LLM/embedding/独立 reranker；全部模型请求经过 DB 2，保存请求、响应、节点树和 usage；不代表整合同 Celery 验证 |
 | `run replay` | 已完成合同的捕获文件 | 固定模型响应，7 次交替本地对照；无模型调用 |
-| `analyze` | 已完成合同的索引及重排响应 | E07/E08、本地并发、内容边界探针；无模型调用 |
-| `live` | 固定索引、路由、结构与向量结果 | 仅真实重排；保存每个配对的提示词和响应，可续跑 |
+| `analyze` | 新协议的索引及重排请求、索引分数 | E07 本地成本及内容边界探针；E08 标为停用，全局并发标为未测量；无模型调用 |
+| `live` | 新协议的固定索引、路由、结构与向量结果 | 仅调用配置的独立 reranker，通过 DB 2 限流；保存每个配对的请求与分数，可续跑 |
 | `formal` | 同一套合同和两个隔离主程序 API | 完整审查、任务 ID、trace、带批注 DOCX |
 | `judge` | 最终 DOCX、原始 DOCX、标准和期望表 | LLM 初判，保留理由和真实可见批注，**不是人工准确率** |
 | `report` | 已有实验结果 | CSV 与 `recommendations.md`；不调用模型 |
@@ -89,10 +89,11 @@ python -m tests.docxindex_ablation.report --output $experiment
 ## 正式主程序对照
 
 测试启动器运行原项目 `app.app` 和 `mcp_service.server.server`，不是重写审查工作流。
-当前只启动基线采集。已有完整基线可直接做质量核验，不必重复调用模型：
+当前只启动基线采集。正式任务固定进入 Celery，不能关闭队列。已有完整旧基线仍可做对应版本的质量核验，但不能作为新重排协议的对照。以下命令在同一 Linux/WSL 测试项目中、不同终端分别运行 API 与配套 worker；两个进程必须能通过 `config.yaml` 连接 DB 0 和 DB 2，数据路径必须一致：
 
 ```powershell
 python -m tests.docxindex_ablation.service --api --variant baseline --port 5101
+python -m tests.docxindex_ablation.service --worker --variant baseline
 ```
 
 随后在测试终端设置已有、已注册的 `API_KEY` 环境变量（不要把密钥提交进脚本），再运行：
@@ -104,13 +105,16 @@ python -m tests.docxindex_ablation.report --output $experiment
 
 隔离边界：
 
-- 开发机运行 Python 主程序，监听 `127.0.0.1:5101/5102`，不占用现有 5000 端口。
-- 测试进程禁用 Celery 入队，使用原 API 已有的进程内执行分支；审查 workflow 不变。
-- Redis 使用 Docker 发布端口 `127.0.0.1:6380`，保留现有全局模型限额和 key；Redis 容器必须已启动。
+- Linux/WSL 测试开发机运行源码及已安装依赖，API 监听 `127.0.0.1:5101`；不要求远端镜像宿主机具备源码或 Python。
+- API 将任务投递至独立队列 `contract_agent_ablation_baseline`，必须启动匹配的 `--worker`；测试 worker 使用 `prefork/concurrency=1`，不会消费生产默认队列。生产部署仍保持三个 worker。
+- Redis 地址完全读取当前 `config.yaml`；DB 0 存任务、DB 2 控制模型名额。不替换成发布端口，不修改 key、容量、租约，不关闭限流。测试环境需要自己满足所配置主机名和网络的可达性。
 - 真实 API 任务存入 `data/api/docxindex_ablation_<variant>/api/<task_id>/`，不会在启动时扫描或改写原服务任务。
 - 批注 DOCX 和评测结果复制到 `tests/docxindex_ablation/results/<run>/formal_verified/<variant>/`。
-- 两种配置按合同交替执行顺序，各一遍；这是配对筛查，不足以消除全部模型随机性。不能宣称显著提速。
-- 结束后关闭两个测试终端；不要停止用户原有服务或 Redis。
+- 目前只运行基线，不能拿单次结果宣称消融提速。后续配对筛查也不足以消除全部模型随机性。
+- API、worker 和 MCP 都必须使用同一项目位置、数据根目录和模型配置；不要让宿主机 API 将本地绝对路径传给看不到该目录的容器 worker。
+- 结束后关闭测试 API 和测试 worker；不要停止用户原有服务或 Redis。
+
+普通部署的日志核验也可使用 `scripts/verify_real_contract_logging.py --help`，它访问已运行 API，并通过 `--task-root` 显式指定开发机看到的共享 `data/api`，不启动应用、不覆写配置、不关闭队列或模型限流。真正执行该脚本会提交真实合同；`--help` 不调用模型。
 
 ### 干预生效校验与本轮纠正
 

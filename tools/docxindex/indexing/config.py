@@ -70,7 +70,6 @@ class HierarchyIndexConfig(BaseModel):
     batch_target_tokens: int = Field(default=16000, ge=1000, le=26000)
     batch_overlap_tokens: int = Field(default=800, ge=0, le=5000)
     max_levels: int = Field(default=6, ge=1, le=6)
-    retry_count: int = Field(default=3, ge=1, le=5)
 
     @model_validator(mode="after")
     def validate_batch_budget(self) -> "HierarchyIndexConfig":

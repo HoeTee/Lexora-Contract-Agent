@@ -1,16 +1,21 @@
+"""Cross-process FIFO model slots. Waiting consumes the caller's deadline."""
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
-from typing import AsyncIterator, Iterator
+
+from redis import asyncio as redis_asyncio
+from redis.exceptions import RedisError
 
 from config import MODEL_SEMAPHORE_CONFIGS
+from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, run_sync
 
 
-class ModelSemaphoreTimeout(TimeoutError):
+class ModelSemaphoreTimeout(ModelCallTimeout):
     pass
 
 
@@ -19,11 +24,9 @@ LLMGlobalSemaphoreTimeout = ModelSemaphoreTimeout
 
 @dataclass(frozen=True)
 class ModelSemaphoreConfig:
-    enabled: bool
     redis_url: str
     key: str
     max_concurrent_requests: int
-    wait_timeout_seconds: float
     lease_seconds: float
     poll_interval_seconds: float
 
@@ -31,201 +34,157 @@ class ModelSemaphoreConfig:
 @dataclass
 class ModelSemaphoreLease:
     model_type: str
-    enabled: bool
-    acquired: bool = False
-    key: str = ""
-    member: str = ""
-    wait_seconds: float = 0.0
-    max_concurrent_requests: int = 0
+    key: str
+    member: str
+    wait_seconds: float
+    max_concurrent_requests: int
+    acquired: bool = True
 
 
 LLMGlobalSemaphoreLease = ModelSemaphoreLease
 
 
 class RedisModelSemaphore:
+    # One atomic operation cleans expired owners/waiters, validates the shared
+    # capacity policy, enqueues once, and gives the oldest waiter the next slot.
     _ACQUIRE_SCRIPT = """
     redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', ARGV[1])
-    local current = redis.call('ZCARD', KEYS[1])
-    if current < tonumber(ARGV[3]) then
+    local expired = redis.call('ZRANGEBYSCORE', KEYS[3], '-inf', ARGV[1])
+    for _, member in ipairs(expired) do
+        redis.call('ZREM', KEYS[2], member)
+        redis.call('ZREM', KEYS[3], member)
+    end
+    local policy = redis.call('GET', KEYS[5])
+    if policy and policy ~= ARGV[6] and
+       (redis.call('ZCARD', KEYS[1]) > 0 or redis.call('ZCARD', KEYS[2]) > 0) then
+        return -1
+    end
+    redis.call('SET', KEYS[5], ARGV[6], 'EX', ARGV[5])
+    if not redis.call('ZSCORE', KEYS[2], ARGV[4]) then
+        local sequence = redis.call('INCR', KEYS[4])
+        redis.call('ZADD', KEYS[2], sequence, ARGV[4])
+        redis.call('ZADD', KEYS[3], ARGV[7], ARGV[4])
+    end
+    for index = 1, 4 do redis.call('EXPIRE', KEYS[index], ARGV[5]) end
+    if redis.call('ZCARD', KEYS[1]) < tonumber(ARGV[3])
+       and redis.call('ZRANK', KEYS[2], ARGV[4]) == 0 then
+        redis.call('ZREM', KEYS[2], ARGV[4])
+        redis.call('ZREM', KEYS[3], ARGV[4])
         redis.call('ZADD', KEYS[1], ARGV[2], ARGV[4])
-        redis.call('EXPIRE', KEYS[1], ARGV[5])
         return 1
     end
     return 0
     """
 
-    def __init__(self, model_type: str, config: ModelSemaphoreConfig) -> None:
+    def __init__(self, model_type: str, config: ModelSemaphoreConfig):
         self.model_type = model_type
         self.config = config
-        self._sync_redis = None
-        self._async_redis_by_loop: dict[asyncio.AbstractEventLoop, object] = {}
+        self._clients = {}
 
-    def _sync_client(self):
-        if self._sync_redis is None:
-            try:
-                import redis
-            except ImportError as exc:
-                raise RuntimeError("redis package is required when model semaphore is enabled.") from exc
-            self._sync_redis = redis.Redis.from_url(self.config.redis_url, decode_responses=True)
-        return self._sync_redis
-
-    async def _async_client(self):
+    def _async_client(self):
         loop = asyncio.get_running_loop()
-        client = self._async_redis_by_loop.get(loop)
-        if client is None:
+        if loop not in self._clients:
+            self._clients[loop] = redis_asyncio.from_url(
+                self.config.redis_url, decode_responses=True,
+                socket_connect_timeout=2, socket_timeout=2,
+            )
+        return self._clients[loop]
+
+    async def acquire_async(self, *, caller_name: str, model: str, budget: ModelCallBudget) -> ModelSemaphoreLease:
+        start = time.monotonic()
+        member = f"{uuid.uuid4().hex}:{self.model_type}:{caller_name}:{model}"
+        client = self._async_client()
+        key = self.config.key
+        keys = [key, key + ':waiting', key + ':deadlines', key + ':sequence', key + ':policy']
+        try:
+            async with asyncio.timeout(budget.remaining()):
+                while True:
+                    remaining = budget.remaining()
+                    now_ms = int(time.time() * 1000)
+                    result = await client.eval(
+                        self._ACQUIRE_SCRIPT, len(keys), *keys, now_ms,
+                        now_ms + int(self.config.lease_seconds * 1000),
+                        self.config.max_concurrent_requests, member,
+                        int(self.config.lease_seconds) + 60,
+                        f"{self.config.max_concurrent_requests}:{self.config.lease_seconds}",
+                        now_ms + int(remaining * 1000),
+                    )
+                    if result == -1:
+                        raise RuntimeError(f"Inconsistent model semaphore policy for {key}; drain old workers and use identical settings.")
+                    if result == 1:
+                        budget.remaining()
+                        return ModelSemaphoreLease(self.model_type, key, member, time.monotonic()-start,
+                                                   self.config.max_concurrent_requests)
+                    await asyncio.sleep(min(self.config.poll_interval_seconds, budget.remaining()))
+        except BaseException as exc:
+            # Also remove a slot if cancellation raced with a successful EVAL.
             try:
-                from redis import asyncio as redis_asyncio
-            except ImportError as exc:
-                raise RuntimeError("redis package is required when model semaphore is enabled.") from exc
-            client = redis_asyncio.from_url(self.config.redis_url, decode_responses=True)
-            self._async_redis_by_loop[loop] = client
-        return client
+                await asyncio.shield(self._remove(member, include_owner=True))
+            except (RedisError, TimeoutError):
+                logging.getLogger(__name__).exception("Redis slot cleanup failed; lease will reclaim %s", member)
+            if isinstance(exc, TimeoutError):
+                raise ModelSemaphoreTimeout(f"Model budget expired waiting for {self.model_type} capacity.") from exc
+            raise
 
-    def acquire_sync(self, *, caller_name: str, model: str) -> ModelSemaphoreLease:
-        start = time.monotonic()
-        deadline = start + self.config.wait_timeout_seconds
-        member = self._member(caller_name, model)
-        client = self._sync_client()
-        lease_ms = int(self.config.lease_seconds * 1000)
-        expire_seconds = int(self.config.lease_seconds) + 60
+    async def _remove(self, member: str, *, include_owner: bool):
+        client = self._async_client()
+        async with asyncio.timeout(2):
+            async with client.pipeline(transaction=True) as pipe:
+                for suffix in (['', ':waiting', ':deadlines'] if include_owner else [':waiting', ':deadlines']):
+                    pipe.zrem(self.config.key + suffix, member)
+                await pipe.execute()
 
-        while True:
-            now_ms = int(time.time() * 1000)
-            acquired = client.eval(
-                self._ACQUIRE_SCRIPT,
-                1,
-                self.config.key,
-                now_ms,
-                now_ms + lease_ms,
-                self.config.max_concurrent_requests,
-                member,
-                expire_seconds,
-            )
-            if int(acquired) == 1:
-                return self._lease(member, start)
-            if time.monotonic() >= deadline:
-                raise self._timeout()
-            time.sleep(self.config.poll_interval_seconds)
+    async def release_async(self, lease: ModelSemaphoreLease):
+        if lease.acquired:
+            await self._remove(lease.member, include_owner=True)
+            lease.acquired = False
 
-    async def acquire_async(self, *, caller_name: str, model: str) -> ModelSemaphoreLease:
-        start = time.monotonic()
-        deadline = start + self.config.wait_timeout_seconds
-        member = self._member(caller_name, model)
-        client = await self._async_client()
-        lease_ms = int(self.config.lease_seconds * 1000)
-        expire_seconds = int(self.config.lease_seconds) + 60
+    def acquire_sync(self, *, caller_name: str, model: str, budget: ModelCallBudget):
+        return run_sync(self.acquire_async(caller_name=caller_name, model=model, budget=budget))
 
-        while True:
-            now_ms = int(time.time() * 1000)
-            acquired = await client.eval(
-                self._ACQUIRE_SCRIPT,
-                1,
-                self.config.key,
-                now_ms,
-                now_ms + lease_ms,
-                self.config.max_concurrent_requests,
-                member,
-                expire_seconds,
-            )
-            if int(acquired) == 1:
-                return self._lease(member, start)
-            if time.monotonic() >= deadline:
-                raise self._timeout()
-            await asyncio.sleep(self.config.poll_interval_seconds)
-
-    def release_sync(self, lease: ModelSemaphoreLease) -> None:
-        if not lease.acquired or not lease.member:
-            return
-        self._sync_client().zrem(self.config.key, lease.member)
-
-    async def release_async(self, lease: ModelSemaphoreLease) -> None:
-        if not lease.acquired or not lease.member:
-            return
-        client = await self._async_client()
-        await client.zrem(self.config.key, lease.member)
-
-    def _member(self, caller_name: str, model: str) -> str:
-        return f"{uuid.uuid4().hex}:{self.model_type}:{caller_name}:{model}"
-
-    def _lease(self, member: str, start: float) -> ModelSemaphoreLease:
-        return ModelSemaphoreLease(
-            model_type=self.model_type,
-            enabled=True,
-            acquired=True,
-            key=self.config.key,
-            member=member,
-            wait_seconds=round(time.monotonic() - start, 3),
-            max_concurrent_requests=self.config.max_concurrent_requests,
-        )
-
-    def _timeout(self) -> ModelSemaphoreTimeout:
-        return ModelSemaphoreTimeout(
-            f"Timed out waiting for global {self.model_type} semaphore "
-            f"key={self.config.key!r}, max_concurrent_requests={self.config.max_concurrent_requests}."
-        )
+    def release_sync(self, lease: ModelSemaphoreLease):
+        return run_sync(self.release_async(lease))
 
 
-def _build_config(model_type: str) -> ModelSemaphoreConfig:
-    raw = MODEL_SEMAPHORE_CONFIGS[model_type]
-    return ModelSemaphoreConfig(
-        enabled=raw["enabled"],
-        redis_url=raw["redis_url"],
-        key=raw["key"],
-        max_concurrent_requests=max(1, int(raw["max_concurrent_requests"])),
-        wait_timeout_seconds=max(0.1, float(raw["wait_timeout_seconds"])),
-        lease_seconds=max(1.0, float(raw["lease_seconds"])),
-        poll_interval_seconds=max(0.05, float(raw["poll_interval_seconds"])),
-    )
-
-
-_SEMAPHORES = {
-    model_type: RedisModelSemaphore(model_type, _build_config(model_type))
-    for model_type in ("llm", "embedding", "reranker")
-}
+_SEMAPHORES = {kind: RedisModelSemaphore(kind, ModelSemaphoreConfig(**raw))
+               for kind, raw in MODEL_SEMAPHORE_CONFIGS.items()}
 
 
 @asynccontextmanager
-async def model_semaphore(model_type: str, caller_name: str, model: str) -> AsyncIterator[ModelSemaphoreLease]:
-    config = _build_config(model_type)
-    if not config.enabled:
-        yield ModelSemaphoreLease(model_type=model_type, enabled=False)
-        return
-
+async def model_semaphore(model_type: str, caller_name: str, model: str, *, budget: ModelCallBudget | None = None):
     semaphore = _SEMAPHORES[model_type]
-    lease = await semaphore.acquire_async(caller_name=caller_name, model=model)
+    lease = await semaphore.acquire_async(caller_name=caller_name, model=model, budget=budget or ModelCallBudget())
     try:
         yield lease
     finally:
-        await semaphore.release_async(lease)
+        await asyncio.shield(semaphore.release_async(lease))
 
 
 @contextmanager
-def model_semaphore_sync(model_type: str, caller_name: str, model: str) -> Iterator[ModelSemaphoreLease]:
-    config = _build_config(model_type)
-    if not config.enabled:
-        yield ModelSemaphoreLease(model_type=model_type, enabled=False)
-        return
-
+def model_semaphore_sync(model_type: str, caller_name: str, model: str, *, budget: ModelCallBudget | None = None):
     semaphore = _SEMAPHORES[model_type]
-    lease = semaphore.acquire_sync(caller_name=caller_name, model=model)
+    lease = semaphore.acquire_sync(caller_name=caller_name, model=model, budget=budget or ModelCallBudget())
     try:
         yield lease
     finally:
         semaphore.release_sync(lease)
 
 
-def semaphore_metadata(lease: ModelSemaphoreLease) -> dict[str, object]:
-    if not lease.enabled:
-        return {}
+def semaphore_metadata(lease: ModelSemaphoreLease) -> dict:
     prefix = f"{lease.model_type}_global_semaphore"
-    return {
-        f"{prefix}_key": lease.key,
-        f"{prefix}_wait_seconds": lease.wait_seconds,
-        f"{prefix}_max_requests": lease.max_concurrent_requests,
-    }
+    return {f"{prefix}_key": lease.key, f"{prefix}_wait_seconds": lease.wait_seconds,
+            f"{prefix}_max_requests": lease.max_concurrent_requests}
 
 
 @asynccontextmanager
-async def llm_global_semaphore(agent_name: str, model: str) -> AsyncIterator[ModelSemaphoreLease]:
-    async with model_semaphore("llm", agent_name, model) as lease:
+async def llm_global_semaphore(agent_name: str, model: str, *, budget: ModelCallBudget | None = None):
+    async with model_semaphore('llm', agent_name, model, budget=budget) as lease:
         yield lease
+
+
+async def close_model_clients() -> None:
+    loop = asyncio.get_running_loop()
+    for semaphore in _SEMAPHORES.values():
+        client = semaphore._clients.pop(loop, None)
+        if client is not None:
+            await client.aclose()

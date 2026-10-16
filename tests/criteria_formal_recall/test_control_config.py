@@ -1,0 +1,63 @@
+"""Configuration migration failures must be explicit before serving work."""
+from copy import deepcopy
+import unittest
+from unittest.mock import patch
+
+import config
+
+
+class ControlConfigurationTests(unittest.TestCase):
+    def test_removed_fields_are_rejected_with_a_migration_message(self):
+        for section, field in (("workflow", "max_api_concurrent_reviews"),
+                               ("workflow", "criterion_retry_max_attempts"),
+                               ("queue", "enabled"), ("queue", "task_soft_time_limit_seconds"),
+                               ("embedding", "timeout_seconds"), ("rerank", "max_retries")):
+            with self.subTest(field=f"{section}.{field}"):
+                raw = deepcopy(config.CONFIG)
+                raw[section][field] = 1
+                with patch.object(config, "CONFIG", raw), self.assertRaisesRegex(RuntimeError, "Removed configuration"):
+                    config._validate_control_config()
+
+    def test_legacy_shared_semaphore_and_retrieval_limits_are_not_silently_accepted(self):
+        raw = deepcopy(config.CONFIG)
+        raw["model_semaphore"]["limits"] = {"llm": 5}
+        with patch.object(config, "CONFIG", raw), self.assertRaisesRegex(RuntimeError, "Migrate shared"):
+            config._validate_control_config()
+        raw = deepcopy(config.CONFIG)
+        raw["retrieval"].setdefault("docxindex", {})["concurrency"] = {"llm": 5}
+        with patch.object(config, "CONFIG", raw), self.assertRaisesRegex(RuntimeError, "Remove retrieval"):
+            config._validate_control_config()
+
+    def test_per_model_bypass_and_wait_timeout_are_removed(self):
+        for field in ("enabled", "wait_timeout_seconds"):
+            raw = deepcopy(config.CONFIG)
+            raw["model_semaphore"]["llm"][field] = 1
+            with patch.object(config, "CONFIG", raw), self.assertRaisesRegex(RuntimeError, "Removed/unknown"):
+                config._model_semaphore_config("llm", default_max=5)
+
+    def test_lease_must_cover_execution_and_cleanup_margin(self):
+        raw = deepcopy(config.CONFIG)
+        raw["model_semaphore"]["llm"]["lease_seconds"] = raw["workflow"]["model_call_timeout_seconds"]
+        with patch.object(config, "CONFIG", raw), self.assertRaisesRegex(RuntimeError, "plus 5 seconds"):
+            config._model_semaphore_config("llm", default_max=5)
+
+    def test_non_finite_and_fractional_limits_are_rejected(self):
+        for value in (float("nan"), float("inf"), True):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                config._as_float(value, "timeout")
+        for value in (1.5, True):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                config._as_int(value, "concurrency")
+
+    def test_startup_audit_redacts_redis_credentials_and_shows_hidden_defaults(self):
+        with patch.object(config, "QUEUE_BROKER_URL", "redis://username:secret@redis:6379/0"):
+            summary = config.control_configuration_summary()
+        self.assertEqual(summary["queue"]["broker"], "redis://redis:6379/0")
+        self.assertEqual(summary["queue"]["soft_time_limit"], "disabled")
+        self.assertEqual(summary["queue"]["visibility_timeout_seconds"], 3600)
+        self.assertEqual(summary["queue"]["queued_timeout_seconds"], 7200)
+        self.assertEqual(summary["model_semaphore"]["llm"]["key_ttl_seconds"], 660)
+
+
+if __name__ == "__main__":
+    unittest.main()

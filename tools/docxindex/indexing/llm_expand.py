@@ -24,7 +24,6 @@ def expand_large_leaves(
     batch_target_tokens: int = 16000,
     batch_overlap_tokens: int = 800,
     max_levels: int = 6,
-    retry_count: int = 3,
 ) -> None:
     """Expand oversized body leaves through the shared local-hierarchy inference pipeline."""
     pending: list[tuple[DocumentNode, int]] = []
@@ -43,7 +42,6 @@ def expand_large_leaves(
             batch_target_tokens=batch_target_tokens,
             batch_overlap_tokens=batch_overlap_tokens,
             max_levels=max_levels,
-            retry_count=retry_count,
             split_long_nodes=False,
             paragraph_split_threshold_tokens=split_threshold_tokens,
             paragraph_chunk_target_tokens=chunk_target_tokens,

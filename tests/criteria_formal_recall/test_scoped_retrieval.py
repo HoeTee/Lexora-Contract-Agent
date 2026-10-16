@@ -342,7 +342,7 @@ class FullScanTests(unittest.TestCase):
         self.assertIn("提取正文附件引用", client.prompts[0])
 
 
-    def test_scan_retries_only_the_failed_batch(self) -> None:
+    def test_scan_does_not_restart_batch_after_model_controller_failure(self) -> None:
         owner = {"node_id": "body/sec", "title": "正文"}
         index = {
             "nodes": [owner],
@@ -353,11 +353,11 @@ class FullScanTests(unittest.TestCase):
         }
         client = _RetryingScanClient()
 
-        matches = scan_matches(index, "检查错别字", client, batch_tokens=1, concurrency=1)
+        with self.assertRaisesRegex(TimeoutError, "simulated scan timeout"):
+            scan_matches(index, "检查错别字", client, batch_tokens=1, concurrency=1)
 
-        self.assertEqual(client.calls_by_anchor["p_0001"], 2)
-        self.assertEqual(client.calls_by_anchor["p_0002"], 1)
-        self.assertEqual({item["start_anchor"] for item in matches}, {"p_0001", "p_0002"})
+        self.assertEqual(client.calls_by_anchor["p_0001"], 1)
+        self.assertLessEqual(client.calls_by_anchor.get("p_0002", 0), 1)
 
 
 class _ScanClient:

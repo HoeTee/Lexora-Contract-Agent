@@ -126,7 +126,7 @@ class BaselineQualityTests(unittest.TestCase):
 
     def test_live_reranks_are_blocked_before_model_access(self):
         with TemporaryDirectory() as folder:
-            with patch("tests.docxindex_ablation.live.ORIGINAL_RERANK") as rerank:
+            with patch("tests.docxindex_ablation.live.request") as rerank:
                 with self.assertRaisesRegex(ValueError, "unreviewed"):
                     live(SimpleNamespace(output=Path(folder)))
                 rerank.assert_not_called()

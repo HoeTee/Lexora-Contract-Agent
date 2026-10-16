@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from contextlib import nullcontext
 from pathlib import Path
-from threading import BoundedSemaphore
 from typing import Any
 from loggers.call_log import call_stage, retrieval_call_stage
 
@@ -23,11 +22,9 @@ def llm_query(
     cache_dir: Path | None,
     input_tokens: int = STRUCTURE_QUERY_BUDGET_TOKENS,
     timer: Any | None = None,
-    concurrency: int = 10,
     allowed_node_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     cache = JsonlCache(cache_dir / "llm_query.jsonl" if cache_dir else None)
-    limiter = BoundedSemaphore(max(1, concurrency))
     structure = _compact_structure(index["structure_tree"], allowed_node_ids=allowed_node_ids)
     structure_parts = _split_structure(structure, input_tokens)
     if timer is not None:
@@ -41,7 +38,7 @@ def llm_query(
                 key = cache_key(QUERY_PROMPT_VERSION, client.settings.model, query, str(part_index), text_hash(payload))
                 cached = cache.get(key)
                 if cached is None:
-                    with limiter, call_stage(f"{retrieval_call_stage('structure')}-part{part_index}"):
+                    with call_stage(f"{retrieval_call_stage('structure')}-part{part_index}"):
                         response = client.complete_model(_query_prompt(query, payload), QueryResponse)
                     cached = response.model_dump(mode="json")
                     cache.set(key, cached)

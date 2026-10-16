@@ -5,16 +5,15 @@ import asyncio
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager, nullcontext
+from contextlib import asynccontextmanager
 from pathlib import Path
-from threading import BoundedSemaphore, Lock
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
 import yaml
 from docx import Document
-from openai import AsyncOpenAI, OpenAI
+from openai import AsyncOpenAI
 from pydantic import BaseModel
 
 import config
@@ -27,16 +26,16 @@ from loggers.call_log import call_stage, logical_call, map_with_context, new_cal
 from loggers.trace_logger import NOOP_TRACE
 from routing.config import RouteConfig
 from tools.docxindex.indexing.config import IndexingConfig
-from tools.docxindex.indexing.token_budget import estimate_tokens
 from tools.docxindex.llm.client import LLMClient, LLMClientError, LLMResponseValidationError, LLMSettings
-from tools.docxindex.llm.schemas import RerankResponse
+from tools.docxindex.reranker import RerankerClient
 from tools.docxindex.retrieval.config import RetrievalConfig
 from tools.docxindex.retrieval.llm_query import llm_query
-from tools.docxindex.retrieval.rerank import _candidate_batches, _rerank_prompt, rerank_matches
+from tools.docxindex.retrieval.rerank import _candidate_batches, _rerank_tokens, rerank_matches
 from tools.docxindex.retrieval.scan import scan_matches
 from tools.docxindex.retriever import DocxIndexRetriever
 from tools.docxindex.vector.client import EmbeddingClient, EmbeddingSettings
 from tools.document.reporting.docx_report import DocxReportGenerator
+from tests.criteria_formal_recall._model_test_support import available_slot, model_transport, reranker_transport
 
 
 class Answer(BaseModel):
@@ -49,16 +48,6 @@ def chat_response(content='{"answer":"ok"}', usage=None):
             "usage": usage}
 
 
-def prepare_client(client, sdk):
-    client.client = sdk
-    client._limiter = BoundedSemaphore(2)
-    client._start_lock = Lock()
-    client._next_start = 0.0
-    client._start_interval_seconds = 0.0
-    client._rate_limit_retries = 1
-    return client
-
-
 class LogicalCallTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -66,51 +55,44 @@ class LogicalCallTests(unittest.TestCase):
         self.logs = Path(self.temp.name) / "logs"
         token = set_call_context(self.logs / "events.log", criterion_id="C1", stage="route.1.region")
         self.addCleanup(reset_call_context, token)
-        for target in ("tools.docxindex.llm.client._global_model_slot", "tools.docxindex.vector.client._global_model_slot"):
-            patcher = patch(target, return_value=nullcontext())
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        patcher = patch("tools.docxindex.llm.client.time.sleep")
-        patcher.start()
-        self.addCleanup(patcher.stop)
 
     def client(self, handler):
-        sdk = OpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
-                     http_client=httpx.Client(transport=httpx.MockTransport(handler)))
-        self.addCleanup(sdk.close)
-        client = LLMClient.__new__(LLMClient)
-        client.settings = LLMSettings(model="fake")
-        return prepare_client(client, sdk)
+        transport = model_transport("tools.docxindex.llm.client", handler)
+        transport.__enter__()
+        self.addCleanup(transport.__exit__, None, None, None)
+        return LLMClient(LLMSettings(model="fake", base_url="https://model.test/v1", api_key="fake"))
 
     def records(self, name="logical_calls"):
         return [json.loads(path.read_text(encoding="utf-8")) for path in (self.logs / name).glob("*.json")]
 
-    def test_schema_and_http_retries_share_one_logical_call_in_both_modes(self):
+    def test_schema_and_http_retries_share_one_send_allowance_in_both_modes(self):
         initial_ids = set()
         for detailed in (False, True):
             with self.subTest(detailed=detailed), patch("loggers.call_log.LOGGING_DETAILED", detailed):
                 sequence = iter([
                     httpx.Response(429, json={"error": {"message": "rate limited"}}),
                     httpx.Response(200, json=chat_response("invalid", {"prompt_tokens": 50, "completion_tokens": 30, "total_tokens": 80})),
-                    httpx.Response(201, json=chat_response(usage={"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120})),
                 ])
                 client = self.client(lambda request, sequence=sequence: next(sequence))
-                result = client.complete_model("query", Answer, retries=1)
-                self.assertEqual(result.answer, "ok")
+                with self.assertRaises(LLMResponseValidationError):
+                    client.complete_model("query", Answer)
                 record = next(r for r in self.records() if r["logical_call_id"] not in initial_ids)
-                self.assertEqual((record["retry_count"], record["input_tokens"], record["output_tokens"], record["input_output_tokens"]), (2, 100, 20, 120))
+                self.assertEqual((record["retry_count"], record["input_tokens"], record["output_tokens"], record["input_output_tokens"]), (1, None, None, None))
                 self.assertEqual(record["source"], "docxindex_C1")
                 self.assertEqual(record["category"], "docxindex.retrieval.llm")
-                self.assertIsNone(record["error"])
-                self.assertEqual(set(record), {"logical_call_id", "category", "source", "stage", "reason", "model", "started_at", "finished_at", "status", "retry_count", "input_tokens", "output_tokens", "input_output_tokens", "error"})
-                attempts = sorted(self.records("calls"), key=lambda r: r["attempt"])
+                self.assertEqual(record["status"], "failed")
+                self.assertEqual(len(record["attempts"]), 2)
+                self.assertEqual([r["send_number"] for r in record["attempts"]], [1, 2])
+                self.assertEqual((record["known_input_tokens"], record["known_output_tokens"]), (50, 30))
+                self.assertFalse(record["usage_complete"])
+                attempts = sorted((r for r in self.records("calls") if r["logical_call_id"] == record["logical_call_id"]), key=lambda r: r["attempt"])
                 if detailed:
-                    self.assertEqual([r["attempt"] for r in attempts], [1, 2, 3])
-                    self.assertEqual([r["is_retry"] for r in attempts], [False, True, True])
+                    self.assertEqual([r["attempt"] for r in attempts], [1, 2])
+                    self.assertEqual([r["is_retry"] for r in attempts], [False, True])
                     self.assertEqual({r["logical_call_id"] for r in attempts}, {record["logical_call_id"]})
-                    self.assertIsNone(attempts[1]["input_tokens"])
+                    self.assertEqual(attempts[1]["input_tokens"], 50)
                     self.assertEqual(attempts[1]["failure_stage"], "output_validation")
-                    self.assertEqual(attempts[2]["http_status"], 201)
+                    self.assertEqual(attempts[1]["http_status"], 200)
                 else:
                     self.assertFalse((self.logs / "calls").exists())
                 initial_ids = {r["logical_call_id"] for r in self.records()}
@@ -120,7 +102,7 @@ class LogicalCallTests(unittest.TestCase):
     def test_exhausted_validation_has_null_tokens_and_real_http_status(self):
         client = self.client(lambda request: httpx.Response(200, json=chat_response("invalid", {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12})))
         with self.assertRaises(LLMResponseValidationError):
-            client.complete_model("query", Answer, retries=1)
+            client.complete_model("query", Answer)
         record, = self.records()
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["retry_count"], 1)
@@ -134,7 +116,7 @@ class LogicalCallTests(unittest.TestCase):
         with self.assertRaises(LLMClientError):
             self.client(fail).complete("query")
         record, = self.records()
-        self.assertEqual(record["retry_count"], 0)
+        self.assertEqual(record["retry_count"], 1)
         self.assertIsNone(record["error"]["http_status"])
         self.assertIsNone(record["input_tokens"])
         self.assertIsNone(record["output_tokens"])
@@ -149,16 +131,16 @@ class LogicalCallTests(unittest.TestCase):
 
     def test_semaphore_failure_does_not_count_unsent_retry(self):
         client = self.client(lambda request: self.fail("request must not be sent"))
-        with patch("tools.docxindex.llm.client._global_model_slot", side_effect=TimeoutError("lease wait timeout")):
+        with patch("endpoints.runtime.model_calls.model_semaphore", side_effect=TimeoutError("lease wait timeout")):
             with self.assertRaises(LLMClientError):
                 client.complete("query")
         self.assertEqual(self.records()[0]["retry_count"], 0)
 
     def test_timeout_after_invalid_response_does_not_inherit_previous_http_status(self):
         client = self.client(lambda request: httpx.Response(200, json=chat_response("invalid")))
-        with patch("tools.docxindex.llm.client._global_model_slot", side_effect=[nullcontext(), TimeoutError("lease wait timeout")]):
+        with patch("endpoints.runtime.model_calls.model_semaphore", side_effect=[available_slot(), TimeoutError("lease wait timeout")]):
             with self.assertRaises(LLMClientError) as raised:
-                client.complete_model("query", Answer, retries=1)
+                client.complete_model("query", Answer)
         record, = self.records()
         self.assertIsNone(record["error"]["http_status"])
         self.assertEqual(record["retry_count"], 0)
@@ -183,8 +165,7 @@ class LogicalCallTests(unittest.TestCase):
             return httpx.Response(200, json=chat_response('{"findings":[]}', {"prompt_tokens": 20, "completion_tokens": 2, "total_tokens": 22}))
         client = self.client(handler)
         index = {"nodes": [{"node_id": "body/a"}], "anchor_map": {"p_0001": {"node_id": "body/a", "text": "text", "body_child_index": 1}}}
-        with patch("tools.docxindex.retrieval.scan.time.sleep"):
-            scan_matches(index, "query", client, concurrency=1)
+        scan_matches(index, "query", client, concurrency=1)
         record, = self.records()
         self.assertEqual((record["status"], record["retry_count"], record["input_output_tokens"]), ("succeeded", 1, 22))
 
@@ -225,15 +206,13 @@ class LogicalCallTests(unittest.TestCase):
         self.assertTrue(all(p.name.startswith("docxindex_indexing_") for p in (self.logs / "logical_calls").glob("*.json")))
 
     def test_embedding_records_input_only(self):
-        sdk = OpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
-                     http_client=httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, json={
-                         "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
-                         "model": "fake", "object": "list", "usage": {"prompt_tokens": 11, "total_tokens": 11}}))))
-        self.addCleanup(sdk.close)
-        client = EmbeddingClient.__new__(EmbeddingClient)
-        client.settings = EmbeddingSettings(model="fake")
-        prepare_client(client, sdk)
-        self.assertEqual(client.embed_batch(["text"]), [[0.1, 0.2]])
+        def handler(request):
+            return httpx.Response(200, json={
+                "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
+                "model": "fake", "object": "list", "usage": {"prompt_tokens": 11, "total_tokens": 11}})
+        client = EmbeddingClient(EmbeddingSettings(model="fake"))
+        with model_transport("tools.docxindex.vector.client", handler):
+            self.assertEqual(client.embed_batch(["text"]), [[0.1, 0.2]])
         record, = self.records()
         self.assertEqual(record["category"], "docxindex.retrieval.embedding")
         self.assertEqual(record["input_tokens"], 11)
@@ -256,14 +235,22 @@ class LogicalCallTests(unittest.TestCase):
 
     def test_rerank_requires_all_candidates_and_retries_with_one_id(self):
         responses = iter([
-            {"nodes": [{"node_id": "a", "score": 0.8}]},
-            {"nodes": [{"node_id": "a", "score": 0.8}, {"node_id": "b", "score": 0.9}]},
+            {"results": [{"index": 0, "relevance_score": 0.8}]},
+            {"results": [{"index": 0, "relevance_score": 0.8}, {"index": 1, "relevance_score": 0.9}]},
         ])
-        client = self.client(lambda request: httpx.Response(200, json=chat_response(json.dumps(next(responses)), {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23})))
-        ranked = rerank_matches({"nodes": []}, "query", [{"node_id": "a"}, {"node_id": "b"}], client, 20_000, None, max_selected_nodes=1)
+        sent = []
+        def handler(request):
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, json=next(responses))
+        client = RerankerClient(model="fake-reranker", base_url="https://model.test/rerank", provider="higress_qwen")
+        with reranker_transport(handler):
+            ranked = rerank_matches({"nodes": []}, "query", [{"node_id": "a"}, {"node_id": "b"}], client, 20_000, None, max_selected_nodes=1)
         self.assertEqual([r["node_id"] for r in ranked], ["b", "a"])
+        self.assertEqual(len(sent), 2)
+        self.assertTrue(all(item["model"] == "fake-reranker" and item["top_n"] == 2 for item in sent))
         record, = self.records()
-        self.assertEqual((record["category"], record["retry_count"], record["input_output_tokens"]), ("docxindex.retrieval.reranker", 1, 23))
+        self.assertEqual((record["category"], record["retry_count"], record["input_output_tokens"]), ("docxindex.retrieval.reranker", 1, None))
+        self.assertEqual({attempt["model_type"] for attempt in record["attempts"]}, {"reranker"})
 
     def test_logging_disabled_does_not_create_logical_or_detailed_files(self):
         with patch("loggers.call_log.LOGGING_ENABLED", False), patch("loggers.call_log.LOGGING_DETAILED", True):
@@ -328,8 +315,9 @@ class MinimalLoggingTests(unittest.TestCase):
         self.assertEqual(IndexingConfig.from_sources(Path(config.CONFIG_PATH)), IndexingConfig())
         self.assertEqual(set(RouteConfig.load().methods), {"title", "region", "rule", "scan", "hybrid"})
         self.assertEqual((config.CHUNK_SIZE, config.CHUNK_OVERLAP, config.SIMILARITY_TOP_K, config.RERANK_TOP_N), (512, 100, 10, 5))
-        shared = {"enabled": True, "redis_url": "redis://shared/2", "lease_seconds": 321, "limits": {"llm": 7, "embedding": 3, "reranker": 9}, "llm": {"key": "custom", "lease_seconds": 123}}
-        with patch.dict(config.CONFIG, {"model_semaphore": shared}):
+        per_type = {"llm": {"max_concurrent_requests": 7, "redis_url": "redis://shared/2", "key": "custom", "lease_seconds": 123},
+                    "embedding": {"max_concurrent_requests": 3, "redis_url": "redis://shared/2", "lease_seconds": 321}}
+        with patch.dict(config.CONFIG, {"model_semaphore": per_type}):
             llm = config._model_semaphore_config("llm", default_max=10)
             embed = config._model_semaphore_config("embedding", default_max=5)
         self.assertEqual((llm["max_concurrent_requests"], llm["lease_seconds"], llm["key"]), (7, 123, "custom"))
@@ -377,6 +365,7 @@ class GlobalRankingTests(unittest.TestCase):
         retriever.retrieval_config = RetrievalConfig(semantic={"max_selected_nodes": 2})
         retriever.route_config = RouteConfig()
         retriever.llm_client = SimpleNamespace(settings=SimpleNamespace(model="fake"))
+        retriever.reranker_client = SimpleNamespace(model="fake-reranker")
         groups = [[{"node_id": "early", "sources": ["structure"]}, {"node_id": "shared", "sources": ["structure"]}],
                   [{"node_id": "shared", "sources": ["vector"]}, {"node_id": "late", "sources": ["vector"]}]]
         with patch.object(retriever, "_semantic_matches", side_effect=groups), patch("tools.docxindex.retriever.rerank_matches", side_effect=lambda i, q, rows, *a, **kw: list(reversed(rows))) as rank, patch("tools.docxindex.retriever.build_content_context", return_value={"content_context": [], "pagination": {"next_part": None, "has_more": False}}) as content, patch("tools.docxindex.retriever._format_anchor_context", return_value="text"), patch("tools.docxindex.retriever._route_event") as event:
@@ -395,27 +384,23 @@ class GlobalRankingTests(unittest.TestCase):
         candidates = [{"node_id": f"node{i:02d}", "title": "candidate"} for i in range(20)]
         index = {"nodes": candidates}
         views = _candidate_batches(index, "query", candidates[:3], 20_000)[0]
-        budget = estimate_tokens(_rerank_prompt("query", json.dumps(views, ensure_ascii=False))) + 2
-        prompts = []
-        def complete(prompt, schema):
-            prompts.append(prompt)
-            rows = json.loads(prompt.split("候选 node：\n", 1)[1].split("\n\n重排序规则：", 1)[0])
-            return RerankResponse(nodes=[{"node_id": row["node_id"], "score": 0.9} for row in sorted(rows, key=lambda row: row["node_id"], reverse=True)])
-        client = SimpleNamespace(settings=SimpleNamespace(model="fake"), complete_model=complete)
+        budget = _rerank_tokens("query", json.dumps(views, ensure_ascii=False)) + 2
+        batches = []
+        def rank(query, documents):
+            rows = [json.loads(document) for document in documents]
+            batches.append(rows)
+            return [(i, float(row["node_id"][4:])) for i, row in sorted(enumerate(rows), key=lambda item: item[1]["node_id"], reverse=True)]
+        client = SimpleNamespace(model="fake-reranker", rank=rank)
         ranked = rerank_matches(index, "query", candidates, client, budget, None, max_selected_nodes=2)
         self.assertIn("node19", {r["node_id"] for r in ranked[:2]})
-        self.assertTrue(all(estimate_tokens(prompt) <= budget for prompt in prompts))
-        self.assertTrue(all(any(candidate["node_id"] in prompt for prompt in prompts) for candidate in candidates))
-        self.assertGreater(len(prompts), 2)
+        self.assertTrue(all(_rerank_tokens("query", json.dumps(rows, ensure_ascii=False)) <= budget for rows in batches))
+        self.assertTrue(all(any(candidate["node_id"] in {row["node_id"] for row in batch} for batch in batches) for candidate in candidates))
+        self.assertGreater(len(batches), 2)
 
 
 class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
     @asynccontextmanager
     async def harness(self, responses, *, detailed=False, criterion_id="H03", mcp_client=None):
-        @asynccontextmanager
-        async def semaphore(**kwargs):
-            yield SimpleNamespace(enabled=False)
-
         sequence = iter(responses)
         async def handler(request):
             await asyncio.sleep(0)
@@ -423,7 +408,7 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
 
         sdk = AsyncOpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
                           http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
-        with tempfile.TemporaryDirectory() as tmp, patch("agents.base_agent.AsyncOpenAI", return_value=sdk), patch("agents.base_agent.llm_global_semaphore", semaphore), patch("loggers.call_log.LOGGING_DETAILED", detailed):
+        with tempfile.TemporaryDirectory() as tmp, patch("agents.base_agent.AsyncOpenAI", return_value=sdk), patch("endpoints.runtime.model_calls.model_semaphore", available_slot), patch("loggers.call_log.LOGGING_DETAILED", detailed):
             logs = Path(tmp) / "logs"
             token = set_call_context(logs / "events.log", stage="agent")
             agent = Agent(name=f"SubAgent_{criterion_id}", criterion_id=criterion_id,
@@ -454,12 +439,14 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("JSON/schema", record["reason"])
                     self.assertLessEqual(len(record["reason"]), 200)
                     self.assertIsNone(record["error"])
+                    self.assertEqual((record["known_input_tokens"], record["known_output_tokens"]), (107, 32))
+                    self.assertTrue(record["usage_complete"])
                     self.assertTrue(next((logs / "logical_calls").glob("*.json")).name.startswith("SubAgent_H03__review-initial__"))
                     attempts = sorted(self.read_records(logs, "calls"), key=lambda x: x["attempt"])
                     if detailed:
                         self.assertEqual([r["is_retry"] for r in attempts], [False, True])
                         self.assertEqual(attempts[0]["error"]["http_status"], 200)
-                        self.assertIsNone(attempts[0]["input_tokens"])
+                        self.assertEqual(attempts[0]["input_tokens"], 100)
                         self.assertEqual({r["logical_call_id"] for r in attempts}, {record["logical_call_id"]})
                         self.assertEqual({r["criterion_id"] for r in attempts}, {"H03"})
                     else:
@@ -539,9 +526,6 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((record["status"], record["input_output_tokens"]), ("succeeded", 9))
 
     async def test_sdk_retries_are_observable_and_keep_role_source(self):
-        @asynccontextmanager
-        async def semaphore(**kwargs):
-            yield SimpleNamespace(enabled=False)
         count = 0
         async def handler(request):
             nonlocal count
@@ -549,7 +533,7 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             if count == 1:
                 return httpx.Response(500, json={"error": {"message": "retry"}})
             return httpx.Response(200, json=chat_response(usage={"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9}))
-        with tempfile.TemporaryDirectory() as tmp, patch("agents.base_agent.llm_global_semaphore", semaphore), patch("agents.base_agent.MODEL_CALL_MAX_RETRIES", 1), patch("agents.base_agent._model_retry_delay", return_value=0):
+        with tempfile.TemporaryDirectory() as tmp, patch("endpoints.runtime.model_calls.model_semaphore", available_slot), patch("endpoints.runtime.model_calls._retry_delay", return_value=0):
             sdk = AsyncOpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
             agent = Agent.__new__(Agent)
             agent.client, agent.settings, agent.name, agent.messages = sdk, Settings(api_key="fake", model="fake"), "Reflector_C1", []

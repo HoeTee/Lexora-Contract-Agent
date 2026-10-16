@@ -8,13 +8,10 @@ from llama_index.core import (
 from llama_index.core.node_parser import SentenceSplitter
 from llama_index.core.query_engine import RetrieverQueryEngine
 from llama_index.core.schema import TextNode
-from llama_index.llms.openai_like import OpenAILike
-
 from tools.retrieval.llamaindex.limited_embedding import SemaphoreOpenAILikeEmbedding
+from tools.retrieval.llamaindex.limited_llm import UnifiedOpenAILike as OpenAILike
 from tools.retrieval.llamaindex.qwen_reranker import QwenRerankPostprocessor
 from config import (
-    MODEL_CALL_MAX_RETRIES,
-    MODEL_CALL_TIMEOUT_SECONDS,
     RERANK_INSTRUCT,
     RERANK_PROVIDER,
 )
@@ -60,16 +57,14 @@ class LlamaIndexRAG:
             api_base=llm_base_url,
             is_chat_model=True,
             is_function_calling_model=True,
-            timeout=MODEL_CALL_TIMEOUT_SECONDS,
-            max_retries=MODEL_CALL_MAX_RETRIES,
+            max_retries=0,
             additional_kwargs=llm_additional_kwargs,
         )
         Settings.embed_model = SemaphoreOpenAILikeEmbedding(
             model_name=embed_name,
             api_key=embed_api_key,
             api_base=embed_base_url,
-            timeout=MODEL_CALL_TIMEOUT_SECONDS,
-            max_retries=MODEL_CALL_MAX_RETRIES,
+            max_retries=0,
         )
 
         self.reranker = None
@@ -80,8 +75,6 @@ class LlamaIndexRAG:
                 model=rerank_name,
                 provider=rerank_provider,
                 top_n=rerank_top_n,
-                timeout=MODEL_CALL_TIMEOUT_SECONDS,
-                max_retries=MODEL_CALL_MAX_RETRIES,
                 instruct=RERANK_INSTRUCT,
             )
 

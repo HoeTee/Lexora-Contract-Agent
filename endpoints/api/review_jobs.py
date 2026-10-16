@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 import json
 from json import JSONDecodeError
@@ -18,11 +17,9 @@ from config import (
     API_RESULT_UPLOAD_ENABLED,
     API_URL_DOWNLOAD_MAX_BYTES,
     API_URL_DOWNLOAD_TIMEOUT_SECONDS,
-    QUEUE_ENABLED,
     infer_rerank_provider,
 )
 from endpoints.api.client_mapping import ApiClient, resolve_api_client
-from endpoints.review.job_worker import run_async_review_job
 from endpoints.review.meta import (
     MetaFieldsValidationError,
     extract_configured_meta_fields,
@@ -36,8 +33,6 @@ from endpoints.review.task_store import (
     copy_contract_to_result,
     create_task,
     ensure_task_dirs,
-    mark_failed,
-    mark_queued,
     new_task_id,
     output_dir,
     read_task,
@@ -686,34 +681,17 @@ def _create_submission_task(client: ApiClient, submission: PreparedReviewSubmiss
 
 
 def _dispatch_review_job(client_dir: str, task_id: str):
-    if not QUEUE_ENABLED:
-        asyncio.create_task(run_async_review_job(client_dir, task_id))
-        return None
     try:
         from task_queue.review_queue import enqueue_review_job
 
-        queue_task_id = enqueue_review_job(client_dir, task_id)
-    except Exception as exc:
-        write_task_log_event(client_dir, task_id, "review_queue_submit_failed", error=repr(exc))
-        mark_failed(
-            client_dir,
-            task_id,
-            code="QUEUE_SUBMIT_FAILED",
-            message="Review job queue submission failed.",
-            error={
-                "code": "QUEUE_SUBMIT_FAILED",
-                "message": "Review job queue submission failed.",
-                "detail": repr(exc),
-            },
-        )
+        enqueue_review_job(client_dir, task_id)
+    except Exception:
         return _submit_error_response(
             task_id=task_id,
             status_code=503,
             code="QUEUE_SUBMIT_FAILED",
             message="Review job queue submission failed.",
         )
-    mark_queued(client_dir, task_id, queue_task_id)
-    write_task_log_event(client_dir, task_id, "review_queued", queue_task_id=queue_task_id)
     return None
 
 

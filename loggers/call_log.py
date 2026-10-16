@@ -6,12 +6,15 @@ import json
 import re
 import uuid
 from contextvars import ContextVar, copy_context
+from copy import deepcopy
+import os
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from config import LOGGING_ENABLED, LOGGING_DETAILED
+from endpoints.runtime.model_budget import ModelCallBudget
 
 
 _CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar("model_call_context", default=None)
@@ -67,8 +70,26 @@ def retrieval_call_stage(action: str) -> str:
 
 def map_with_context(executor, function, items):
     """Carry immutable task correlation into each executor job."""
-    futures = [executor.submit(copy_context().run, function, item) for item in items]
-    return [future.result() for future in futures]
+    iterator = iter(items)
+    pending = []
+    sentinel = object()
+    limit = max(1, executor._max_workers)
+    for _ in range(limit):
+        item = next(iterator, sentinel)
+        if item is not sentinel:
+            pending.append(executor.submit(copy_context().run, function, item))
+    results = []
+    while pending:
+        future = pending.pop(0)
+        results.append(future.result())
+        item = next(iterator, sentinel)
+        if item is not sentinel:
+            pending.append(executor.submit(copy_context().run, function, item))
+    return results
+
+
+def current_logical_call():
+    return _LOGICAL.get()
 
 
 def new_call(*, component: str, model: str, request: dict[str, Any],
@@ -129,18 +150,21 @@ class CallRecord:
         self.path = directory / f"{filename}.json" if directory and LOGGING_DETAILED else None
         self.payload: dict[str, Any] = {
             "call_id": self.call_id, "operation_id": operation_id,
+            "task_id": os.getenv("CONTRACT_TASK_ID"), "worker_pid": os.getpid(),
             "criterion_id": criterion_id, "source": call_source,
             "component": component, "stage": stage,
             "reason": logical.payload["reason"] if logical else None,
             "model": model, "status": "pending",
             "started_at": instant.astimezone().isoformat(timespec="milliseconds"),
-            "request": request, "response": None, "error": None,
+            "request": deepcopy(request), "response": None, "error": None,
             "logical_call_id": logical.logical_call_id if logical else None,
             "category": logical.payload["category"] if logical else None,
             "attempt": logical.sent_count + 1 if logical else 1,
             "is_retry": bool(logical and logical.sent_count),
             **token_fields(None),
         }
+        if logical is not None:
+            logical.attempt_records.append(self)
         self._write()  # A failed write must prevent the outbound request.
 
     @property
@@ -153,8 +177,10 @@ class CallRecord:
 
     def sent(self) -> None:
         """Count only requests that actually reach the model client."""
+        self.payload["sent"] = True
         if self.logical:
             self.logical.sent_count += 1
+            self.logical.payload["send_count"] = self.logical.sent_count
             self.logical.payload["retry_count"] = max(0, self.logical.sent_count - 1)
             self.logical.last_record = self
             self.logical._write()
@@ -180,7 +206,7 @@ class CallRecord:
             status="failed", finished_at=_now(), failure_stage=stage,
             error={"type": type(exc).__name__, "message": str(exc),
                    "http_status": self.payload.get("http_status") if stage == "output_validation" else _error_http_status(exc)},
-            **token_fields(None),
+            **(token_fields(None) if self.payload.get("response") is None else {}),
         )
         if timing is not None:
             self.payload["timing"] = timing
@@ -191,6 +217,8 @@ class CallRecord:
 
     def _write(self) -> None:
         _atomic_write(self.path, self.payload)
+        if self.logical:
+            self.logical._write()
 
 
 def token_fields(usage: Any, *, embedding: bool = False) -> dict[str, int | None]:
@@ -226,6 +254,8 @@ class LogicalCall:
         directory = directory or context.get("directory")
         self.logical_call_id = uuid.uuid4().hex
         self.sent_count = 0
+        self.budget = ModelCallBudget()
+        self.attempt_records = []
         self.last_record: CallRecord | None = None
         self.tokens = token_fields(None)
         phase = context.get("phase", "indexing")
@@ -248,6 +278,21 @@ class LogicalCall:
         self._write()
 
     def _write(self) -> None:
+        self.payload["attempts"] = [
+            {key: record.payload.get(key) for key in
+             ("call_id", "status", "sent", "send_number", "http_status", "model_type", "semaphore_key", "budget_seconds",
+              "remaining_seconds", "input_tokens", "output_tokens", "input_output_tokens",
+              "failure_stage", "error", "timing", "retry_reason", "retry_delay_seconds")}
+            for record in self.attempt_records
+        ]
+        sent = [record.payload for record in self.attempt_records if record.payload.get("sent")]
+        self.payload["input_usage_complete"] = all(item.get("input_tokens") is not None for item in sent)
+        self.payload["output_usage_complete"] = all(
+            item.get("output_tokens") is not None or item["component"].endswith("embedding") for item in sent
+        )
+        self.payload["usage_complete"] = self.payload["input_usage_complete"] and self.payload["output_usage_complete"]
+        self.payload["known_input_tokens"] = sum(item["input_tokens"] for item in sent if item.get("input_tokens") is not None)
+        self.payload["known_output_tokens"] = sum(item["output_tokens"] for item in sent if item.get("output_tokens") is not None)
         _atomic_write(self.path, self.payload)
 
     def reject_response(self, exc: BaseException, *, reason: str = "JSON/schema 校验未通过") -> None:

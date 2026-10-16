@@ -1,7 +1,7 @@
 """Single-operation treatments, scoped to an isolated experiment process."""
 
 from bisect import bisect_left, bisect_right
-from contextlib import ExitStack, contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager
 import importlib
 from unittest.mock import patch
 
@@ -37,6 +37,10 @@ class IndexedFormatter:
 @contextmanager
 def treatment(name, index):
     """Apply one treatment without changing the source or service config."""
+    if name == "E08":
+        raise ValueError(
+            "E08 is retired: rerank no longer creates a local semaphore; global model control cannot be disabled."
+        )
     with ExitStack() as stack:
         if name in {"E05", "combined"}:
             by_id = {n["node_id"]: n for n in index["nodes"]}
@@ -57,8 +61,6 @@ def treatment(name, index):
             stack.enter_context(patch.object(RERANK_MODULE, "cache_key", lambda *parts: "uncached"))
             stack.enter_context(patch.object(RERANK_MODULE, "text_hash", lambda text: "uncached"))
             stack.enter_context(patch.object(RERANK_MODULE, "JsonlCache", NoCache))
-        if name == "E08":
-            stack.enter_context(patch.object(RERANK_MODULE, "BoundedSemaphore", lambda n: nullcontext()))
         yield
 
 
@@ -74,6 +76,28 @@ class NoCache:
         pass
 
 
+class RecordedReranker:
+    """Replay exact dedicated-reranker requests without network or Redis calls."""
+
+    def __init__(self, model, requests):
+        self.model = model
+        self.requests = requests
+        self.position = 0
+
+    def rank(self, query, documents, top_n=None):
+        if self.position >= len(self.requests):
+            raise AssertionError("Reranker replay requested an uncaptured batch.")
+        saved = self.requests[self.position]
+        self.position += 1
+        if (query, documents, top_n) != (saved["query"], saved["documents"], saved.get("top_n")):
+            raise AssertionError("Reranker replay inputs differ from the captured batch.")
+        return [tuple(pair) for pair in saved["scores"]]
+
+    def assert_consumed(self):
+        if self.position != len(self.requests):
+            raise AssertionError("Reranker replay did not consume all captured batches.")
+
+
 def skip_single_rerank(index, query, candidates, *args, **kwargs):
     if len(candidates) == 1:
         return candidates
@@ -84,7 +108,6 @@ def field_removal(field):
     original = RERANK_MODULE._candidate_batches
 
     def fit(*args, **kwargs):
-        return [[{k: v for k, v in row.items() if k != field} for row in batch]
-                for batch in original(*args, **kwargs)]
+        return [[{k: v for k, v in row.items() if k != field} for row in batch] for batch in original(*args, **kwargs)]
 
     return patch.object(RERANK_MODULE, "_candidate_batches", fit)
