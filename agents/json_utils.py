@@ -3,11 +3,14 @@ Helpers for extracting, validating, and repairing JSON agent outputs.
 """
 
 import json
+from collections import Counter
 from config import MODEL_CALL_MAX_RETRIES
 from contextlib import contextmanager, nullcontext
 from typing import TypeVar
 
 from pydantic import BaseModel, ValidationError
+
+from agents.prompts import get_prompt, render_prompt
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -62,12 +65,26 @@ def extract_json(text: str) -> dict:
     return parsed
 
 
+def _validation_feedback(error: Exception) -> str:
+    """Summarize repeated field failures without echoing input objects or URLs."""
+    if not isinstance(error, ValidationError):
+        return str(error)[:4000]
+    groups: Counter[tuple[str, str]] = Counter()
+    for item in error.errors(include_url=False, include_input=False):
+        location = ".".join("[]" if isinstance(part, int) else str(part) for part in item["loc"])
+        groups[(location.replace(".[]", "[]"), item["msg"])] += 1
+    lines = [
+        render_prompt("JSON_VALIDATION_ERROR_ITEM", field=field, message=message[:400], count=count)
+        for (field, message), count in list(groups.items())[:12]
+    ]
+    if len(groups) > 12:
+        lines.append(get_prompt("JSON_VALIDATION_ERRORS_TRUNCATED"))
+    return "\n".join(lines)
+
+
 def _repair_prompt(error: Exception, expected_format: str) -> str:
-    return (
-        "你的上一次输出没有通过 JSON 格式校验。\n\n"
-        f"校验错误如下：\n{error}\n\n"
-        "请严格修正为下面要求的数据结构，只返回 JSON，不要返回 Markdown、解释、代码块或额外字段：\n\n"
-        f"{expected_format}"
+    return render_prompt(
+        "JSON_REPAIR_PROMPT", errors=_validation_feedback(error), expected_format=expected_format
     )
 
 
@@ -93,7 +110,9 @@ async def _chat_until_valid_json(
     agent, initial_prompt: str, schema: type[ModelT], expected_format: str, *,
     max_attempts: int, final_attempt_schema: type[BaseModel] | None,
 ) -> tuple[dict, str]:
-    prompt = initial_prompt
+    prompt = render_prompt(
+        "JSON_INITIAL_REQUEST_PROMPT", initial_prompt=initial_prompt, expected_format=expected_format
+    )
     last_error: Exception | None = None
     raw_output = ""
 

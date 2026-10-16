@@ -124,7 +124,7 @@ docker exec -it lexora bash
 ```text
 .env
 config.yaml
-cn_prompts.yaml
+agents/prompts.yaml
 criteria-routes.yaml
 profiles/
 data/
@@ -136,13 +136,15 @@ Compose 将宿主机输入挂载为：
 volumes:
   - ./.env:/app/.env:ro
   - ./config.yaml:/app/config.yaml:ro
-  - ./cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+  - ./agents/prompts.yaml:/app/agents/prompts.yaml:ro
   - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
   - ./profiles:/app/profiles
   - ./data:/app/data
 ```
 
-输入文件来自远端部署宿主机；`.env`、`config.yaml` 和 Prompt 以只读方式供 API 与 worker 启动时读取，`profiles/` 和 `data/` 写入宿主机持久化目录，不写入镜像层。修改 Prompt 后，需要重启 API 服务和所有 worker。
+输入文件来自远端部署宿主机；`.env`、`config.yaml` 和 `agents/prompts.yaml` 以只读方式供 API 与三个 worker 启动时读取，`profiles/` 和 `data/` 写入宿主机持久化目录，不写入镜像层。上面的 `./agents/prompts.yaml` 是宿主机相对 Compose 文件的路径，容器始终从 `/app/agents/prompts.yaml` 读取。部署包应保留 `agents/` 这一层目录；API 和三个 worker 必须挂载同一份文件。修改提示词后，需要重启 API 服务和全部三个 worker。
+
+旧版提示词目录已移除，加载器也随代码迁移到了新模块。首次升级必须在构建机重建镜像、同步新的 `agents/prompts.yaml`，再修改远端 Compose 的四处提示词挂载并重建 API 与三个 worker 容器。只更换挂载路径不能让旧镜像使用新加载器。以后只改 YAML 中的提示词正文时，可以保留镜像，但仍须同步文件并重启这四个服务。
 
 `profiles/` 可以为空。创建租户和用户后，程序会生成 `profiles/tenant_profiles.json` 和 `profiles/tenants/<tenant_id>/profiles.json`；不会自动生成用户审查要点文件。该目录必须可写，因为管理 CLI、管理员后台和用户资料修改都会更新身份数据。
 

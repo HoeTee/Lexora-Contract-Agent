@@ -432,7 +432,8 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
     def read_records(self, logs, directory="logical_calls"):
         return [json.loads(p.read_text(encoding="utf-8")) for p in (logs / directory).glob("*.json")]
 
-    async def test_default_schema_allowance_succeeds_on_third_send(self):
+    @patch("agents.json_utils.MODEL_CALL_MAX_RETRIES", 2)
+    async def test_three_send_schema_allowance_succeeds_on_third_send(self):
         async with self.harness([chat_response("invalid"), chat_response("{}"), chat_response()]) as (agent, logs):
             result, _ = await chat_until_valid_json(agent, "review", Answer, '{}')
             self.assertEqual(result, {"answer": "ok"})
@@ -441,7 +442,8 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
             self.assertEqual(record["retry_count"], 2)
 
-    async def test_default_schema_allowance_never_sends_a_fourth_request(self):
+    @patch("agents.json_utils.MODEL_CALL_MAX_RETRIES", 2)
+    async def test_three_send_schema_allowance_never_sends_a_fourth_request(self):
         responses = [chat_response("invalid")] * 3 + [chat_response()]
         async with self.harness(responses) as (agent, logs):
             with self.assertRaisesRegex(AgentOutputValidationError, "after 3 attempts"):

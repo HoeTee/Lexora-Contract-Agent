@@ -26,6 +26,7 @@ from config import (
 from endpoints.runtime.errors import ModelCallError
 from endpoints.runtime.model_budget import ModelCallTimeout
 from endpoints.runtime.model_calls import execute_model
+from agents.prompts import get_prompt
 import json
 from contextlib import contextmanager
 import tiktoken
@@ -244,7 +245,7 @@ class Agent:
 
         if self.tool_call_count > self.MAX_TOOL_CALLS:
             print(f"[{self.name}] ⚠️ Max tool calls ({self.MAX_TOOL_CALLS}) reached. Aborting task and marking review invalid.")
-            return "You have used up all your tool calls. Please provide the final answer."
+            return get_prompt("AGENT_TOOL_LIMIT_PROMPT")
 
         for tool_call in tool_calls:
             result = await self._execute_a_tool(tool_call)
@@ -451,7 +452,7 @@ class Agent:
                 if forced:
                     self.messages.pop()  # Remove unresolved tool_calls message preventing API errors
                     self.messages.append(
-                        {"role": "user", "content": "你已用尽所有工具调用次数，请根据已收集的信息直接给出最终结论。"}
+                        {"role": "user", "content": get_prompt("AGENT_TOOL_LIMIT_PROMPT")}
                     )
                     log_conversation(self.name, self.messages)
                     continue

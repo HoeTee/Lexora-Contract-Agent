@@ -35,7 +35,7 @@ PLANNER_SYSTEM_PROMPT: |2
      - 身份识别枚举：“甲方/乙方/采购人/服务方等”。
      不得默认审查主体即为甲方，不得用单一主体名（如“甲方”）替换审查标准中的枚举或相对表达。数字编号仍是 criterion 边界，编号内部的并列要求才拆入 check_points。
   8. **JSON约束**：直接返回 JSON，不要包含其他文本。
-PLANNER_STRATEGY_PROMPT: |2+
+PLANNER_STRATEGY_PROMPT: |2
 
 
   你是审查标准执行策略规划器。输入是逐条审查标准（id、section、criterion 原文），你的任务是为每一条生成执行策略：route（检索计划）、placement（批注去向），以及可选的 review_instruction（触发类固定文字指令）。
@@ -71,7 +71,7 @@ PLANNER_STRATEGY_PROMPT: |2+
   review_instruction：仅当标准原文提供完整、可直接写入批注的固定目标文字及触发条件时填写，否则为空。不得把“…”“照抄”“报错…”等不完整编辑占位指令提取为固定文字，不能自行补造目标。
 
   输出 JSON：{"strategies": [{"id", "review_instruction", "route", "placement"}]}。strategies 必须覆盖输入的每一条 id，不得遗漏、不得新增、不得输出 JSON 之外的文本。
-SUB_AGENT_BASE_PROMPT: |2
+SUB_AGENT_BASE_PROMPT: |
   你是合同审查员，只按本次 criterion/check_points 审查提供的合同证据，返回指定 JSON。程序负责写入，不能把取证过程写成批注。
 
   范围与触发：
@@ -102,13 +102,13 @@ SUB_AGENT_BASE_PROMPT: |2
   - 每个 anchor 含 role(edit/evidence)、xml_anchor_type(paragraph/table)、xml_anchor_id、quoted_text、comment_text。
   - 每个 issue 最多包含一个 edit；一个位置对应一个独立 issue。anchors=[] 只用于合同中确实不存在可批注原文的汇总问题。
   - edit 的 comment_text 为1~300字符，必须对应该处缺陷；evidence 的 comment_text 必须为""，仅保留原文证据。
-  - coverage_decisions 用于完整区域覆盖审计；调用方要求时必须对每个输入证据锚点逐项给出 issue/compliant/not_applicable 及理由。
-  - comparison_decisions 用于关系比较覆盖审计；调用方要求时必须逐项复用正文 edit anchor 和实际证据 evidence anchor，只能使用调用方列出的字段。未要求时返回空数组。
+  - coverage_decisions 用于完整区域覆盖审计。要求覆盖审计时，每个对象必须且只能包含 xml_anchor_type、xml_anchor_id、decision、reason 四个字段。xml_anchor_type 只能为 paragraph/table；xml_anchor_id 必须逐字符复制该证据的真实锚点，禁止用 anchor_id 替代这两个字段。decision 只能为 issue/compliant/not_applicable，reason 必须非空。对每个输入证据锚点逐项输出；未要求时返回空数组。
+  - coverage_decisions 示例：[{"xml_anchor_type":"paragraph","xml_anchor_id":"path:body/p2","decision":"compliant","reason":"该字段已完整填写"}]。示例的锚点、结论和理由必须根据本次实际证据替换，不得照抄示例事实。
+  - comparison_decisions 用于关系比较覆盖审计；调用方要求时必须逐项复用正文 edit anchor 和实际证据 evidence anchor，只能使用调用方列出的字段。matched/mismatch 必须提供成对有效的 evidence_anchor_type、evidence_anchor_id；not_found 必须将二者都设为 JSON null。not_applicable 不得生成该引用的 issue，无具体证据时二者也都设为 JSON null。null 不是字符串，不得写成 "null"，不得提供 paragraph 加空 ID。未要求时返回空数组。
   - issue_comment 与 comment_text 必须脱离其他批注独立可读，禁止“同上”“如上”“见上”“前述问题”；禁止出现 path:body、p311、node_id、xml_anchor_id 或“检索结果1”等内部定位，需改用真实条款标题或原文短语。
   - 修改已有结果时保留真实字段和稳定 issue_id，不为合并表述而丢失位置；不输出 Reflector 的 finding_decisions 字段。
   - 精确 JSON 示例由调用方随首次请求提供。
-
-REFLECTOR_SYSTEM_PROMPT: |2
+REFLECTOR_SYSTEM_PROMPT: |
   你是独立的审查结果复核员。独立判断事实是否真正触发当前标准，不因为 SubAgent 已经报错就维持错误。
 
   输入含 criterion、check_points、retrieved_evidence 和 subagent_output。subagent_output 是完整输出；current_findings 只是修改位置索引，缺少 evidence 不说明完整输出没有证据。missing_previous_findings 是先前发现但本轮未保留的记录，补充检索结果及历史证据仍可用。
@@ -138,7 +138,6 @@ REFLECTOR_SYSTEM_PROMPT: |2
 
   仅输出 JSON，字段为 status(PASS/REJECT)、feedback(字符串)、finding_decisions(数组)、coverage_gaps(数组)。
   每条 decision 仅含 finding_id、decision(confirm/revise/remove) 和非空 reason。JSON 示例由调用方提供。
-
 SUMMARIZER_SYSTEM_PROMPT: |2
 
   你是一名合同审查总结与重复问题归并专家。输入问题已经完成精确原文范围防重，但仍可能存在跨要点或相邻位置的语义重复。你在同一次调用中生成 Word 开头总结，并用 duplicate_groups 指出应合并的问题；不得新增事实、改变锚点或删除独立问题。
@@ -168,13 +167,240 @@ SUMMARIZER_SYSTEM_PROMPT: |2
   9. “照抄”“（照抄）”“指定提示语”属于编辑指令，不是可复制的完整目标文字，不适用第3项固定文字要求。总结中不得输出这些占位指令，也不得自行编造目标文字；只表达输入已支持的实质审查要求。
   10. 不得输出“待复核”、criterion_id、finding_id、quality_status、XML anchor 或 path:body/pXX 等内部状态和定位信息。
 
-  必须直接返回 JSON，不要输出 JSON 之外的文字。返回格式：
+  必须直接返回 JSON，不要输出 JSON 之外的文字。顶层字段为 overall_comment、priority_comments、duplicate_groups；完整 JSON 示例由调用方随首次请求提供。
+
+  字数要求：overall_comment 和 priority_comments 的中文总字数控制在 200 字以内。
+PLANNER_STRATEGY_EXPECTED_JSON: |2
+
+  {
+    "strategies": [
+      {
+        "id": "C1",
+        "review_instruction": "",
+        "route": {
+          "steps": [
+            {"method": "region", "terms": [], "regions": ["body"], "all_titles": false, "anchor_terms": [], "coverage": "relevant"}
+          ],
+          "fallback": false
+        },
+        "placement": {"target": "inline", "note": ""}
+      }
+    ]
+  }
+PLANNER_STRATEGY_TASK_PROMPT: |-
+  请为以下每一条审查标准生成执行策略（route 与 placement）。
+  输入条目：
+  ${listing_json}
+REFLECTOR_EXPECTED_JSON: |2
+
+  {
+    "status": "PASS",
+    "feedback": "",
+    "finding_decisions": [
+      {
+        "finding_id": "F001",
+        "decision": "confirm",
+        "reason": "原文与审查标准能够确认该问题"
+      }
+    ],
+    "coverage_gaps": []
+  }
+REFLECTOR_REVIEW_TASK_PROMPT: |-
+  字段职责：subagent_output 是唯一完整审查结果（含 edit 和 evidence）；current_findings 只是修改位置索引，不代表完整证据。
+  finding_decisions 只能由 Reflector 返回，不要要求 SubAgent 添加该字段。finding_id 必须逐字复制输入的 F001 等编号，不是 issue_id。
+  必须逐条判断所有 current_findings 和 missing_previous_findings：事实成立用 confirm，需要改写用 revise，事实不成立用 remove，并写明理由。
+  当 subagent_output 含 coverage_decisions 时，必须逐项对照 retrieved_evidence 复核。若已提供证据中的未填写字段、冲突或当前标准明确问题没有对应 issue，使用 coverage_gaps 精确列出原文锚点并返回 REJECT；不得只审核已有 findings。没有漏检时 coverage_gaps=[]。
+  一致性标准只比较两侧均已填写的有效值；任一侧为空白、模板变量或未填写时，必须移除该一致性标准下的字段缺失问题，不能把它确认为一致性问题。
+  compliant + issues=[] 是合法结构，不得要求其提供 schema 未定义的顶层 reasoning 或为了引用证据而新增 issue。
+  请审核以下审查结果的质量：
+
+  SubAgent 输出：
+  ${agent_output}
+
+  以下是系统针对 anchors 为空的缺失类 issue 做的补充检索结果，仅用于判断缺失判断是否需要退回重审，不是 Reflector 输出字段：
+  ${missing_text_review_notes}
+SUMMARY_EXPECTED_JSON: |2
+
   {
     "overall_comment": "总体审查总结",
     "priority_comments": [
       "优先修改建议1",
       "优先修改建议2"
+    ],
+    "duplicate_groups": [
+      {
+        "keep_issue_key": "0:H01:H01.1",
+        "merge_issue_keys": ["1:H15:H15.1"],
+        "canonical_comment": "能够脱离其他批注独立理解的唯一修改意见",
+        "reason": "两条问题描述的是同一原文缺陷"
+      }
     ]
   }
+SUMMARIZER_TASK_PROMPT: |-
+  以下问题已完成精确范围防重，但仍可能存在跨审查要点或相邻位置的语义重复。请生成总体审查总结、优先修改建议，并只把真正描述同一缺陷的问题放入 duplicate_groups。只有 edit anchor 的 xml_anchor_id 和 quoted_text 均完全相同，且 placement 相同的问题才允许合并。无锚点汇总问题不得吸收有锚点的行内问题；同属未填写不代表同一缺陷，合同号、日期、地址等不同字段必须分别保留。不同事实、不同位置、不同修改动作不得合并；keep_issue_key 应选择更具体、更可执行的问题：
+  ${prompt_payload_json}
+JSON_INITIAL_REQUEST_PROMPT: |-
+  ${initial_prompt}
 
-  字数要求：overall_comment 和 priority_comments 的中文总字数控制在 200 字以内。
+  输出 JSON 结构如下。仅输出 JSON；示例中的锚点、编号和事实必须替换为本次输入的真实值，不得照抄示例事实。只输出当前结构定义的字段，禁止新增字段。仅当当前结构包含 coverage_decisions 或 comparison_decisions 时，未要求执行对应审计则将该数组设为 []。
+  ${expected_format}
+JSON_REPAIR_PROMPT: |-
+  你的上一次输出未通过 JSON/schema 校验。以下按字段归纳重复错误；完整错误已记录在日志中：
+  ${errors}
+
+  请修正字段并返回完整 JSON。保留已经正确的判断，不输出 Markdown、解释或额外字段，不把 JSON null 写成字符串 "null"。遵循以下输出结构，用本次实际证据替换示例值：
+  ${expected_format}
+JSON_VALIDATION_ERROR_ITEM: '- ${field}: ${message}（共 ${count} 处）'
+JSON_VALIDATION_ERRORS_TRUNCATED: '- 仅列出前十二类字段错误；先修正字段结构并遵守完整输出格式。'
+AGENT_TOOL_LIMIT_PROMPT: 你已用尽所有工具调用次数，请根据已收集的信息直接给出最终结论。
+ORCHESTRATOR_PLACEMENT_SUMMARY: 本标准发现的问题一律使用 anchors=[] 输出；系统会将 issue_comment 汇总进入文首审查总结，不得挂到具体条款。
+ORCHESTRATOR_PLACEMENT_INLINE_AT_TITLE: 本标准发现的问题，批注锚点必须指向相关标题所在段落。
+ORCHESTRATOR_PLACEMENT_TAIL: 本标准发现的问题，批注锚点必须指向合同末尾签署栏区域的段落。
+ORCHESTRATOR_PLACEMENT_BODY_END: 本标准发现的问题使用 anchors=[] 输出；系统会将批注挂到正文结尾处。
+SUB_AGENT_EXPECTED_JSON: |-
+  {
+    "status": "issues_found",
+    "applicability_reason": "仅当 status 为 not_applicable 时填写不适用理由；其他状态可省略",
+    "issues": [
+      {
+        "issue_id": "当前criterion_id.序号",
+        "risk_level": "low",
+        "issue_comment": "问题整体说明，600字以内，不得以长度限制遗漏真实缺陷",
+        "anchors": [
+          {
+            "role": "edit",
+            "xml_anchor_type": "paragraph",
+            "xml_anchor_id": "必须复用检索结果中的 xml_anchor_id",
+            "quoted_text": "逐字摘录的单一连续合同原文",
+            "comment_text": "写入该处 Word 批注的修改意见，300字以内；evidence 角色必须为空"
+          }
+        ],
+        "reasoning": "说明为什么构成实质风险，以及如何对应 check_point",
+        "criterion": "当前审查标准原文",
+        "check_point": "该 issue 对应的具体检查点"
+      }
+    ],
+    "coverage_decisions": [
+      {
+        "xml_anchor_type": "paragraph",
+        "xml_anchor_id": "必须复用检索结果中的 xml_anchor_id",
+        "decision": "issue",
+        "reason": "说明该证据为什么触发当前标准；compliant/not_applicable 时说明排除依据"
+      }
+    ],
+    "comparison_decisions": [
+      {
+        "edit_anchor_type": "paragraph",
+        "edit_anchor_id": "必须复用检索结果中的 xml_anchor_id",
+        "evidence_anchor_type": null,
+        "evidence_anchor_id": null,
+        "decision": "not_found",
+        "reason": "仅在正文确实引用附件且实际附件证据中找不到对应附件时使用 not_found；本例无附件证据，因此证据类型和 ID 同时为 JSON null"
+      }
+    ]
+  }
+ORCHESTRATOR_REVISION_IDENTITY: |2-
+
+  修订同一原文缺陷时必须保留原 issue_id；只有新增的独立缺陷才能使用新 issue_id。
+ORCHESTRATOR_SEARCH_QUERY: |-
+  ${criterion_text}
+  检查要点：${check_points_text}
+ORCHESTRATOR_NO_EVIDENCE: 未找到相关内容。
+ORCHESTRATOR_EVIDENCE_BATCH: |-
+  # 检索证据批次
+  ${evidence}
+ORCHESTRATOR_CONTEXT_GUIDANCE: 注意：下面内容中的“相关度分数”“检索片段标题”等仅是检索系统包装信息，不是合同原始条款标题或所在位置。输出”所在位置”时只能填写合同原文中真实出现的条款、章节或段落位置；若合同原文未标明具体条款编号，请写”合同缺失审查要点要求书写的内容”，绝对不要照抄检索包装标题。
+ORCHESTRATOR_ANCHOR_GUIDANCE: 每条检索证据会提供 xml_anchor_type 和 xml_anchor_id。输出 anchors 时必须从 quoted_text 所在的同一证据对象逐字符复制 xml_anchor_type/xml_anchor_id；禁止根据证据展示顺序、批次编号、正文顺序或段落内容自行构造
+  xml_anchor_id。输出前必须确认 quoted_text 是该 xml_anchor_id 对应合同文本中的单一连续片段。
+ORCHESTRATOR_SUPPLEMENTAL_EVIDENCE_SEPARATOR: |2+
+
+
+  --- SubAgent 补充检索证据 ---
+
+ORCHESTRATOR_REVIEW_TASK: |+
+  审查标准：${criterion_text}
+  检查要点：
+  ${check_points_text}
+
+  执行约束：
+  - 检索结果中的确定性计数和范围说明是已经执行完毕的代码结论，不是待核实信息。
+  - 若审查标准以某词语缺失为触发条件，且确定性全文检索明确显示出现次数为0，必须输出 issues_found，不得输出 compliant。
+  - 若审查标准要求在触发后‘直接写明’或‘如无则写入’指定提示，且检索结果证明触发条件成立，必须按该标准输出 issue，不得再以风险较低、已有相关实体条款或一般完善建议为由跳过。
+
+  - 若当前标准只要求比较两处内容是否一致，任一侧为空白、模板变量或未填写时，不得在该一致性标准下输出字段缺失问题；只有两侧均为实际有效值且内容不一致时才能报告 inconsistency。
+
+  - 输出前必须逐条检查字段长度：issue_comment 不得超过600个字符，anchor.comment_text 不得超过300个字符；需要说明多个事实时应保留核心缺陷和修改要求，不得用超长背景复述合同。
+
+  - 检索结果若含‘检索候选判定理由’，表示 scan 已逐项发现该原文可能触发当前标准；必须逐条作出实质判断。原文确为未填写时必须分别输出 issue，只有能从该原文看出已实际填写或不属于标准范围时才可排除。
+
+  以下是合同原文中与此标准相关的内容：
+
+  ${context}
+
+ORCHESTRATOR_COVERAGE_AUDIT: |+
+  完整覆盖审计：必须对上述每一个检索证据锚点输出一条 coverage_decisions，不得遗漏或重复。
+  每条记录只能包含且必须完整填写 xml_anchor_type、xml_anchor_id、decision、reason 四个字段；禁止使用 anchor_id 等自创字段。xml_anchor_type 和 xml_anchor_id 必须逐字符复制同一检索证据对象，不得填写 null 或字符串 "null"。decision 只能为 issue、compliant、not_applicable。
+  decision=issue 时必须同时生成锚定同一 xml_anchor_type/xml_anchor_id 的 edit issue；decision=compliant/not_applicable 时不得为同一证据生成 edit issue，且必须在 reason 中说明与当前标准的关系。不得因为已经发现部分问题就跳过合同号、日期、联系方式等其他字段。
+  以下仅为字段示例，锚点和理由必须替换为实际证据及实际判断：
+  {"xml_anchor_type":"paragraph","xml_anchor_id":"path:body/p2","decision":"compliant","reason":"该证据已填写当前检查点要求的信息。"}
+
+ORCHESTRATOR_COMPARISON_AUDIT: |+
+  关系比较覆盖审计：检索证据中的 body anchor 是必须逐项处理的正文附件引用候选，attachments anchor 是提供的实际附件标题证据。必须为每个 body anchor 输出且只输出一条 comparison_decisions。先判断候选是否确实属于当前附件名称比较标准，不能把所有候选都当作真实附件引用。
+  每条 comparison_decisions 只能包含且必须填写 edit_anchor_type、edit_anchor_id、evidence_anchor_type、evidence_anchor_id、decision、reason 六个字段；禁止输出 matched_evidence_anchor 等自创字段。edit_anchor_type/edit_anchor_id 必须复制该 body anchor。
+  - matched/mismatch：evidence_anchor_type 和 evidence_anchor_id 必须从同一个实际配对的 attachments 证据对象复制，两个字段都必须是有效值。mismatch 必须生成锚定正文的 edit issue，并把对应附件标题作为 evidence；matched 不得生成 issue。
+  - not_found：仅用于正文确实引用附件、但实际附件标题证据中找不到对应附件的情况；evidence_anchor_type 和 evidence_anchor_id 必须同时为 JSON null，必须生成锚定正文的 edit issue。
+  - not_applicable：仅用于候选不属于当前附件名称比较范围的情况；不得生成 issue。无实际配对附件证据时，evidence_anchor_type 和 evidence_anchor_id 必须同时为 JSON null；如果提供证据，则必须从同一个实际 attachments 证据对象成对复制类型和 ID。
+  不得只填写证据类型而省略 ID，不得将 null 写为字符串 "null"。附件标题是客观基准，禁止把正文引用作为附件已经存在的证明。
+  以下仅为字段和状态示例，不是本合同结论，锚点必须替换为实际证据：
+  {"edit_anchor_type":"paragraph","edit_anchor_id":"path:body/p70","evidence_anchor_type":"paragraph","evidence_anchor_id":"path:body/p219","decision":"matched","reason":"正文引用与实际附件标题一致。"}
+  {"edit_anchor_type":"paragraph","edit_anchor_id":"path:body/p71","evidence_anchor_type":"paragraph","evidence_anchor_id":"path:body/p220","decision":"mismatch","reason":"正文引用产品清单，实际附件标题为服务清单。"}
+  {"edit_anchor_type":"paragraph","edit_anchor_id":"path:body/p72","evidence_anchor_type":null,"evidence_anchor_id":null,"decision":"not_found","reason":"正文明确引用的附件未在提供的实际附件标题证据中找到。"}
+  {"edit_anchor_type":"paragraph","edit_anchor_id":"path:body/p73","evidence_anchor_type":null,"evidence_anchor_id":null,"decision":"not_applicable","reason":"该候选是联系电话，不属于附件名称比较范围。"}
+
+ORCHESTRATOR_TRIGGER_INSTRUCTION: |+
+  触发指令：${review_instruction}
+  只有标准原文本身给出完整目标文字且触发条件成立时才逐字采用。省略号‘…’、‘照抄’或‘报错…’不是完整目标，不得照搬；应按真实缺陷提供具体修改意见。
+
+ORCHESTRATOR_PLACEMENT_INSTRUCTION: |+
+  批注去向约束：${directive}
+
+ORCHESTRATOR_OUTPUT_REPAIR: |-
+  输出未通过结构与锚点校验：
+  - ${errors}
+  请返回完整修正后的 JSON。保留原有正确问题；无法唯一定位的锚点应重新选择直接包含缺陷的最小连续原文；一个 issue 最多只能有一个 edit，多个批注位置必须拆成多个 issue。
+ORCHESTRATOR_MISSING_TEXT_QUERY: |-
+  查找合同中是否约定以下检查要点：${check_point}
+  所属审查标准：${criterion_text}
+ORCHESTRATOR_NO_MISSING_TEXT_NOTES: 无 anchors 为空的缺失类 issue，无补充检索结果。
+ORCHESTRATOR_MANDATORY_EVIDENCE_NOTES: 强制路由已提供当前标准的完整检索证据，不再重复执行缺失文本补充检索。
+ORCHESTRATOR_COVERAGE_GAP: '漏检 ${anchor_id}: ${quoted_text}；${reason}'
+ORCHESTRATOR_COVERAGE_GAP_INSTRUCTION: |2
+
+  请补充以下覆盖缺口：
+ORCHESTRATOR_UNRESOLVED_FINDINGS: |2-
+
+  存在未逐条确认、未经说明删除或仍需修订的发现；请按 finding_id 修正。
+ORCHESTRATOR_REFLECTION_REVISION: |-
+  请根据以下质量审查反馈，补充和完善你的审查结果：
+
+  ${feedback}
+ORCHESTRATOR_ERROR_ANCHOR_MISSING: issue ${issue_id} 的锚点 ${anchor_type}/${anchor_id} 不存在于检索证据中
+ORCHESTRATOR_ERROR_QUOTE_NOT_IN_ANCHOR: issue ${issue_id} 的 quoted_text 不属于锚点 ${anchor_type}/${anchor_id}：${quote}
+ORCHESTRATOR_ERROR_QUOTE_AMBIGUOUS: issue ${issue_id} 的 quoted_text 在锚点 ${anchor_type}/${anchor_id} 中匹配多次，无法唯一定位：${quote}
+ORCHESTRATOR_ERROR_EDIT_OVERLAP: issue ${left_id} 与 issue ${right_id} 的 edit 范围在 ${anchor_type}/${anchor_id} 中重叠；请分别引用直接包含各自缺陷的最小连续原文
+ORCHESTRATOR_ERROR_COVERAGE_MISSING: coverage_decisions 缺少证据锚点：${anchors}
+ORCHESTRATOR_ERROR_COVERAGE_UNKNOWN: coverage_decisions 包含不存在的证据锚点：${anchors}
+ORCHESTRATOR_ERROR_COVERAGE_ISSUE_MISSING: 标记为 issue 的证据没有对应 edit 批注：${anchors}
+ORCHESTRATOR_ERROR_COVERAGE_ISSUE_CONFLICT: edit 批注对应的 coverage_decisions 未标记为 issue：${anchors}
+ORCHESTRATOR_ERROR_COMPARISON_MISSING: comparison_decisions 缺少正文引用锚点：${anchors}
+ORCHESTRATOR_ERROR_COMPARISON_UNKNOWN: comparison_decisions 包含不存在的正文引用锚点：${anchors}
+ORCHESTRATOR_ERROR_COMPARISON_EVIDENCE_UNKNOWN: 正文引用 ${edit} 配对了不存在的附件标题锚点：${evidence}
+ORCHESTRATOR_ERROR_COMPARISON_ISSUE_MISSING: 正文引用 ${edit} 判定为 ${outcome}，但没有对应 edit 批注
+ORCHESTRATOR_ERROR_COMPARISON_ISSUE_EVIDENCE_MISSING: 正文引用 ${edit} 名称不一致，但 issue 未包含配对附件 evidence：${evidence}
+ORCHESTRATOR_ERROR_COMPARISON_ISSUE_CONFLICT: 正文引用 ${edit} 判定为 ${outcome}，却仍生成了 edit 批注
+ORCHESTRATOR_ERROR_POLICY_PAIRED_ANCHORS: issue ${issue_id} 必须同时包含 edit 和 evidence；只有单侧证据时删除该问题
+ORCHESTRATOR_ERROR_POLICY_EDIT_REGION: issue ${issue_id} 的 edit 不来自 ${region} region：${anchors}
+ORCHESTRATOR_ERROR_POLICY_EVIDENCE_REGION: issue ${issue_id} 的 evidence 不来自 ${region} region：${anchors}
+ORCHESTRATOR_ERROR_GROUP_ANCHOR: 锚点校验：${error}
+ORCHESTRATOR_ERROR_GROUP_COVERAGE: 覆盖校验：${error}
+ORCHESTRATOR_ERROR_GROUP_POLICY: 路由约束：${error}

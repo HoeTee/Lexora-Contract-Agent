@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -20,7 +19,7 @@ from agents.orchestrator import (
     _FindingLedger,
     _preserve_revision_issue_ids,
 )
-from agents.prompts.cn_prompts import load_prompts
+from agents.prompts import get_prompt, load_prompts
 from agents.schemas import ReflectorOutput, SubAgentOutput, SummaryOutput
 from agents.summarizer import (
     SUMMARIZER_MAX_PROMPT_TOKENS,
@@ -625,7 +624,7 @@ class DocxAnchorRegressionTests(unittest.TestCase):
 
 class PromptAuthorityTests(unittest.TestCase):
     def test_explicit_criteria_are_authoritative_for_review_and_reflection(self) -> None:
-        prompt_path = Path(__file__).resolve().parents[2] / "agents" / "prompts" / "cn_prompts.yaml"
+        prompt_path = Path(__file__).resolve().parents[2] / "agents" / "prompts.yaml"
 
         prompts = load_prompts(prompt_path)
 
@@ -648,10 +647,10 @@ class PromptAuthorityTests(unittest.TestCase):
         self.assertIn("必须列入 coverage_gaps", prompts["REFLECTOR_SYSTEM_PROMPT"])
 
     def test_runtime_prompt_makes_deterministic_absence_authoritative(self) -> None:
-        source = inspect.getsource(OrchestratorAgent.execute_single_criterion)
+        prompt = get_prompt("ORCHESTRATOR_REVIEW_TASK")
 
-        self.assertIn("确定性计数和范围说明", source)
-        self.assertIn("必须输出 issues_found，不得输出 compliant", source)
+        self.assertIn("确定性计数和范围说明", prompt)
+        self.assertIn("必须输出 issues_found，不得输出 compliant", prompt)
 
 
 class SubAgentSchemaNormalizationTests(unittest.TestCase):

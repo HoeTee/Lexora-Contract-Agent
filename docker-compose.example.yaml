@@ -27,7 +27,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./config.yaml:/app/config.yaml:ro
-      - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./agents/prompts.yaml:/app/agents/prompts.yaml:ro
       - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
       - ./profiles:/app/profiles
       - ./data:/app/data
@@ -59,7 +59,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./config.yaml:/app/config.yaml:ro
-      - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./agents/prompts.yaml:/app/agents/prompts.yaml:ro
       - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
       - ./profiles:/app/profiles
       - ./data:/app/data
@@ -84,7 +84,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./config.yaml:/app/config.yaml:ro
-      - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./agents/prompts.yaml:/app/agents/prompts.yaml:ro
       - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
       - ./profiles:/app/profiles
       - ./data:/app/data
@@ -109,7 +109,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./config.yaml:/app/config.yaml:ro
-      - ./agents/prompts/cn_prompts.yaml:/app/agents/prompts/cn_prompts.yaml:ro
+      - ./agents/prompts.yaml:/app/agents/prompts.yaml:ro
       - ./criteria-routes.yaml:/app/resources/criteria/criteria-routes.yaml:ro
       - ./profiles:/app/profiles
       - ./data:/app/data

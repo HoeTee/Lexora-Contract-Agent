@@ -9,7 +9,7 @@ import json
 
 from agents.base_agent import Agent
 from agents.json_utils import chat_until_valid_json
-from agents.prompts.cn_prompts import PLANNER_STRATEGY_PROMPT
+from agents.prompts import get_prompt, render_prompt
 from agents.schemas import StrategyExtractionOutput
 from routing.criteria import split_criteria_from_docx
 
@@ -17,23 +17,8 @@ from routing.criteria import split_criteria_from_docx
 __all__ = ["PlannerAgent", "assemble_tasks", "split_criteria_from_docx"]
 
 
-STRATEGY_EXPECTED_JSON = """
-{
-  "strategies": [
-    {
-      "id": "C1",
-      "review_instruction": "",
-      "route": {
-        "steps": [
-          {"method": "region", "terms": [], "regions": ["body"], "all_titles": false, "anchor_terms": [], "coverage": "relevant"}
-        ],
-        "fallback": false
-      },
-      "placement": {"target": "inline", "note": ""}
-    }
-  ]
-}
-"""
+PLANNER_STRATEGY_PROMPT = get_prompt("PLANNER_STRATEGY_PROMPT")
+STRATEGY_EXPECTED_JSON = get_prompt("PLANNER_STRATEGY_EXPECTED_JSON")
 
 
 class PlannerAgent(Agent):
@@ -56,10 +41,9 @@ class PlannerAgent(Agent):
             {"id": item["id"], "section": item["section"], "criterion": item["criterion"]}
             for item in skeletons
         ]
-        prompt = (
-            "请为以下每一条审查标准生成执行策略（route 与 placement）。\n"
-            "输入条目：\n"
-            f"{json.dumps(listing, ensure_ascii=False, indent=2)}"
+        prompt = render_prompt(
+            "PLANNER_STRATEGY_TASK_PROMPT",
+            listing_json=json.dumps(listing, ensure_ascii=False, indent=2),
         )
         parsed, _ = await chat_until_valid_json(
             self,

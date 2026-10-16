@@ -2,7 +2,7 @@
 
 import unittest
 
-from agents.prompts.cn_prompts import (
+from agents.prompts import (
     REFLECTOR_SYSTEM_PROMPT,
     SUB_AGENT_BASE_PROMPT,
     SUMMARIZER_SYSTEM_PROMPT,

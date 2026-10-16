@@ -21,7 +21,7 @@ from config import (
 from agents.base_agent import Agent
 from agents.json_utils import AgentOutputValidationError, agent_call_purpose, chat_until_valid_json
 from agents.reflector import ReflectorAgent
-from agents.prompts.cn_prompts import SUB_AGENT_BASE_PROMPT
+from agents.prompts import get_prompt, render_prompt
 from agents.schemas import SubAgentOutput
 from endpoints.runtime.errors import ModelCallError, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
@@ -32,10 +32,10 @@ from tools.docxindex.indexing import estimate_tokens
 
 
 _PLACEMENT_DIRECTIVES = {
-    "summary": "本标准发现的问题一律使用 anchors=[] 输出；系统会将 issue_comment 汇总进入文首审查总结，不得挂到具体条款。",
-    "inline_at_title": "本标准发现的问题，批注锚点必须指向相关标题所在段落。",
-    "tail": "本标准发现的问题，批注锚点必须指向合同末尾签署栏区域的段落。",
-    "body_end": "本标准发现的问题使用 anchors=[] 输出；系统会将批注挂到正文结尾处。",
+    "summary": get_prompt("ORCHESTRATOR_PLACEMENT_SUMMARY"),
+    "inline_at_title": get_prompt("ORCHESTRATOR_PLACEMENT_INLINE_AT_TITLE"),
+    "tail": get_prompt("ORCHESTRATOR_PLACEMENT_TAIL"),
+    "body_end": get_prompt("ORCHESTRATOR_PLACEMENT_BODY_END"),
 }
 
 def _finding_entries(opinion: dict) -> dict[str, dict]:
@@ -215,42 +215,7 @@ class _FindingLedger:
         return unresolved
 
 
-SUB_AGENT_EXPECTED_JSON = """
-{
-  "status": "issues_found",
-  "applicability_reason": "仅当 status 为 not_applicable 时填写不适用理由；其他状态可省略",
-  "issues": [
-    {
-      "issue_id": "当前criterion_id.序号",
-      "risk_level": "low",
-      "issue_comment": "问题整体说明，600字以内，不得以长度限制遗漏真实缺陷",
-      "anchors": [
-        {
-          "role": "edit",
-          "xml_anchor_type": "paragraph",
-          "xml_anchor_id": "必须复用检索结果中的 xml_anchor_id",
-          "quoted_text": "逐字摘录的单一连续合同原文",
-          "comment_text": "写入该处 Word 批注的修改意见，300字以内；evidence 角色必须为空"
-        }
-      ],
-      "reasoning": "说明为什么构成实质风险，以及如何对应 check_point",
-      "criterion": "当前审查标准原文",
-      "check_point": "该 issue 对应的具体检查点"
-    }
-  ],
-  "coverage_decisions": [],
-  "comparison_decisions": [
-    {
-      "edit_anchor_type": "paragraph",
-      "edit_anchor_id": "必须复用正文候选的 xml_anchor_id",
-      "evidence_anchor_type": "paragraph",
-      "evidence_anchor_id": "matched/mismatch 时必须复用实际附件标题的 xml_anchor_id；not_found 时为 null",
-      "decision": "matched 或 mismatch 或 not_found 或 not_applicable",
-      "reason": "说明正文引用与实际附件标题的配对及比较结论"
-    }
-  ]
-}
-"""
+SUB_AGENT_EXPECTED_JSON = get_prompt("SUB_AGENT_EXPECTED_JSON")
 
 
 class OrchestratorAgent:
@@ -282,8 +247,7 @@ class OrchestratorAgent:
         """Request a revision and restore IDs for defects that remain at the same source."""
         revised, _ = await chat_until_valid_json(
             sub_agent,
-            prompt
-            + "\n修订同一原文缺陷时必须保留原 issue_id；只有新增的独立缺陷才能使用新 issue_id。",
+            prompt + get_prompt("ORCHESTRATOR_REVISION_IDENTITY"),
             SubAgentOutput,
             SUB_AGENT_EXPECTED_JSON,
         )
@@ -335,7 +299,10 @@ class OrchestratorAgent:
         route_override: dict | None = None,
     ) -> tuple[str, int]:
         """Unified retrieval: returns (context_text, retrieval_tokens)."""
-        search_query = f"{criterion_text}\n检查要点：{check_points_text}"
+        search_query = render_prompt(
+            "ORCHESTRATOR_SEARCH_QUERY",
+            criterion_text=criterion_text, check_points_text=check_points_text,
+        )
         retrieval_tokens = 0
 
         print(f"[Orchestrator] {cid}: Searching contract via temporary {RETRIEVAL_BACKEND} index...")
@@ -373,7 +340,7 @@ class OrchestratorAgent:
                 search_result,
                 default_component="embedding" if RETRIEVAL_BACKEND == "llamaindex" else "docxindex",
             )
-        contexts = [search_result] if search_result else ["未找到相关内容。"]
+        contexts = [search_result] if search_result else [get_prompt("ORCHESTRATOR_NO_EVIDENCE")]
         if RETRIEVAL_BACKEND == "docxindex" and isinstance(search_result, str):
             try:
                 payload = json.loads(search_result)
@@ -382,8 +349,10 @@ class OrchestratorAgent:
             if isinstance(payload, dict) and isinstance(payload.get("contexts"), list):
                 contexts = [str(item) for item in payload["contexts"] if str(item).strip()]
                 if not contexts:
-                    contexts = ["未找到相关内容。"]
-        context = "\n\n".join(f"# 检索证据批次\n{item}" for item in contexts)
+                    contexts = [get_prompt("ORCHESTRATOR_NO_EVIDENCE")]
+        context = "\n\n".join(
+            render_prompt("ORCHESTRATOR_EVIDENCE_BATCH", evidence=item) for item in contexts
+        )
         retrieval_tokens = estimate_tokens(context)
 
         if self.logger:
@@ -402,7 +371,7 @@ class OrchestratorAgent:
             context: str
     ) -> str:
         """Add guardrails so retrieval wrapper text is not mistaken for contract locations."""
-        normalized_context = context or "未找到相关内容。"
+        normalized_context = context or get_prompt("ORCHESTRATOR_NO_EVIDENCE")
         normalized_context = re.sub(
             r"^##\s*检索结果\s*\d+(?:\s*\([^)]*\))?\s*$",
             "",
@@ -410,18 +379,8 @@ class OrchestratorAgent:
             flags=re.MULTILINE,
         )
         normalized_context = re.sub(r"\n{3,}", "\n\n", normalized_context).strip()
-        guidance = (
-            '注意：下面内容中的“相关度分数”“检索片段标题”等仅是检索系统包装信息，'
-            '不是合同原始条款标题或所在位置。输出”所在位置”时只能填写合同原文中真实出现的条款、'
-            '章节或段落位置；若合同原文未标明具体条款编号，请写”合同缺失审查要点要求书写的内容”，'
-            '绝对不要照抄检索包装标题。'
-        )
-        anchor_guidance = (
-            "每条检索证据会提供 xml_anchor_type 和 xml_anchor_id。"
-            "输出 anchors 时必须从 quoted_text 所在的同一证据对象逐字符复制 xml_anchor_type/xml_anchor_id；"
-            "禁止根据证据展示顺序、批次编号、正文顺序或段落内容自行构造 xml_anchor_id。"
-            "输出前必须确认 quoted_text 是该 xml_anchor_id 对应合同文本中的单一连续片段。"
-        )
+        guidance = get_prompt("ORCHESTRATOR_CONTEXT_GUIDANCE")
+        anchor_guidance = get_prompt("ORCHESTRATOR_ANCHOR_GUIDANCE")
         return f"{guidance}\n{anchor_guidance}\n\n{normalized_context}"
 
     @staticmethod
@@ -471,7 +430,7 @@ class OrchestratorAgent:
             if prepared not in seen:
                 seen.add(prepared)
                 contexts.append(prepared)
-        return "\n\n--- SubAgent 补充检索证据 ---\n\n".join(contexts)
+        return get_prompt("ORCHESTRATOR_SUPPLEMENTAL_EVIDENCE_SEPARATOR").join(contexts)
 
     @staticmethod
     def _normalized_span(text: str, quote: str) -> str | None:
@@ -581,7 +540,10 @@ class OrchestratorAgent:
                 item = evidence_by_key.get((anchor_type, anchor_id))
                 if item is None:
                     errors.append(
-                        f"issue {issue_id} 的锚点 {anchor_type}/{anchor_id} 不存在于检索证据中"
+                        render_prompt(
+                            "ORCHESTRATOR_ERROR_ANCHOR_MISSING", issue_id=issue_id,
+                            anchor_type=anchor_type, anchor_id=anchor_id,
+                        )
                     )
                     continue
                 normalized_content = self._normalize_anchor_text(item["content"])
@@ -593,12 +555,18 @@ class OrchestratorAgent:
                 ] if normalized_quote else []
                 if not starts:
                     errors.append(
-                        f"issue {issue_id} 的 quoted_text 不属于锚点 {anchor_type}/{anchor_id}：{quote!r}"
+                        render_prompt(
+                            "ORCHESTRATOR_ERROR_QUOTE_NOT_IN_ANCHOR", issue_id=issue_id,
+                            anchor_type=anchor_type, anchor_id=anchor_id, quote=repr(quote),
+                        )
                     )
                     continue
                 if len(starts) > 1:
                     errors.append(
-                        f"issue {issue_id} 的 quoted_text 在锚点 {anchor_type}/{anchor_id} 中匹配多次，无法唯一定位：{quote!r}"
+                        render_prompt(
+                            "ORCHESTRATOR_ERROR_QUOTE_AMBIGUOUS", issue_id=issue_id,
+                            anchor_type=anchor_type, anchor_id=anchor_id, quote=repr(quote),
+                        )
                     )
                     continue
                 if anchor.get("role", "edit") == "edit":
@@ -619,8 +587,10 @@ class OrchestratorAgent:
                 overlaps = left_range[0] < right_range[1] and right_range[0] < left_range[1]
                 if overlaps:
                     errors.append(
-                        f"issue {left[0]} 与 issue {right[0]} 的 edit 范围在 "
-                        f"{left[1]}/{left[2]} 中重叠；请分别引用直接包含各自缺陷的最小连续原文"
+                        render_prompt(
+                            "ORCHESTRATOR_ERROR_EDIT_OVERLAP", left_id=left[0], right_id=right[0],
+                            anchor_type=left[1], anchor_id=left[2],
+                        )
                     )
         return errors
 
@@ -640,9 +610,9 @@ class OrchestratorAgent:
         missing = sorted(expected - actual)
         unknown = sorted(actual - expected)
         if missing:
-            errors.append(f"coverage_decisions 缺少证据锚点：{missing}")
+            errors.append(render_prompt("ORCHESTRATOR_ERROR_COVERAGE_MISSING", anchors=missing))
         if unknown:
-            errors.append(f"coverage_decisions 包含不存在的证据锚点：{unknown}")
+            errors.append(render_prompt("ORCHESTRATOR_ERROR_COVERAGE_UNKNOWN", anchors=unknown))
 
         issue_anchor_keys = {
             (str(anchor.get("xml_anchor_type") or ""), str(anchor.get("xml_anchor_id") or ""))
@@ -657,7 +627,7 @@ class OrchestratorAgent:
             and (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or "")) not in issue_anchor_keys
         )
         if missing_issues:
-            errors.append(f"标记为 issue 的证据没有对应 edit 批注：{missing_issues}")
+            errors.append(render_prompt("ORCHESTRATOR_ERROR_COVERAGE_ISSUE_MISSING", anchors=missing_issues))
         issue_decision_keys = {
             (str(item.get("xml_anchor_type") or ""), str(item.get("xml_anchor_id") or ""))
             for item in decisions
@@ -666,8 +636,7 @@ class OrchestratorAgent:
         conflicting_issue_anchors = sorted(issue_anchor_keys - issue_decision_keys)
         if conflicting_issue_anchors:
             errors.append(
-                "edit 批注对应的 coverage_decisions 未标记为 issue："
-                f"{conflicting_issue_anchors}"
+                render_prompt("ORCHESTRATOR_ERROR_COVERAGE_ISSUE_CONFLICT", anchors=conflicting_issue_anchors)
             )
         return errors
 
@@ -701,9 +670,9 @@ class OrchestratorAgent:
         missing = sorted(expected_edits - actual_edits)
         unknown = sorted(actual_edits - expected_edits)
         if missing:
-            errors.append(f"comparison_decisions 缺少正文引用锚点：{missing}")
+            errors.append(render_prompt("ORCHESTRATOR_ERROR_COMPARISON_MISSING", anchors=missing))
         if unknown:
-            errors.append(f"comparison_decisions 包含不存在的正文引用锚点：{unknown}")
+            errors.append(render_prompt("ORCHESTRATOR_ERROR_COMPARISON_UNKNOWN", anchors=unknown))
 
         issue_edits: set[tuple[str, str]] = set()
         issue_evidence: dict[tuple[str, str], set[tuple[str, str]]] = {}
@@ -734,13 +703,17 @@ class OrchestratorAgent:
             )
             outcome = decision.get("decision")
             if evidence_id and evidence_key not in allowed_evidence:
-                errors.append(f"正文引用 {edit} 配对了不存在的附件标题锚点：{evidence_key}")
+                errors.append(render_prompt(
+                    "ORCHESTRATOR_ERROR_COMPARISON_EVIDENCE_UNKNOWN", edit=edit, evidence=evidence_key,
+                ))
             if outcome in {"mismatch", "not_found"} and edit not in issue_edits:
-                errors.append(f"正文引用 {edit} 判定为 {outcome}，但没有对应 edit 批注")
+                errors.append(render_prompt("ORCHESTRATOR_ERROR_COMPARISON_ISSUE_MISSING", edit=edit, outcome=outcome))
             if outcome == "mismatch" and evidence_key not in issue_evidence.get(edit, set()):
-                errors.append(f"正文引用 {edit} 名称不一致，但 issue 未包含配对附件 evidence：{evidence_key}")
+                errors.append(render_prompt(
+                    "ORCHESTRATOR_ERROR_COMPARISON_ISSUE_EVIDENCE_MISSING", edit=edit, evidence=evidence_key,
+                ))
             if outcome in {"matched", "not_applicable"} and edit in issue_edits:
-                errors.append(f"正文引用 {edit} 判定为 {outcome}，却仍生成了 edit 批注")
+                errors.append(render_prompt("ORCHESTRATOR_ERROR_COMPARISON_ISSUE_CONFLICT", edit=edit, outcome=outcome))
         return errors
 
     @staticmethod
@@ -777,8 +750,7 @@ class OrchestratorAgent:
             roles = {anchor.get("role", "edit") for anchor in issue.get("anchors") or []}
             if not {"edit", "evidence"}.issubset(roles):
                 errors.append(
-                    f"issue {issue.get('issue_id')} 必须同时包含 edit 和 evidence；"
-                    "只有单侧证据时删除该问题"
+                    render_prompt("ORCHESTRATOR_ERROR_POLICY_PAIRED_ANCHORS", issue_id=issue.get("issue_id"))
                 )
                 continue
             invalid_edits = [
@@ -790,8 +762,10 @@ class OrchestratorAgent:
             ]
             if invalid_edits:
                 errors.append(
-                    f"issue {issue.get('issue_id')} 的 edit 不来自 {edit_region} region："
-                    f"{invalid_edits}"
+                    render_prompt(
+                        "ORCHESTRATOR_ERROR_POLICY_EDIT_REGION", issue_id=issue.get("issue_id"),
+                        region=edit_region, anchors=invalid_edits,
+                    )
                 )
             invalid_evidence = [
                 anchor.get("xml_anchor_id")
@@ -802,8 +776,10 @@ class OrchestratorAgent:
             ]
             if invalid_evidence:
                 errors.append(
-                    f"issue {issue.get('issue_id')} 的 evidence 不来自 {evidence_region} region："
-                    f"{invalid_evidence}"
+                    render_prompt(
+                        "ORCHESTRATOR_ERROR_POLICY_EVIDENCE_REGION", issue_id=issue.get("issue_id"),
+                        region=evidence_region, anchors=invalid_evidence,
+                    )
                 )
         return errors
 
@@ -829,12 +805,18 @@ class OrchestratorAgent:
 
             grouped_errors: list[str] = []
             anchor_errors = self._anchor_validation_errors(parsed_opinion, review_context)
-            grouped_errors.extend(f"锚点校验：{error}" for error in anchor_errors)
+            grouped_errors.extend(
+                render_prompt("ORCHESTRATOR_ERROR_GROUP_ANCHOR", error=error) for error in anchor_errors
+            )
             if coverage_audit:
                 coverage_errors = self._coverage_audit_errors(parsed_opinion, base_context)
-                grouped_errors.extend(f"覆盖校验：{error}" for error in coverage_errors)
+                grouped_errors.extend(
+                    render_prompt("ORCHESTRATOR_ERROR_GROUP_COVERAGE", error=error) for error in coverage_errors
+                )
             policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
-            grouped_errors.extend(f"路由约束：{error}" for error in policy_errors)
+            grouped_errors.extend(
+                render_prompt("ORCHESTRATOR_ERROR_GROUP_POLICY", error=error) for error in policy_errors
+            )
 
             if not grouped_errors:
                 return parsed_opinion, raw_output, review_context, totals
@@ -849,11 +831,9 @@ class OrchestratorAgent:
             with agent_call_purpose(sub_agent, stage, "; ".join(grouped_errors)):
                 parsed_opinion, raw_output = await self._revise_subagent_output(
                     sub_agent,
-                    "输出未通过结构与锚点校验：\n- "
-                    + "\n- ".join(grouped_errors)
-                    + "\n请返回完整修正后的 JSON。保留原有正确问题；"
-                    "无法唯一定位的锚点应重新选择直接包含缺陷的最小连续原文；"
-                    "一个 issue 最多只能有一个 edit，多个批注位置必须拆成多个 issue。",
+                    render_prompt(
+                        "ORCHESTRATOR_OUTPUT_REPAIR", errors="\n- ".join(grouped_errors),
+                    ),
                     previous_opinion,
                 )
 
@@ -873,9 +853,9 @@ class OrchestratorAgent:
             issue_id = issue.get("issue_id", "")
             check_point = issue.get("check_point", "")
             criterion_text = issue.get("criterion", "")
-            search_query = (
-                f"查找合同中是否约定以下检查要点：{check_point}\n"
-                f"所属审查标准：{criterion_text}"
+            search_query = render_prompt(
+                "ORCHESTRATOR_MISSING_TEXT_QUERY",
+                check_point=check_point, criterion_text=criterion_text,
             )
             search_result = await self.mcp_client.call_tool(
                 "contract_search",
@@ -904,7 +884,7 @@ class OrchestratorAgent:
                     default_component="embedding" if RETRIEVAL_BACKEND == "llamaindex" else "agent",
                 )
 
-            context = self._prepare_review_context(search_result or "未找到相关内容。")
+            context = self._prepare_review_context(search_result or get_prompt("ORCHESTRATOR_NO_EVIDENCE"))
             notes.append(
                 {
                     "issue_id": issue_id,
@@ -915,7 +895,7 @@ class OrchestratorAgent:
             )
 
         if not notes:
-            return "无 anchors 为空的缺失类 issue，无补充检索结果。"
+            return get_prompt("ORCHESTRATOR_NO_MISSING_TEXT_NOTES")
         return json.dumps(notes, ensure_ascii=False, indent=2)
 
     def _build_reflector_input(
@@ -1014,7 +994,7 @@ class OrchestratorAgent:
             set(SUBAGENT_ALLOWED_TOOLS),
         )
         sub_agent = Agent(
-            system_prompt=SUB_AGENT_BASE_PROMPT,
+            system_prompt=get_prompt("SUB_AGENT_BASE_PROMPT"),
             name=f"SubAgent_{cid}",
             criterion_id=cid,
             mcp_client=self.mcp_client,
@@ -1023,56 +1003,23 @@ class OrchestratorAgent:
         )
 
         sub_agent.call_stage = "review-initial"
-        task_prompt = (
-            f"审查标准：{criterion_text}\n"
-            f"检查要点：\n{check_points_text}\n\n"
-            "执行约束：\n"
-            "- 检索结果中的确定性计数和范围说明是已经执行完毕的代码结论，不是待核实信息。\n"
-            "- 若审查标准以某词语缺失为触发条件，且确定性全文检索明确显示出现次数为0，"
-            "必须输出 issues_found，不得输出 compliant。\n"
-            "- 若审查标准要求在触发后‘直接写明’或‘如无则写入’指定提示，且检索结果证明触发条件成立，"
-            "必须按该标准输出 issue，不得再以风险较低、已有相关实体条款或一般完善建议为由跳过。\n\n"
-            "- 若当前标准只要求比较两处内容是否一致，任一侧为空白、模板变量或未填写时，不得在该一致性标准下输出字段缺失问题；"
-            "只有两侧均为实际有效值且内容不一致时才能报告 inconsistency。\n\n"
-            "- 输出前必须逐条检查字段长度：issue_comment 不得超过600个字符，anchor.comment_text 不得超过300个字符；"
-            "需要说明多个事实时应保留核心缺陷和修改要求，不得用超长背景复述合同。\n\n"
-            "- 检索结果若含‘检索候选判定理由’，表示 scan 已逐项发现该原文可能触发当前标准；"
-            "必须逐条作出实质判断。原文确为未填写时必须分别输出 issue，只有能从该原文看出已实际填写或不属于标准范围时才可排除。\n\n"
-            f"以下是合同原文中与此标准相关的内容：\n\n{context}\n\n"
+        task_prompt = render_prompt(
+            "ORCHESTRATOR_REVIEW_TASK", criterion_text=criterion_text,
+            check_points_text=check_points_text, context=context,
         )
         if coverage_audit:
-            task_prompt += (
-                "完整覆盖审计：必须对上述每一个检索证据锚点输出一条 coverage_decisions。"
-                "decision=issue 时必须同时生成锚定同一 xml_anchor_id 的 edit issue；"
-                "decision=compliant/not_applicable 时在 reason 中说明与当前标准的关系。"
-                "不得因为已经发现部分问题就跳过合同号、日期、联系方式等其他字段。\n\n"
-            )
+            task_prompt += get_prompt("ORCHESTRATOR_COVERAGE_AUDIT")
         if comparison_audit:
-            task_prompt += (
-                "关系比较覆盖审计：检索证据中的 body anchor 是必须逐项处理的正文附件引用候选，"
-                "attachments anchor 是完整的实际附件标题清单。必须为每个 body anchor 输出且只输出一条 "
-                "comparison_decisions：edit_anchor 复用该 body anchor；matched/mismatch 必须填写实际配对的 "
-                "attachments evidence_anchor；找不到实际附件时使用 not_found 且不填写 evidence_anchor。"
-                "mismatch 必须生成锚定正文的 edit issue，并把对应附件标题作为 evidence；"
-                "not_found 必须生成锚定正文的 edit issue；matched/not_applicable 不得生成 issue。"
-                "附件标题是客观基准，禁止把正文引用作为附件已经存在的证明。"
-                "comparison_decisions 每项只能包含 edit_anchor_type、edit_anchor_id、"
-                "evidence_anchor_type、evidence_anchor_id、decision、reason 六个字段；"
-                "禁止输出 matched_evidence_anchor 等自创字段。示例："
-                '{"edit_anchor_type":"paragraph","edit_anchor_id":"path:body/p70",'
-                '"evidence_anchor_type":"paragraph","evidence_anchor_id":"path:body/p219",'
-                '"decision":"mismatch","reason":"正文引用产品清单，实际附件标题为服务清单。"}'
-                "。\n\n"
-            )
+            task_prompt += get_prompt("ORCHESTRATOR_COMPARISON_AUDIT")
         if review_instruction:
-            task_prompt = (
-                task_prompt
-                + f"触发指令：{review_instruction}\n"
-                + "只有标准原文本身给出完整目标文字且触发条件成立时才逐字采用。省略号‘…’、‘照抄’或‘报错…’不是完整目标，不得照搬；应按真实缺陷提供具体修改意见。\n\n"
+            task_prompt += render_prompt(
+                "ORCHESTRATOR_TRIGGER_INSTRUCTION", review_instruction=review_instruction,
             )
         placement_directive = _PLACEMENT_DIRECTIVES.get(placement_target)
         if placement_directive:
-            task_prompt += f"批注去向约束：{placement_directive}\n\n"
+            task_prompt += render_prompt(
+                "ORCHESTRATOR_PLACEMENT_INSTRUCTION", directive=placement_directive,
+            )
         parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
             sub_agent,
             task_prompt,
@@ -1130,7 +1077,7 @@ class OrchestratorAgent:
         reflector_tokens = 0
         for round_num in range(MAX_REFLECTION_ROUNDS):
             if criterion.get("review_source") == "mandatory":
-                missing_text_review_notes = "强制路由已提供当前标准的完整检索证据，不再重复执行缺失文本补充检索。"
+                missing_text_review_notes = get_prompt("ORCHESTRATOR_MANDATORY_EVIDENCE_NOTES")
             else:
                 missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion, cid)
             reflector = ReflectorAgent(criterion_id=cid, settings=self.settings)
@@ -1154,12 +1101,15 @@ class OrchestratorAgent:
             coverage_gaps = review.get("coverage_gaps") or []
             if coverage_gaps:
                 gap_feedback = "\n".join(
-                    f"漏检 {gap.get('xml_anchor_id')}: {gap.get('quoted_text')}；{gap.get('reason')}"
+                    render_prompt(
+                        "ORCHESTRATOR_COVERAGE_GAP", anchor_id=gap.get("xml_anchor_id"),
+                        quoted_text=gap.get("quoted_text"), reason=gap.get("reason"),
+                    )
                     for gap in coverage_gaps
                 )
                 review["feedback"] = (
                     str(review.get("feedback") or "").strip()
-                    + "\n请补充以下覆盖缺口：\n"
+                    + get_prompt("ORCHESTRATOR_COVERAGE_GAP_INSTRUCTION")
                     + gap_feedback
                 ).strip()
             status = review["status"]
@@ -1178,7 +1128,7 @@ class OrchestratorAgent:
                 break
             else:
                 if status == "PASS":
-                    review["feedback"] += "\n存在未逐条确认、未经说明删除或仍需修订的发现；请按 finding_id 修正。"
+                    review["feedback"] += get_prompt("ORCHESTRATOR_UNRESOLVED_FINDINGS")
                 if round_num + 1 == MAX_REFLECTION_ROUNDS:
                     break
                 print(f"[Orchestrator] {cid}: REJECT round {round_num+1}, refining...")
@@ -1187,7 +1137,9 @@ class OrchestratorAgent:
                     with agent_call_purpose(sub_agent, f"review-reflection-revision{round_num + 1}", review.get("feedback")):
                         parsed_opinion, sub_agent_opinion = await self._revise_subagent_output(
                             sub_agent,
-                            f"请根据以下质量审查反馈，补充和完善你的审查结果：\n\n{review.get('feedback', '')}",
+                            render_prompt(
+                                "ORCHESTRATOR_REFLECTION_REVISION", feedback=review.get("feedback", ""),
+                            ),
                             previous_opinion,
                         )
                         parsed_opinion, sub_agent_opinion, review_context, anchor_validation = (

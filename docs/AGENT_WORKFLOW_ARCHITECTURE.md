@@ -25,7 +25,7 @@
 
 ### 批注意义与证据边界
 
-`agents/prompts/cn_prompts.yaml` 中 SubAgent 负责判定，现有 Reflector 独立复核；不增加新的 Agent 类型：
+`agents/prompts.yaml` 中 SubAgent 负责判定，现有 Reflector 独立复核；不增加新的 Agent 类型：
 
 - “照抄”等编辑指令不作为最终意见，也不能在目标文字不明确时编造提示语。通用提醒返回 `anchors=[]` 进入总结；具体缺陷才锚定问题原文。
 - 字段是否未填写由 LLM 结合字段名称、相邻文字、表格关系和合同语境判断，不由业务正则硬匹配。`[合同中心-合同编码]`、`#乙方合同号#【     】`、字段后的 `XX` 是提示词示例；`【5‰】`、`【5%】` 等已有值和条件性补件说明是反例。批注必须直接引用对应字段和未填写位置。
@@ -46,7 +46,7 @@
 
 SubAgent 的一个 issue 含多个 edit anchor 时，FindingLedger 按锚点拆成独立 finding，并为拆分结果生成唯一的局部 `issue_id`；原 issue 的判断内容不变，每个位置仍分别进入 Reflector 与批注写入器。
 
-基础设施：`agents/base_agent.py`（`Agent` 基类与 `Settings` 模型配置）、`agents/schemas.py`（结构化输出 schema）、`agents/prompts/cn_prompts.yaml`（所有提示词，含审查边界）。
+基础设施：`agents/base_agent.py`（`Agent` 基类与 `Settings` 模型配置）、`agents/schemas.py`（结构化输出 schema）、`agents/prompts.yaml`（集中维护 agent 提示词，含审查边界和结构化输出要求）、`agents/prompts.py`（加载提示词并填入本次任务数据）。系统提示、任务模板和输出修复提示统一由该 YAML 提供；各 agent 只传入标准、证据、模型结果等动态内容。旧版 `agents/prompts/` 目录不再保留。
 
 ## 智能体结构化输出 schema
 

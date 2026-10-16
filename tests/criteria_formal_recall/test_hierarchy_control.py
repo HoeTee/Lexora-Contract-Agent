@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import httpx
 from redis.exceptions import ConnectionError as RedisConnectionError
 
+from config import MODEL_CALL_MAX_RETRIES
 from endpoints.runtime.model_budget import ModelCallTimeout, ModelRetryLimitError
 from loggers.call_log import reset_call_context, set_call_context
 from tests.criteria_formal_recall._model_test_support import model_transport
@@ -51,7 +52,8 @@ class HierarchyFallbackTests(TestCase):
                                             split_threshold_tokens=30, chunk_target_tokens=20)
                 finally:
                     reset_call_context(token)
-                self.assertEqual(len(sends), 3)
+                expected_sends = MODEL_CALL_MAX_RETRIES + 1
+                self.assertEqual(len(sends), expected_sends)
                 self.assertIn("JSON 必须符合以下 schema", sends[1]["messages"][0]["content"])
                 self.assertTrue(root.children)
                 self.assertEqual({child.node_type for child in root.children}, {"chunk"})
@@ -59,8 +61,8 @@ class HierarchyFallbackTests(TestCase):
                 records = list((Path(directory) / "logs" / "logical_calls").glob("*.json"))
                 self.assertEqual(len(records), 1)
                 record = json.loads(records[0].read_text(encoding="utf-8"))
-                self.assertEqual((record["status"], record["retry_count"]), ("failed", 2))
-                self.assertEqual(len(record["attempts"]), 3)
+                self.assertEqual((record["status"], record["retry_count"]), ("failed", MODEL_CALL_MAX_RETRIES))
+                self.assertEqual(len(record["attempts"]), expected_sends)
                 self.assertEqual({attempt["failure_stage"] for attempt in record["attempts"]}, {"output_validation"})
                 self.assertFalse((Path(directory) / "cache" / "llm_hierarchy.jsonl").exists())
 

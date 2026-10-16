@@ -12,6 +12,7 @@ import httpx
 
 from pydantic import ValidationError
 
+from config import MODEL_CALL_MAX_RETRIES
 from endpoints.runtime.errors import classify_model_call_error
 from tools.docxindex.llm.client import LLMClient, LLMSettings, LLMResponseValidationError
 from tools.docxindex.llm.prompts import ATTACHMENT_HIERARCHY_PROMPT_VERSION, ROUTE_EXPECTED_JSON, route_prompt
@@ -176,7 +177,7 @@ class RoutePromptContractTests(unittest.TestCase):
         self.assertIsNone(raised.exception.http_status)
         self.assertEqual(raised.exception.error_type, "response_validation_error")
         self.assertIn("scan route may only be combined", str(raised.exception))
-        self.assertEqual(request.await_count, 3)
+        self.assertEqual(request.await_count, MODEL_CALL_MAX_RETRIES + 1)
 
     def test_retrieval_error_fields_survive_model_error_classification(self) -> None:
         error = classify_model_call_error(

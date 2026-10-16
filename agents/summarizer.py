@@ -7,27 +7,12 @@ from copy import deepcopy
 from agents.base_agent import Agent, estimate_chat_prompt_tokens
 from config import MAX_PROMPT_TOKENS
 from agents.json_utils import chat_until_valid_json
-from agents.prompts.cn_prompts import SUMMARIZER_SYSTEM_PROMPT
+from agents.prompts import get_prompt, render_prompt
 from agents.schemas import SummaryContentOutput, SummaryOutput
 
 
-SUMMARY_EXPECTED_JSON = """
-{
-  "overall_comment": "总体审查总结",
-  "priority_comments": [
-    "优先修改建议1",
-    "优先修改建议2"
-  ],
-  "duplicate_groups": [
-    {
-      "keep_issue_key": "0:H01:H01.1",
-      "merge_issue_keys": ["1:H15:H15.1"],
-      "canonical_comment": "能够脱离其他批注独立理解的唯一修改意见",
-      "reason": "两条问题描述的是同一原文缺陷"
-    }
-  ]
-}
-"""
+SUMMARIZER_SYSTEM_PROMPT = get_prompt("SUMMARIZER_SYSTEM_PROMPT")
+SUMMARY_EXPECTED_JSON = get_prompt("SUMMARY_EXPECTED_JSON")
 
 SUMMARIZER_MAX_PROMPT_TOKENS = MAX_PROMPT_TOKENS
 
@@ -219,13 +204,9 @@ class SummarizerAgent(Agent):
             "issue_count": len(issues),
             "issues": issues,
         }
-        prompt = (
-            "以下问题已完成精确范围防重，但仍可能存在跨审查要点或相邻位置的语义重复。"
-            "请生成总体审查总结、优先修改建议，并只把真正描述同一缺陷的问题放入 duplicate_groups。"
-            "只有 edit anchor 的 xml_anchor_id 和 quoted_text 均完全相同，且 placement 相同的问题才允许合并。"
-            "无锚点汇总问题不得吸收有锚点的行内问题；同属未填写不代表同一缺陷，合同号、日期、地址等不同字段必须分别保留。"
-            "不同事实、不同位置、不同修改动作不得合并；keep_issue_key 应选择更具体、更可执行的问题：\n"
-            + json.dumps(prompt_payload, ensure_ascii=False, indent=2)
+        prompt = render_prompt(
+            "SUMMARIZER_TASK_PROMPT",
+            prompt_payload_json=json.dumps(prompt_payload, ensure_ascii=False, indent=2),
         )
         parsed, _ = await chat_until_valid_json(
             self,
