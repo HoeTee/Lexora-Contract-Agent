@@ -342,6 +342,12 @@ MODEL_CALL_TIMEOUT_SECONDS = _as_float(
     cfg("workflow", "model_call_timeout_seconds"),
     "workflow.model_call_timeout_seconds",
 )
+MODEL_WAIT_TIMEOUT_SECONDS = _as_float(
+    cfg_optional("workflow", "model_wait_timeout_seconds", 180),
+    "workflow.model_wait_timeout_seconds",
+)
+if MODEL_WAIT_TIMEOUT_SECONDS <= 0:
+    raise RuntimeError("workflow.model_wait_timeout_seconds must be greater than 0.")
 MODEL_CALL_MAX_RETRIES = _as_int(
     cfg("workflow", "model_call_max_retries"),
     "workflow.model_call_max_retries",
@@ -490,6 +496,7 @@ def control_configuration_summary() -> dict[str, Any]:
         },
         "workflow": {"criterion_concurrency_per_contract": MAX_ORCHESTRATOR_CONCURRENCY,
                      "criterion_retry_max_attempts": CRITERION_RETRY_MAX_ATTEMPTS,
+                     "model_wait_timeout_seconds": MODEL_WAIT_TIMEOUT_SECONDS,
                      "model_operation_timeout_seconds": MODEL_CALL_TIMEOUT_SECONDS,
                      "model_extra_send_limit": MODEL_CALL_MAX_RETRIES},
         "model_semaphore": {

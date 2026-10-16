@@ -194,6 +194,10 @@ review-worker-3
 Redis DB 0 保存 Celery 消息，DB 2 保存模型请求名额。Web/API 负责请求和状态读取，worker 负责 workflow、MCP、模型调用、DOCX 生成和日志写入。API 与三个 worker 必须挂载相同的 `data/`、`profiles/` 和配置文件。容器配置中的 Redis 地址应使用 Compose service 名称，而不是 `localhost`：
 
 ```yaml
+workflow:
+  model_wait_timeout_seconds: 180
+  model_call_timeout_seconds: 60
+
 queue:
   broker_url: "redis://redis:6379/0"
   worker_disable_prefetch: true
@@ -204,6 +208,8 @@ queue:
 ```
 
 `queued_timeout_seconds: 7200` 只限制尚未被 worker 接手的任务；`task_time_limit_seconds: 1800` 从 Celery 开始执行时计算，超时终止执行子进程并补充新的子进程，不自动重跑原合同。不配置软时限。Windows 的 `solo` 池不能提供这里的硬时限保证，部署使用 Linux 容器或 Linux/WSL 测试环境。
+
+`model_wait_timeout_seconds: 180` 限制同一次逻辑调用累计等待模型名额的时间，排队不消耗 `model_call_timeout_seconds: 60` 的执行预算。重试继续使用两份剩余预算，整任务时限始终有效。名额 lease 从取得名额时开始，不包含排队；本次保留原 lease 和三个 worker 的并发设置。
 
 所有 worker 和其 MCP 子进程必须使用相同的 DB 2 地址、模型 key、容量及租约设置。不要通过更换 Redis 数据库、key 或关闭限流绕过已有请求上限。Redis 不是合同与报告的存储位置，持久化结果仍写入共享挂载的 `data/`。
 

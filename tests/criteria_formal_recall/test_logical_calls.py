@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import asyncio
 import tempfile
+import time
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -22,6 +23,7 @@ from agents.json_utils import AgentOutputValidationError, agent_call_purpose, ch
 from agents.reflector import ReflectorAgent
 from endpoints.review import task_store
 from endpoints.review.review_state import ReviewStateStore
+from endpoints.runtime import model_budget
 from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout
 from endpoints.runtime.errors import ModelCallError
 from loggers.call_log import call_stage, logical_call, map_with_context, new_call, reset_call_context, set_call_context
@@ -407,9 +409,11 @@ class GlobalRankingTests(unittest.TestCase):
 class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
     @asynccontextmanager
     async def harness(self, responses, *, detailed=False, criterion_id="H03", mcp_client=None,
-                      timeout=None, response_delay=0):
+                      timeout=None, response_delay=0, response_handler=None):
         sequence = iter(responses)
         async def handler(request):
+            if response_handler is not None:
+                return await response_handler(request)
             await asyncio.sleep(response_delay)
             return httpx.Response(200, json=next(sequence))
 
@@ -453,17 +457,45 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
 
     async def test_third_schema_request_keeps_the_original_deadline(self):
-        # Each request fits 900 ms alone; three requests cannot fit the shared 900 ms.
-        async with self.harness([chat_response("invalid")] * 2 + [chat_response()],
-                                timeout=0.9, response_delay=0.32) as (agent, logs):
-            with self.assertRaises(ModelCallError) as caught:
-                await chat_until_valid_json(agent, "review", Answer, '{}')
-            self.assertIsInstance(caught.exception.__cause__, ModelCallTimeout)
-            record, = self.read_records(logs)
-            self.assertEqual(record["status"], "failed")
-            self.assertEqual(record["attempts"][-1]["failure_stage"], "request")
-            self.assertEqual(len(record["attempts"]), 3)
-            self.assertLess(record["attempts"][-1]["remaining_seconds"], 0.32)
+        # Account for the first two requests without depending on SDK cold-start
+        # latency. The third request still receives a real asyncio cancellation.
+        clock = [100.0]
+        budgets = []
+        sends = []
+        cancelled = []
+        def budget_factory():
+            budget = ModelCallBudget(timeout_seconds=60, max_retries=3, started=clock[0])
+            budgets.append(budget)
+            return budget
+        async def handler(request):
+            sends.append(request)
+            if len(sends) <= 2:
+                clock[0] += 20 if len(sends) == 1 else 39.5
+                return httpx.Response(200, json=chat_response("invalid"))
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.append(len(sends))
+                raise
+            finally:
+                clock[0] = 160.001
+        budget_clock = SimpleNamespace(monotonic=lambda: clock[0], time=time.time)
+        with patch.object(model_budget, "time", budget_clock):
+            async with self.harness([], response_handler=handler) as (agent, logs):
+                with patch("loggers.call_log.ModelCallBudget", side_effect=budget_factory):
+                    with self.assertRaises(ModelCallError) as caught:
+                        await asyncio.wait_for(chat_until_valid_json(agent, "review", Answer, '{}'), timeout=5)
+                self.assertIsInstance(caught.exception.__cause__, ModelCallTimeout)
+                record, = self.read_records(logs)
+                self.assertEqual(len(budgets), 1)
+                self.assertEqual(budgets[0].deadline, 160)
+                self.assertEqual(budgets[0].sends, 3)
+                self.assertEqual(cancelled, [3])
+                self.assertEqual(len(sends), 3)
+                self.assertEqual(record["status"], "failed")
+                self.assertEqual(record["attempts"][-1]["failure_stage"], "request")
+                self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
+                self.assertAlmostEqual(record["attempts"][-1]["remaining_seconds"], 0.5)
 
     async def test_agent_schema_repairs_keep_one_call_and_only_final_usage_in_both_modes(self):
         for detailed in (False, True):

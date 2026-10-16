@@ -1,4 +1,4 @@
-"""Shared network deadline, slot acquisition, retries and attempt accounting."""
+"""Separate acquisition and execution budgets with shared retry accounting."""
 from __future__ import annotations
 
 import asyncio
@@ -51,7 +51,7 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
     """send(remaining) returns (parsed response, HTTP status); validate may repair its prompt.
 
     Validation failures and HTTP failures consume the same sends on the logical
-    call. Slot waiting and retry backoff cannot reset the operation deadline.
+    call. Acquisition pauses execution time; neither budget resets on retry.
     """
     logical = current_logical_call()
     budget = budget or (logical.budget if logical is not None else ModelCallBudget())
@@ -64,14 +64,14 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                 exc.call_path = str(logical.last_record.reference_path) if logical.last_record.reference_path else None
             raise exc
         record = new_call(component=caller, model=model, request=request, **(record_options or {}))
-        queue_started = time.monotonic()
+        wait_before = budget.waiting_total_seconds
         request_started = None
         request_finished = None
         backoff_seconds = 0.0
         stage = "semaphore_wait"
         try:
-            async with asyncio.timeout(budget.remaining()):
-                async with model_semaphore(model_type, caller, model, budget=budget) as lease:
+            async with model_semaphore(model_type, caller, model, budget=budget) as lease:
+                async with asyncio.timeout(budget.remaining()):
                     budget.reserve_send()
                     stage = "request"
                     request_started = time.monotonic()
@@ -88,20 +88,22 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                     payload = serialize(response) if serialize else response
                     record.succeeded(payload, http_status=status)
                     stage = "semaphore_release"
-                stage = "output_validation"
-                result = validate(response) if validate else response
-                budget.remaining()
-                return result
+            budget.remaining()
+            stage = "output_validation"
+            result = validate(response) if validate else response
+            budget.remaining()
+            return result
         except asyncio.CancelledError as exc:
             record.failed(exc, stage=stage)
             raise
         except Exception as exc:
             # Synchronous validation cannot receive the timer cancellation until
             # it yields. Its own error must not hide an already expired budget.
-            if isinstance(exc, TimeoutError) or (stage == "output_validation" and time.monotonic() >= budget.deadline):
-                expired = ModelCallTimeout(f"{model_type} operation exceeded its shared deadline during {stage}.")
-                expired.failure_stage = stage
-                exc = expired
+            if not isinstance(exc, ModelCallTimeout) and (
+                isinstance(exc, TimeoutError) or (stage == "output_validation" and budget.remaining_seconds <= 0)
+            ):
+                exc = budget.timeout_error(stage)
+            stage = getattr(exc, "failure_stage", stage)
             record.failed(exc, stage=stage)
             exc.call_id = record.reference_id
             exc.call_path = str(record.reference_path) if record.reference_path else None
@@ -116,21 +118,24 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                 async with asyncio.timeout(budget.remaining()):
                     await asyncio.sleep(delay)
             except TimeoutError as timeout:
-                error = ModelCallTimeout("Model operation expired during retry backoff.")
-                error.failure_stage = "retry_backoff"
+                error = budget.timeout_error("retry_backoff")
+                error.failure_stage = getattr(error, "failure_stage", "retry_backoff")
                 error.call_id = record.reference_id
                 error.call_path = str(record.reference_path) if record.reference_path else None
-                record.failed(error, stage="retry_backoff")
+                record.failed(error, stage=error.failure_stage)
                 raise error from timeout
             finally:
                 backoff_seconds = time.monotonic() - backoff_started
         finally:
             now = time.monotonic()
             record.payload["timing"] = {
-                "queue_wait_seconds": round((request_started or now) - queue_started, 6),
+                "queue_wait_seconds": round(budget.waiting_total_seconds - wait_before, 6),
                 "request_seconds": round((request_finished or now) - request_started, 6) if request_started else 0,
                 "backoff_seconds": round(backoff_seconds, 6),
                 "total_seconds": round(now - budget.started, 6),
-                "remaining_seconds": round(max(0, budget.deadline - now), 6),
+                "model_elapsed_seconds": round(budget.model_elapsed_seconds, 6),
+                "waiting_total_seconds": round(budget.waiting_total_seconds, 6),
+                "wait_remaining_seconds": round(budget.wait_remaining_seconds, 6),
+                "remaining_seconds": round(budget.remaining_seconds, 6),
             }
             record._write()

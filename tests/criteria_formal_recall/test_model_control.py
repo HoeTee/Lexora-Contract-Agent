@@ -13,43 +13,59 @@ import time
 import unittest
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import redis
 
-from endpoints.runtime import llm_semaphore
+from endpoints.runtime import llm_semaphore, model_budget
 from endpoints.runtime.llm_semaphore import ModelSemaphoreConfig, ModelSemaphoreLease, RedisModelSemaphore
-from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, task_execution
+from endpoints.runtime.model_budget import (
+    ModelCallBudget,
+    ModelCallTimeout,
+    ModelRetryLimitError,
+    ModelSemaphoreTimeout,
+    TaskDeadlineExceeded,
+    task_execution,
+)
 from endpoints.runtime.model_calls import execute_model
 from loggers.call_log import logical_call
 
 
-def _worker_requests(redis_url, prefix, http_url, result_queue):
+def _worker_requests(redis_url, prefix, http_url, result_queue, *, request_count=8,
+                     timeout_seconds=15, wait_timeout_seconds=180,
+                     model_limits=(("llm", 5), ("embedding", 3), ("reranker", 10)), request_path=None,
+                     start_barrier=None, report_timings=False):
     async def run():
         semaphores = {kind: RedisModelSemaphore(kind, ModelSemaphoreConfig(
             redis_url, f"{prefix}:{kind}", limit, 30, 0.005))
-            for kind, limit in (("llm", 5), ("embedding", 3), ("reranker", 10))}
+            for kind, limit in model_limits}
         try:
             with patch.dict(llm_semaphore._SEMAPHORES, semaphores):
                 async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
                     async def one(kind):
                         async def send(remaining):
-                            response = await client.post(f"{http_url}/{kind}", json={}, timeout=remaining)
+                            response = await client.post(f"{http_url}/{request_path or kind}", json={}, timeout=remaining)
                             response.raise_for_status()
                             return response.json(), response.status_code
                         with logical_call(f"test.{kind}", "local-test"):
-                            return await execute_model(model_type=kind, model="local-test", caller=f"test.{kind}",
-                                request={}, send=send, budget=ModelCallBudget(timeout_seconds=15, max_retries=0))
-                    await asyncio.gather(*(one(kind) for kind in semaphores for _ in range(8)))
+                            budget = ModelCallBudget(timeout_seconds=timeout_seconds,
+                                wait_timeout_seconds=wait_timeout_seconds, max_retries=0)
+                            await execute_model(model_type=kind, model="local-test", caller=f"test.{kind}",
+                                request={}, send=send, budget=budget)
+                            return {"wait_seconds": budget.wait_seconds, "sends": budget.sends}
+                    if start_barrier is not None:
+                        start_barrier.wait(timeout=10)
+                    results = await asyncio.gather(*(one(kind) for kind in semaphores for _ in range(request_count)))
+                    return results if report_timings else None
         finally:
             for semaphore in semaphores.values():
                 client = semaphore._clients.pop(asyncio.get_running_loop(), None)
                 if client:
                     await client.aclose()
     try:
-        asyncio.run(run())
-        result_queue.put(None)
+        result_queue.put(asyncio.run(run()))
     except BaseException as exc:
         result_queue.put(repr(exc))
 
@@ -83,6 +99,7 @@ class _HTTPFixture:
                     attempt = fixture.counts[kind]
                     fixture.active[kind] = fixture.active.get(kind, 0) + 1
                     fixture.peaks[kind] = max(fixture.peaks.get(kind, 0), fixture.active[kind])
+                active = True
                 try:
                     if kind == "trickle":
                         self.send_response(200)
@@ -93,9 +110,14 @@ class _HTTPFixture:
                             self.wfile.flush()
                             time.sleep(0.02)
                     else:
-                        time.sleep(0.1)
+                        time.sleep(0.8 if kind == "slow-model" else 0.1)
                         status = 429 if kind == "retry" and attempt == 1 else 200
                         body = json.dumps({"ok": True, "usage": {"prompt_tokens": 3, "completion_tokens": 2}}).encode()
+                        # End server work before the client can receive the
+                        # response and acquire the next slot on another thread.
+                        with fixture.lock:
+                            fixture.active[kind] -= 1
+                        active = False
                         self.send_response(status)
                         self.send_header("Content-Type", "application/json")
                         self.send_header("Content-Length", str(len(body)))
@@ -106,8 +128,9 @@ class _HTTPFixture:
                 except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                     fixture.disconnected.set()
                 finally:
-                    with fixture.lock:
-                        fixture.active[kind] -= 1
+                    if active:
+                        with fixture.lock:
+                            fixture.active[kind] -= 1
                     self.close_connection = True
 
             def log_message(self, *_):
@@ -128,11 +151,75 @@ class _HTTPFixture:
 
 
 class BudgetTests(unittest.TestCase):
+    def setUp(self):
+        self.clock = 100.0
+        clock = SimpleNamespace(monotonic=lambda: self.clock, time=lambda: self.clock + 900)
+        clock_patch = patch.object(model_budget, "time", clock)
+        clock_patch.start()
+        self.addCleanup(clock_patch.stop)
+
+    def test_waiting_pauses_only_model_budget_and_accumulates_across_attempts(self):
+        budget = ModelCallBudget(timeout_seconds=60, wait_timeout_seconds=180, started=self.clock)
+        self.clock += 10
+        with budget.waiting():
+            self.clock += 120
+            self.assertAlmostEqual(budget.remaining(), 50)
+            self.assertAlmostEqual(budget.waiting_remaining(), 60)
+        self.clock += 20
+        with budget.waiting():
+            self.clock += 40
+            self.assertAlmostEqual(budget.remaining(), 30)
+            self.assertAlmostEqual(budget.waiting_remaining(), 20)
+        self.assertAlmostEqual(budget.wait_seconds, 160)
+        self.assertAlmostEqual(budget.model_elapsed_seconds, 30)
+        self.assertAlmostEqual(budget.remaining(), 30)
+
+    def test_wait_budget_expires_without_consuming_model_or_send_allowance(self):
+        budget = ModelCallBudget(timeout_seconds=60, wait_timeout_seconds=180, started=self.clock)
+        with budget.waiting():
+            self.clock += 100
+        with self.assertRaises(ModelSemaphoreTimeout):
+            with budget.waiting():
+                self.clock += 81
+                budget.waiting_remaining()
+        self.assertEqual(budget.sends, 0)
+        self.assertAlmostEqual(budget.model_remaining_seconds, 60)
+
+    def test_retry_and_validation_work_do_not_reset_model_or_send_allowance(self):
+        budget = ModelCallBudget(timeout_seconds=60, wait_timeout_seconds=180, max_retries=1, started=self.clock)
+        budget.reserve_send()
+        self.clock += 20
+        with budget.waiting():
+            self.clock += 100
+        self.clock += 15  # Synchronous schema repair between execute_model calls.
+        budget.reserve_send()
+        self.assertEqual(budget.sends, 2)
+        self.assertAlmostEqual(budget.remaining(), 25)
+        self.assertFalse(budget.can_retry)
+        with self.assertRaises(ModelRetryLimitError):
+            budget.reserve_send()
+        self.clock += 26
+        with self.assertRaises(ModelCallTimeout):
+            budget.remaining()
+
+    def test_task_deadline_caps_waiting_without_extending_it_when_wait_ends(self):
+        with task_execution(self.clock + 900 + 10):
+            budget = ModelCallBudget(timeout_seconds=60, wait_timeout_seconds=180, started=self.clock)
+            with budget.waiting():
+                self.clock += 5
+                self.assertAlmostEqual(budget.remaining(), 5)
+                self.assertAlmostEqual(budget.waiting_remaining(), 5)
+            self.clock += 6
+            with self.assertRaises(TaskDeadlineExceeded):
+                budget.waiting_remaining()
+            with self.assertRaises(TaskDeadlineExceeded):
+                budget.remaining()
+
     def test_task_deadline_caps_new_call_and_restores_environment(self):
         before = os.getenv("CONTRACT_TASK_DEADLINE")
-        with task_execution(time.time() + 0.1, task_id="budget-test"):
-            budget = ModelCallBudget(timeout_seconds=60)
-            self.assertLessEqual(budget.remaining(), 0.1)
+        with task_execution(self.clock + 900 + 0.1, task_id="budget-test"):
+            budget = ModelCallBudget(timeout_seconds=60, started=self.clock)
+            self.assertAlmostEqual(budget.remaining(), 0.1)
             self.assertEqual(os.getenv("CONTRACT_TASK_ID"), "budget-test")
         self.assertEqual(os.getenv("CONTRACT_TASK_DEADLINE"), before)
 
@@ -316,21 +403,181 @@ class ModelControlIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.redis.zcard(self.semaphore.config.key + ":waiting"), 0)
         self.assertEqual(self.redis.zcard(self.semaphore.config.key + ":deadlines"), 0)
 
-    async def test_waiting_uses_call_budget_and_does_not_remove_other_owner(self):
+    async def _wait_for_waiters(self, count):
+        async with asyncio.timeout(3):
+            while self.redis.zcard(self.semaphore.config.key + ":waiting") != count:
+                await asyncio.sleep(0.005)
+
+    async def test_waiting_uses_separate_budget_and_does_not_remove_other_owner(self):
         owner = await self.semaphore.acquire_async(caller_name="owner", model="test", budget=ModelCallBudget())
         sends = []
         async def send(remaining):
             sends.append(remaining)
             return {}, 200
         started = time.monotonic()
-        with self.assertRaises(ModelCallTimeout):
+        budget = ModelCallBudget(timeout_seconds=5, wait_timeout_seconds=0.3)
+        with self.assertRaises(ModelSemaphoreTimeout) as caught:
             await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
-                                budget=ModelCallBudget(timeout_seconds=0.3))
+                                budget=budget)
         self.assertLess(time.monotonic() - started, 1.5)
+        self.assertEqual(caught.exception.failure_stage, "semaphore_wait")
         self.assertEqual(sends, [])
+        self.assertEqual(budget.sends, 0)
         self.assertEqual(self.redis.zcard(self.semaphore.config.key), 1)
+        self.assertIsNotNone(self.redis.zscore(self.semaphore.config.key, owner.member))
         self._assert_no_waiters()
         await self.semaphore.release_async(owner)
+
+    async def test_wait_longer_than_model_budget_then_complete_real_http_request(self):
+        owner = await self.semaphore.acquire_async(caller_name="owner", model="test", budget=ModelCallBudget())
+        request_budgets = []
+        async def send(remaining):
+            request_budgets.append(remaining)
+            return await self._send("/llm", remaining)
+        budget = ModelCallBudget(timeout_seconds=0.5, wait_timeout_seconds=2, max_retries=0)
+        with logical_call("test.llm", "test") as logical:
+            operation = asyncio.create_task(execute_model(model_type="llm", model="test", caller="test",
+                request={}, send=send, budget=budget))
+            try:
+                await self._wait_for_waiters(1)
+                await asyncio.sleep(0.65)
+                self.assertFalse(operation.done(), "Waiting must outlive the shorter model budget")
+                await self.semaphore.release_async(owner)
+                result = await operation
+            finally:
+                if not operation.done():
+                    operation.cancel()
+                    await asyncio.gather(operation, return_exceptions=True)
+                await self.semaphore.release_async(owner)
+        self.assertTrue(result["ok"])
+        self.assertEqual(logical.sent_count, 1)
+        self.assertGreater(request_budgets[0], 0.35)
+        timing = logical.payload["attempts"][0]["timing"]
+        self.assertGreaterEqual(timing["queue_wait_seconds"], 0.65)
+        self.assertGreaterEqual(timing["request_seconds"], 0.1)
+        self.assertGreater(timing["total_seconds"], budget.timeout_seconds)
+        self.assertLess(timing["model_elapsed_seconds"], budget.timeout_seconds)
+        self.assertAlmostEqual(timing["waiting_total_seconds"], timing["queue_wait_seconds"], places=5)
+        self.assertAlmostEqual(timing["total_seconds"],
+            timing["waiting_total_seconds"] + timing["model_elapsed_seconds"], delta=0.005)
+        self.assertEqual(self.redis.zcard(self.semaphore.config.key), 0)
+        self._assert_no_waiters()
+
+    async def test_schema_and_network_retries_share_cumulative_wait_allowance(self):
+        for retry_kind in ("schema", "network"):
+            with self.subTest(retry_kind=retry_kind):
+                owner = await self.semaphore.acquire_async(caller_name="first-owner", model="test", budget=ModelCallBudget())
+                original_release = self.semaphore.release_async
+                blockers = []
+                sends = []
+                async def replace_owner(lease, *, original_release=original_release, owner=owner, blockers=blockers):
+                    await original_release(lease)
+                    if lease.member != owner.member and not blockers:
+                        blockers.append(await self.semaphore.acquire_async(caller_name="second-owner", model="test",
+                            budget=ModelCallBudget()))
+                async def send(_, *, sends=sends, retry_kind=retry_kind):
+                    sends.append(True)
+                    if retry_kind == "network":
+                        response = httpx.Response(429, headers={"Retry-After": "0"},
+                            request=httpx.Request("POST", self.http.url))
+                        response.raise_for_status()
+                    return {}, 200
+                def validate(_):
+                    raise ValueError("repair schema")
+                budget = ModelCallBudget(timeout_seconds=5, wait_timeout_seconds=2, max_retries=3)
+                with logical_call("test.llm", "test") as logical:
+                    with patch.object(self.semaphore, "release_async", replace_owner):
+                        operation = asyncio.create_task(execute_model(model_type="llm", model="test", caller="test",
+                            request={}, send=send, validate=validate if retry_kind == "schema" else None, budget=budget))
+                        try:
+                            await self._wait_for_waiters(1)
+                            await asyncio.sleep(0.9)
+                            await original_release(owner)
+                            with self.assertRaises(ModelSemaphoreTimeout):
+                                await operation
+                        finally:
+                            if not operation.done():
+                                operation.cancel()
+                                await asyncio.gather(operation, return_exceptions=True)
+                            await original_release(owner)
+                    self.assertEqual(logical.sent_count, 1)
+                    self.assertEqual(len(logical.payload["attempts"]), 2)
+                    self.assertFalse(logical.payload["attempts"][1]["sent"])
+                    self.assertLess(logical.payload["attempts"][1]["timing"]["queue_wait_seconds"], 1.5,
+                        "The second attempt only has the first attempt's unused wait allowance")
+                self.assertEqual(len(sends), 1)
+                self.assertGreater(budget.wait_seconds, 1.8)
+                self.assertEqual(len(blockers), 1)
+                self.assertIsNotNone(self.redis.zscore(self.semaphore.config.key, blockers[0].member))
+                self._assert_no_waiters()
+                await original_release(blockers[0])
+
+    async def test_task_deadline_stops_wait_before_wait_allowance_expires(self):
+        owner = await self.semaphore.acquire_async(caller_name="owner", model="test", budget=ModelCallBudget())
+        send = AsyncMock()
+        try:
+            with task_execution(time.time() + 0.25):
+                budget = ModelCallBudget(timeout_seconds=5, wait_timeout_seconds=5)
+                with self.assertRaises(TaskDeadlineExceeded) as caught:
+                    await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                        budget=budget)
+            self.assertEqual(caught.exception.failure_stage, "task_deadline")
+            self.assertEqual(budget.sends, 0)
+            send.assert_not_awaited()
+            self.assertIsNotNone(self.redis.zscore(self.semaphore.config.key, owner.member))
+            self._assert_no_waiters()
+        finally:
+            await self.semaphore.release_async(owner)
+
+    async def test_task_deadline_still_stops_request_after_waiting(self):
+        owner = await self.semaphore.acquire_async(caller_name="owner", model="test", budget=ModelCallBudget())
+        request_started = asyncio.Event()
+        request_cancelled = asyncio.Event()
+        async def send(_):
+            request_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                request_cancelled.set()
+        with task_execution(time.time() + 0.7):
+            budget = ModelCallBudget(timeout_seconds=5, wait_timeout_seconds=5)
+            operation = asyncio.create_task(execute_model(model_type="llm", model="test", caller="test",
+                request={}, send=send, budget=budget))
+            try:
+                await self._wait_for_waiters(1)
+                await asyncio.sleep(0.3)
+                await self.semaphore.release_async(owner)
+                with self.assertRaises(TaskDeadlineExceeded) as caught:
+                    await operation
+            finally:
+                if not operation.done():
+                    operation.cancel()
+                    await asyncio.gather(operation, return_exceptions=True)
+                await self.semaphore.release_async(owner)
+        self.assertEqual(caught.exception.failure_stage, "task_deadline")
+        self.assertTrue(request_started.is_set())
+        self.assertTrue(request_cancelled.is_set())
+        self.assertEqual(self.redis.zcard(self.semaphore.config.key), 0)
+        self._assert_no_waiters()
+
+    async def test_request_timeout_releases_only_its_own_slot(self):
+        original = self.semaphore.config
+        self.semaphore.config = ModelSemaphoreConfig(original.redis_url, original.key, 2,
+            original.lease_seconds, original.poll_interval_seconds)
+        owner = await self.semaphore.acquire_async(caller_name="other-contract", model="test", budget=ModelCallBudget())
+        async def send(_):
+            self.assertEqual(self.redis.zcard(self.semaphore.config.key), 2)
+            await asyncio.Event().wait()
+        try:
+            with self.assertRaises(ModelCallTimeout) as caught:
+                await execute_model(model_type="llm", model="test", caller="timed-out-contract", request={}, send=send,
+                    budget=ModelCallBudget(timeout_seconds=0.2, wait_timeout_seconds=2, max_retries=0))
+            self.assertEqual(caught.exception.failure_stage, "request")
+            self.assertEqual(self.redis.zcard(self.semaphore.config.key), 1)
+            self.assertIsNotNone(self.redis.zscore(self.semaphore.config.key, owner.member))
+            self._assert_no_waiters()
+        finally:
+            await self.semaphore.release_async(owner)
 
     async def test_fifo_and_cancelled_waiter_cleanup(self):
         owner = await self.semaphore.acquire_async(caller_name="owner", model="test", budget=ModelCallBudget())
@@ -482,6 +729,41 @@ class ModelControlIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 if process.is_alive():
                     process.terminate()
                     process.join(5)
+            result_queue.close()
+
+    async def test_three_processes_queue_fifteen_requests_with_full_model_budget(self):
+        context = multiprocessing.get_context("spawn")
+        result_queue = context.Queue()
+        start_barrier = context.Barrier(3)
+        processes = [context.Process(target=_worker_requests,
+            args=(self.redis_url, self.prefix, self.http.url, result_queue), kwargs={
+                "request_count": 5, "timeout_seconds": 1.2, "wait_timeout_seconds": 6,
+                "model_limits": (("llm", 5),), "request_path": "slow-model", "start_barrier": start_barrier,
+                "report_timings": True,
+            }) for _ in range(3)]
+        for process in processes:
+            process.start()
+        try:
+            for process in processes:
+                await asyncio.to_thread(process.join, 20)
+                self.assertFalse(process.is_alive(), "Queued model test worker did not finish")
+                self.assertEqual(process.exitcode, 0)
+            results = [result_queue.get(timeout=2) for _ in processes]
+            self.assertTrue(all(isinstance(result, list) for result in results), results)
+            calls = [call for result in results for call in result]
+            self.assertEqual(len(calls), 15)
+            self.assertTrue(all(call["sends"] == 1 for call in calls))
+            self.assertGreater(max(call["wait_seconds"] for call in calls), 1.2,
+                "At least one successful call must queue longer than its execution budget")
+            self.assertEqual(self.http.counts["slow-model"], 15)
+            self.assertEqual(self.http.peaks["slow-model"], 5)
+            self.assertEqual(self.redis.zcard(self.semaphore.config.key), 0)
+            self._assert_no_waiters()
+        finally:
+            for process in processes:
+                if process.is_alive():
+                    process.terminate()
+                    await asyncio.to_thread(process.join, 5)
             result_queue.close()
 
 

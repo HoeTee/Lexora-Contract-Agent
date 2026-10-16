@@ -72,7 +72,7 @@ docker exec -it lexora bash
 
 ## 配置与数据
 
-模型密钥放在 `.env`；模型、workflow、API、检索、队列和日志配置放在 `config.yaml`。配置加载入口是 `config.py`。各配置作用范围、默认值和旧字段迁移见 [并发与超时配置说明](docs/CONCURRENCY_TIMEOUT_CONFIGURATION.md)。模型限流固定启用，单次操作共享等待、请求和修复的 60 秒预算，默认最多发送 3 次；失败要点默认最多执行 2 次（含首次），成功结果复用，整合同仍受 Celery 硬时限约束。
+模型密钥放在 `.env`；模型、workflow、API、检索、队列和日志配置放在 `config.yaml`。配置加载入口是 `config.py`。各配置作用范围、默认值和旧字段迁移见 [并发与超时配置说明](docs/CONCURRENCY_TIMEOUT_CONFIGURATION.md)。模型限流固定启用，每次逻辑操作分别累计等待名额的 180 秒预算和请求、校验、退避及修复的 60 秒执行预算，排队不消耗执行预算；重试不重置两份预算，默认最多发送 3 次。失败要点默认最多执行 2 次（含首次），成功结果复用，整合同仍受 Celery 硬时限约束。
 
 合同检索保留 DocxIndex 和 LlamaIndex 两种临时索引后端，通过 `retrieval.backend` 选择。
 

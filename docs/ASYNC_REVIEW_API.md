@@ -31,7 +31,7 @@ POST /api/review/jobs/result
 
 Web 和 API 固定将审查任务投递到 Redis DB 0 的 Celery 队列，由三个独立 worker 执行；每个 worker 同时执行一份合同。不存在 `queue.enabled` 或进程内审查回退分支，OA 入口已移除。状态查询仍然读取共享数据目录中的 `task.json`，外部 API 路径、鉴权方式和请求体不变。API 进程不直接承载 workflow、MCP、LLM 调用和 DOCX 生成。
 
-worker 内的模型请求统一经过 Redis DB 2 限流。`workflow.model_call_timeout_seconds` 同时覆盖名额等待、HTTP、退避和同一次调用的输出修复；重试共用原截止时间。`queue.queued_timeout_seconds` 默认 7200 秒，只控制排队等待；`queue.task_time_limit_seconds` 默认 1800 秒，控制 worker 执行整份合同的最长时间。硬超时后任务记录为失败，不自动重新提交；不配置软时限。各项配置及迁移说明见 [并发与超时配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
+worker 内的模型请求统一经过 Redis DB 2 限流。`workflow.model_wait_timeout_seconds` 默认 180 秒，限制同一逻辑调用累计等待模型名额的时间；`workflow.model_call_timeout_seconds` 默认 60 秒，限制排除名额等待后的 HTTP、校验、退避和输出修复时间。重试共用两份剩余预算及发送次数。`queue.queued_timeout_seconds` 默认 7200 秒，只控制等待 worker 接手；`queue.task_time_limit_seconds` 默认 1800 秒，控制 worker 执行整份合同的最长时间，包含执行中的模型等待。整任务到期优先于两份模型预算，硬超时后任务记录为失败，不自动重新提交；不配置软时限。各项配置及迁移说明见 [并发与超时配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
 Celery task、Redis broker 和 worker 的部署边界见 [部署说明](DEPLOYMENT.md)，workflow 内部并发与恢复边界见 [智能体与工作流架构](AGENT_WORKFLOW_ARCHITECTURE.md)。
 

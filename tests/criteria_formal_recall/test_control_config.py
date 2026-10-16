@@ -10,6 +10,33 @@ import config
 
 
 class ControlConfigurationTests(unittest.TestCase):
+    def test_model_wait_budget_defaults_to_180_and_is_reported_independently(self):
+        for value in (None, 25.5, 3600):
+            raw = deepcopy(config.CONFIG)
+            if value is None:
+                raw["workflow"].pop("model_wait_timeout_seconds", None)
+            else:
+                raw["workflow"]["model_wait_timeout_seconds"] = value
+            with self.subTest(value=value), patch("yaml.safe_load", return_value=raw), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                loaded = runpy.run_path(config.__file__)
+                expected = 180 if value is None else value
+                self.assertEqual(loaded["MODEL_WAIT_TIMEOUT_SECONDS"], expected)
+                summary = loaded["control_configuration_summary"]()
+                self.assertEqual(summary["workflow"]["model_wait_timeout_seconds"], expected)
+                self.assertEqual(loaded["MODEL_CALL_TIMEOUT_SECONDS"], config.MODEL_CALL_TIMEOUT_SECONDS)
+                self.assertEqual(summary["model_semaphore"]["llm"]["lease_seconds"],
+                    config.MODEL_SEMAPHORE_CONFIGS["llm"]["lease_seconds"])
+
+    def test_model_wait_budget_requires_a_positive_finite_number(self):
+        for value in (0, -1, float("nan"), float("inf"), True):
+            raw = deepcopy(config.CONFIG)
+            raw["workflow"]["model_wait_timeout_seconds"] = value
+            with self.subTest(value=value), patch("yaml.safe_load", return_value=raw), \
+                    redirect_stdout(StringIO()), redirect_stderr(StringIO()):
+                with self.assertRaisesRegex(RuntimeError, "workflow.model_wait_timeout_seconds"):
+                    runpy.run_path(config.__file__)
+
     def test_removed_fields_are_rejected_with_a_migration_message(self):
         for section, field in (("workflow", "max_api_concurrent_reviews"),
                                ("queue", "enabled"), ("queue", "task_soft_time_limit_seconds"),

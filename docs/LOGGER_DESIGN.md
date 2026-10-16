@@ -79,6 +79,8 @@ logging:
 
 普通日志和详细日志都保留 `attempts` 的基础信息：`sent/send_number`、HTTP 状态、模型类型、信号量 key、预算、剩余时间、失败阶段、重试原因和等待/请求/退避/总耗时。只有详细模式记录完整请求和响应正文。
 
+`timing.model_elapsed_seconds` 表示排除模型名额等待后的累计执行耗时；`timing.waiting_total_seconds`、`timing.wait_remaining_seconds` 表示累计等待耗时及剩余等待预算。`timing.total_seconds` 仍包含等待，允许超过 60 秒。等待超时记录为 `semaphore_wait`，整任务到期记录为 `task_deadline`，与请求和校验阶段的超时分开。
+
 失败 error 仅含 type、http_status、message（最多 200 字符）。本地请求超时而未收到响应时 http_status=null；服务返回 HTTP 错误时记录实际状态；收到 HTTP 成功响应但校验失败仍记为逻辑失败。成功 HTTP 状态也从实际响应读取，无法取得时不默认填写 200。
 
 类别为：
@@ -116,7 +118,7 @@ result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的�
 
 索引参数、路由方法描述和备用 llamaindex 参数有代码默认值，允许可选覆盖。示例配置显式列出 rerank provider 名单、subagent 工具名单和 worker 禁止预取项，便于核对实际部署。模型名称及地址保留各部署自己的值；BGE embedding 和 reranker 的地址与 payload 约束见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md#61-bge-embedding-和-reranker-怎么配置)。
 
-`model_semaphore.llm/embedding/reranker` 各自配置 `max_concurrent_requests`、`redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`。`enabled`、`wait_timeout_seconds` 和旧共享 `limits` 格式已移除，保留旧字段会在启动时明确报迁移错误。等待名额、HTTP、退避和同一结果的修复共同消耗 `workflow.model_call_timeout_seconds`，额外发送共同消耗 `workflow.model_call_max_retries`。请求结束主动释放名额；退出清理最多 2 秒，worker 强制终止或 Redis 不可用时依靠租约回收。完整配置和任务硬时限见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
+`model_semaphore.llm/embedding/reranker` 各自配置 `max_concurrent_requests`、`redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`。逐类型 `enabled`、`wait_timeout_seconds` 和旧共享 `limits` 格式已移除，保留旧字段会在启动时明确报迁移错误。等待名额消耗 `workflow.model_wait_timeout_seconds`（默认 180 秒），暂停 `workflow.model_call_timeout_seconds`（默认 60 秒）的执行计时；HTTP、校验、退避和同一结果的修复继续消耗执行预算。重试共用两份剩余预算，额外发送共同消耗 `workflow.model_call_max_retries`。lease 在取得名额时开始，请求结束主动释放；退出清理最多 2 秒，worker 强制终止或 Redis 不可用时依靠租约回收。完整配置和任务硬时限见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
 恢复契约版本为 6；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。新写入的 criterion output 删除 tokens；工作流内存结果和返回值中的 token_stats 保留兼容，不用于准确模型 usage 统计。准确用量读取 logical_calls。旧任务文件不改名、不补写字段；旧 Reflector 日志缺少要点归属，不能可靠补回 H 编号。
 

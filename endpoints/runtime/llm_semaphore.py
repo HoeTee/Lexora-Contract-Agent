@@ -1,4 +1,4 @@
-"""Cross-process FIFO model slots. Waiting consumes the caller's deadline."""
+"""Cross-process FIFO slots with a separate cumulative acquisition budget."""
 from __future__ import annotations
 
 import asyncio
@@ -12,11 +12,7 @@ from redis import asyncio as redis_asyncio
 from redis.exceptions import RedisError
 
 from config import MODEL_SEMAPHORE_CONFIGS
-from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, run_sync
-
-
-class ModelSemaphoreTimeout(ModelCallTimeout):
-    pass
+from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, ModelSemaphoreTimeout, run_sync
 
 
 LLMGlobalSemaphoreTimeout = ModelSemaphoreTimeout
@@ -125,33 +121,39 @@ class RedisModelSemaphore:
         key = self.config.key
         keys = [key, key + ':waiting', key + ':deadlines', key + ':sequence', key + ':policy']
         try:
-            async with asyncio.timeout(budget.remaining()):
-                while True:
-                    remaining = budget.remaining()
-                    now_ms = int(time.time() * 1000)
-                    result = await client.eval(
-                        self._ACQUIRE_SCRIPT, len(keys), *keys, now_ms,
-                        now_ms + int(self.config.lease_seconds * 1000),
-                        self.config.max_concurrent_requests, member,
-                        int(self.config.lease_seconds) + 60,
-                        f"{self.config.max_concurrent_requests}:{self.config.lease_seconds}",
-                        now_ms + int(remaining * 1000),
-                    )
-                    if result == -1:
-                        raise RuntimeError(f"Inconsistent model semaphore policy for {key}; drain old workers and use identical settings.")
-                    if result == 1:
-                        budget.remaining()
-                        return ModelSemaphoreLease(self.model_type, key, member, time.monotonic()-start,
-                                                   self.config.max_concurrent_requests)
-                    await asyncio.sleep(min(self.config.poll_interval_seconds, budget.remaining()))
-        except BaseException as exc:
+            with budget.waiting():
+                try:
+                    async with asyncio.timeout(budget.waiting_remaining()):
+                        while True:
+                            remaining = budget.waiting_remaining()
+                            now_ms = int(time.time() * 1000)
+                            result = await client.eval(
+                                self._ACQUIRE_SCRIPT, len(keys), *keys, now_ms,
+                                now_ms + int(self.config.lease_seconds * 1000),
+                                self.config.max_concurrent_requests, member,
+                                int(self.config.lease_seconds) + 60,
+                                f"{self.config.max_concurrent_requests}:{self.config.lease_seconds}",
+                                now_ms + int(remaining * 1000),
+                            )
+                            if result == -1:
+                                raise RuntimeError(f"Inconsistent model semaphore policy for {key}; drain old workers and use identical settings.")
+                            if result == 1:
+                                budget.waiting_remaining()
+                                return ModelSemaphoreLease(self.model_type, key, member, time.monotonic()-start,
+                                                           self.config.max_concurrent_requests)
+                            await asyncio.sleep(min(self.config.poll_interval_seconds, budget.waiting_remaining()))
+                except TimeoutError as exc:
+                    if isinstance(exc, ModelCallTimeout):
+                        raise
+                    # Distinguish task expiry from an acquisition timer firing.
+                    budget.waiting_remaining()
+                    raise ModelSemaphoreTimeout(f"Slot-wait budget expired for {self.model_type} capacity.") from exc
+        except BaseException:
             # Also remove a slot if cancellation raced with a successful EVAL.
             try:
                 await _finish_cleanup(self._remove(member, include_owner=True))
             except (RedisError, TimeoutError):
                 logging.getLogger(__name__).exception("Redis slot cleanup failed; lease will reclaim %s", member)
-            if isinstance(exc, TimeoutError):
-                raise ModelSemaphoreTimeout(f"Model budget expired waiting for {self.model_type} capacity.") from exc
             raise
 
     async def _remove(self, member: str, *, include_owner: bool):
