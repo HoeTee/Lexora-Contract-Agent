@@ -111,13 +111,34 @@ DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存
 
 一个 scan 批次的一次判断是一次模型操作；不同独立批次分别计时。Agent 正常进入下一步、工具结果续写或业务反思时产生新的操作。同一结果的 JSON/结构修复继续使用原操作预算。正常业务步骤不等于网络重试，失败后也不能通过重跑整个要点来重置预算。
 
+各入口的边界如下。同一行中的所有请求仍使用同一类 Redis 全局名额；“独立操作”只表示有自己的截止时间和发送次数，不增加并发上限。
+
+| 调用入口 | 一次操作覆盖什么 | 何时建立下一次操作 |
+| --- | --- | --- |
+| Agent 的模型生成 | 一次回答及该回答的传输重试、JSON/schema 修复 | 下一个正常生成步骤、工具结果续写或业务反思 |
+| DocxIndex LLM | 一次路由、扫描、结构判断或层级批次判断及其输出修复 | 下一个独立批次或判断 |
+| DocxIndex 摘要 | 同一摘要结果的生成、校验及压缩修复 | 不同节点或不同摘要批次 |
+| DocxIndex embedding | 一次实际输入批次及其传输/输出重试 | 下一个 embedding 批次 |
+| DocxIndex 独立 reranker | 一次候选批次重排及其传输/输出重试 | 下一候选批次或下一轮合并重排 |
+| LlamaIndex LLM、embedding、reranker | 每次适配器请求及其传输/输出重试 | 下一次独立适配器请求 |
+
+还有一类业务修订：模型回答已经通过 JSON/schema 校验，但确定性的证据、锚点、覆盖范围或路由检查发现结论不符合要求时，Orchestrator 会把具体反馈交给 SubAgent 生成新的完整结论。每次检查最多触发 2 次新结论修订，由内部 `max_revisions=2` 控制。这两次是正常业务操作，各自建立模型预算；不是网络或 schema 修复次数。初次结论和每次业务反思后的结论都可以进入这项检查，因此整个要点不只允许两次业务修订。网络、schema 或确定性检查最终失败后，不自动重跑整个要点。
+
+**60 秒限制一次模型操作，不是整个要点的总时长。**一个要点可以经历检索、初次结论、上述业务修订和反思等多个操作；全部要点和操作仍受合同任务的 1800 秒硬时限约束。
+
+批量摘要已经成功且通过结构校验时，未获得有效摘要的其他节点可以分别生成；这属于不同节点的工作。批量请求因网络、模型时限、Redis、无效 JSON 或修复次数耗尽而失败时，错误向上报告，不能通过改为逐节点生成来重新获得预算。
+
+同一节点的摘要过长时，压缩修复在原操作内进行。若输出修复次数耗尽，但已经收到过结构合法的过长摘要，可以直接截断该已收到的文本；不再发送请求。网络、时限或 Redis 错误不使用截断结果掩盖失败。
+
 可重试连接错误、408/409/429、可重试服务错误和输出校验错误，在剩余时间及次数允许时重试。明确的参数错误等直接结束。`Retry-After` 等待也在预算内。
 
 可选的层级增强若耗尽输出校验修复次数，保留原有确定性分块/标题回退，不再发送请求；网络、时间和 Redis 错误继续向上报告。
 
 SDK 自带重试关闭。DocxIndex 和保留的 LlamaIndex 网络调用全部接入公共模块。同步调用通过常驻异步网络线程等待实际可取消的协程，不使用无法停止同步 HTTP 的 `to_thread` 包装来冒充超时控制。批处理仍有内部有界调度，但没有第二套用户配置的模型请求限额。
 
-截止后不再发送模型请求。释放 Redis 名额的退出清理单独最多等待 2 秒；清理失败依靠租约回收，不获得新的模型执行时间。
+截止后不再发送模型请求。本地 HTTP 协程先退出或完成取消，再释放自己的 Redis 名额。退出清理单独最多等待 2 秒；取消发生在清理期间时，也等待这次有界清理结束后再向上传递取消，避免任务事件循环关闭时遗留清理协程。清理失败依靠租约回收，不获得新的模型执行时间。
+
+正在传播的超时或取消不会被随后的 Redis 清理错误覆盖，清理故障另行记录。若模型已经正常返回，但释放 Redis 失败，则报告释放故障，不再次发送模型请求。
 
 LlamaIndex 当前业务不使用流式请求。其流式入口明确报不支持，防止继承方法绕过控制。
 
@@ -173,6 +194,84 @@ DocxIndex 原先使用 LLM 输出排序，并在每个批次创建临时信号�
 
 此项改变排序方式，需要在内网验证效果。网络和协议测试通过不代表真实审查质量已经验证。
 
+### 6.1 BGE embedding 和 reranker 怎么配置
+
+两者是不同接口，不能用模型名称相似来判断协议兼容。
+
+| 配置 | 地址和模型名的含义 | 实际发送 |
+| --- | --- | --- |
+| `embedding.base_url`、`embedding.name` | `base_url` 是 OpenAI 兼容 API 的根前缀，例如 `http://模型服务/v1`；`name` 填该服务实际部署的模型标识 | SDK 向根前缀下的 `/embeddings` 发送 `model`、`input` 等字段 |
+| `rerank.base_url`、`rerank.name` | `base_url` 是完整重排地址，代码直接 POST，不自动补 `/rerank`；`name` 用于查找协议映射 | 按映射的 provider 构造下面的 payload |
+
+BGE embedding 不需要加入 rerank 的 provider 名单。项目不按 embedding 名称选择厂商，配置中的任意模型标识会传给 OpenAI 兼容 embeddings 接口；服务必须接受该标识并返回兼容的 `data[].embedding/index` 结构。仅提供其他厂商私有向量接口时，当前适配器不能直接使用。公司内网的实际模型名称及地址应以部署值为准。
+
+用户已确认两套环境的模型名称如下。该表记录部署选择，不代表两个环境的实际服务都已完成调用验证。
+
+| 环境 | LLM | embedding | reranker |
+| --- | --- | --- | --- |
+| 公司内网生产 | `qwen3.6-35b-a3b` | `bge-m3` | `bge-reranker-v2-m3` |
+| 测试 | `qwen3.6-35b-a3b` | `qwen3-embedding` | `qwen3-reranker` |
+
+生产切换片段如下；地址是占位符，必须替换为实际环境地址，其他模型、控制及检索配置保留。若原配置还使用其他重排模型，将这里的 `bge` 项合并到已有 provider 名单。
+
+```yaml
+llm:
+  name: qwen3.6-35b-a3b
+embedding:
+  base_url: "<内网 embedding API 根前缀>"
+  name: bge-m3
+rerank:
+  base_url: "<内网完整重排 URL>"
+  name: bge-reranker-v2-m3
+  provider_model_names:
+    bge:
+      - bge-reranker-v2-m3
+```
+
+此片段说明内网切换方式，不表示本地现有模型地址已经切换或内网接口已完成实测。BGE 服务是否满足上面的接口契约，需要用实际部署地址验证。
+
+测试环境的名称片段如下。embedding 地址仍是 OpenAI 兼容根前缀；reranker 地址仍是完整重排地址。当前为 `qwen3-reranker` 增加 Higress 协议别名，发送扁平的 `model/query/documents/top_n`。实际测试网关若要求嵌套的 `input/parameters`，应将该别名移到 `dashscope_qwen`，不能同时放入两个列表。名称只选择本地适配，不证明真实网关接受对应 payload。
+
+```yaml
+llm:
+  name: qwen3.6-35b-a3b
+embedding:
+  base_url: "<测试 embedding API 根前缀>"
+  name: qwen3-embedding
+rerank:
+  base_url: "<测试完整重排 URL>"
+  name: qwen3-reranker
+  provider_model_names:
+    higress_qwen:
+      - Qwen3-Reranker-8B
+      - qwen3-reranker
+```
+
+尚未获得测试网的实际地址，此处验证范围是请求协议兼容，不能称为已连通该测试服务。
+
+`rerank.provider_model_names` 显式列出模型名和请求协议。匹配不区分大小写，模型名必须唯一归属一个 provider；未知名称明确报错，不依据 `bge` 等子串猜测协议。默认映射如下，内网使用别名时，将实际别名加入对应列表，并把 `rerank.name` 设置为同一别名：
+
+```yaml
+rerank:
+  provider_model_names:
+    higress_qwen:
+      - Qwen3-Reranker-8B
+      - qwen3-reranker
+    bge:
+      - bge-reranker-v2-m3
+    dashscope_qwen:
+      - qwen3-rerank
+      - gte-rerank-v2
+```
+
+| provider | 请求 JSON 结构 | 说明 |
+| --- | --- | --- |
+| `bge` | `query`、`documents`、`top_n` | 不发送 `model` 或 `instruct`；完整 URL 必须指向已选择模型的 BGE 服务 |
+| `higress_qwen` | `model`、`query`、`documents`、`top_n`，以及配置的非空 `instruct` | 模型标识随请求发送 |
+| `dashscope_qwen` | `model`、`input: {query, documents}`、`parameters: {return_documents: false, top_n}`，以及配置的非空 `instruct` | 使用该接口的嵌套结构 |
+
+配置模型名称不会转换服务端协议。若公司网关的 BGE 重排要求其他字段，应先确认它的实际接口契约，再增加适配，不能直接认定兼容。三个 provider 都经过同一 `reranker` 并发和模型预算控制。
+
 ## 7. 移除配置清单及不变配置
 
 必须删除以下旧字段，不能靠保留旧值继续启动：
@@ -225,6 +324,7 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 | worker 心跳间隔 | 10 秒 | 状态更新频率，不是任务执行时限 |
 | 任务文件锁等待/检查间隔 | 30 秒 / 0.05 秒 | 共享任务文件写入；锁由 OS 持有，无旧版 300 秒陈旧锁等待 |
 | 截止状态核对余量 | 5 秒 | 父回调缺失时的状态兜底，加上 watchdog 周期发现 |
+| 确定性业务检查的 `max_revisions` | 每次检查最多 2 次新结论修订 | 证据、锚点、覆盖或路由反馈；前次回答须先通过 schema。初始及每次反思后可分别触发，不是网络/schema 重试，也不是整要点重跑 |
 
 ## 9. 控制配置完整片段
 
@@ -302,7 +402,7 @@ CLI 等待到期不会取消服务端合同，也不会改变 Celery 时限；�
 
 ## 12. 验证及边界
 
-本次在本地测试服务和隔离 Redis 上验证控制逻辑，不请求公司内网模型。
+控制逻辑使用本地测试 HTTP 和隔离 Redis 验证。本轮另用本地配置中的阿里云模型端点完成一次真实合同任务，没有把它当作公司内网模型实测。
 
 | 验证 | 已验证内容 |
 | --- | --- |
@@ -317,7 +417,9 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 
 60 秒模型预算、30 分钟硬上限、要点并发 2 仍是首轮参数。是否需要将模型预算调整回 30 秒、并发上限是否符合模型服务能力，目前不确定，需要内网同批合同复测。
 
-## 13. 本次验证记录
+## 13. 验证记录
+
+### 13.1 前轮实现验证
 
 - 正式回归集：236 项，235 项通过；默认跳过的 Linux 专用测试已在容器中单独执行通过。该次回归设置 `TEST_MODEL_REDIS_URL`，包含真实 Redis/HTTP 的 6 项集成场景。
 - 消融兼容离线测试：22 项通过，无真实模型请求。
@@ -325,6 +427,16 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 - Ruff、Python 编译和示例 Compose 配置检查通过。内网真实模型的质量及 20 分钟目标尚未复测。
 
 集成测试使用隔离临时 Redis，不操作原有部署服务。测试文件分别为 `test_model_control.py`、`test_celery_hard_timeout_linux.py`；后者需要 Linux/prefork 与显式隔离 broker。
+
+### 13.2 本轮复核和真实合同
+
+使用当前源码、三个独立 worker、隔离 Redis DB 0/DB 2，经 API 提交 `deploy/test_contract.docx`。任务在 222.532 秒（约 3 分 43 秒）后进入 `succeeded` 并生成 44 条批注；18 个要点中 17 个成功，H18 的 schema 校验失败。因此任务完成和报告生成不等于所有要点审查成功。
+
+实际发送 104 次：LLM 82、embedding 19、reranker 3；共 95 个逻辑操作、9 次额外发送，单操作最多发送 2 次。全部已发送记录都包含模型类型、名额 key、预算、剩余时间和发送序号。逐次记录中最大的 `timing.total_seconds` 为 57.941402 秒，它从所属逻辑预算的起点累计，不是单次 HTTP 耗时。没有发生模型超时。任务结束后，DB 2 三类模型的持有者、等待者和等待截止记录均为 0。
+
+本轮正式回归共 260 项，259 项通过、1 项 Linux 专项在 Windows 跳过；该 Linux 专项另在 Docker 中通过，耗时 11.223 秒。消融兼容测试 22 项通过。真实 Redis／本地 HTTP 专项验证了请求及释放阶段超时、重复取消、清理失败和硬杀后的租约回收；真实合同本身未发生超时，不能用这次合同成功替代超时测试。
+
+该任务调用本地配置中的阿里云端点，不能据此推断公司内网 BGE 或测试网 Qwen 服务的性能。生产 BGE、测试 Qwen 的适配仅通过 MockTransport 协议回归，没有伪称已访问其真实部署地址。源码审计、清理故障及取消测试、任务记录和报告证据见[本轮审计报告](code-review/model-control-audit-20261016.md)。
 
 ## 14. 代码入口
 
@@ -337,8 +449,17 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 | [task_queue/review_request.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_request.py:39) | Celery 超时/进程失败事件 → 父进程业务失败处理 |
 | [endpoints/runtime/model_budget.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_budget.py:63) | 统一预算与任务截止时间 → 剩余时间及发送额度 |
 | [endpoints/runtime/model_calls.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_calls.py:49) | 模型类型、发送和校验函数 → 在共享预算内获得结果或明确失败 |
-| [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:47) | 类型、key、容量及截止时间 → Lua 原子名额申请/释放 |
+| [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:75) | 类型、key、容量及截止时间 → Lua 原子名额申请/释放 |
+| [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:47) | 外部取消 → 等待同一次有界清理结束后传播取消 |
+| [agents/base_agent.py](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:302) | Agent 生成请求 → 公共 LLM 并发和预算控制 |
+| [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:809) | schema 合法的结论及业务反馈 → 最多 2 次新的完整结论修订 |
+| [tools/docxindex/llm/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/llm/client.py:95) | DocxIndex 提示及校验函数 → 公共 LLM 并发和预算控制 |
+| [tools/docxindex/vector/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/vector/client.py:71) | 一批文本 → 公共 embedding 并发和预算控制 |
 | [tools/docxindex/reranker.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/reranker.py:67) | 查询和候选文档 → 独立重排模型的索引及分数 |
+| [tools/docxindex/indexing/llm_summary.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/indexing/llm_summary.py:119) | 批量摘要结果 → 保存有效摘要，独立生成未覆盖节点 |
+| [tools/docxindex/indexing/llm_summary.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/indexing/llm_summary.py:170) | 单节点摘要 → 原操作内压缩修复或本地截断已有候选 |
+| [tools/retrieval/llamaindex/limited_llm.py](C:/Users/lenovo/Desktop/contract_agent/tools/retrieval/llamaindex/limited_llm.py:34) | LlamaIndex LLM 请求 → 公共 LLM 并发和预算控制 |
+| [tools/retrieval/llamaindex/limited_embedding.py](C:/Users/lenovo/Desktop/contract_agent/tools/retrieval/llamaindex/limited_embedding.py:28) | LlamaIndex 查询/文本/批量向量请求 → 公共 embedding 并发和预算控制 |
 | [loggers/call_log.py](C:/Users/lenovo/Desktop/contract_agent/loggers/call_log.py:250) | 逐次实际发送记录 → 操作汇总、重试及 token 完整性 |
 | [endpoints/review/web_history.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/review/web_history.py:10) | 完成的 Web 任务 → 历史和下载元数据 |
 | [main.py](C:/Users/lenovo/Desktop/contract_agent/main.py:85) | 本地 DOCX、服务地址和凭据 → 通过 API 获取报告 |

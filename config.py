@@ -311,7 +311,7 @@ RERANK_NAME = (
 )
 RERANK_PROVIDER_MODEL_NAMES = _as_provider_model_names(
     cfg_optional("rerank", "provider_model_names", {
-        "higress_qwen": ["Qwen3-Reranker-8B"],
+        "higress_qwen": ["Qwen3-Reranker-8B", "qwen3-reranker"],
         "bge": ["bge-reranker-v2-m3"],
         "dashscope_qwen": ["qwen3-rerank", "gte-rerank-v2"],
     }),

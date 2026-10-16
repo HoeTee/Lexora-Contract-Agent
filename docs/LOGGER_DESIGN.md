@@ -18,7 +18,7 @@ logging:
 | `input/` | 按 `api.keep_input` 保留 | 同左 | 业务输入，与详细日志开关无关。 |
 | `output/` | 保留现有规则 | 同左 | 原合同批注输出；上传后的留存仍按 `api.keep_output` 控制。 |
 | `logs/events.log` | 保留，简短摘要 | 保留 | 任务状态、主要阶段耗时、最终业务统计及最终错误。关闭时不写 traceback、模型正文和重复 token 字段，错误文本最多 200 字符。 |
-| `logs/logical_calls/` | 保留 | 保留 | 每个逻辑模型调用一份 prettified JSON；不包含正文或 attempts 列表。 |
+| `logs/logical_calls/` | 保留 | 保留 | 每个逻辑模型调用一份 prettified JSON；包含逐次 attempts、预算、耗时、错误及已知用量，不包含完整请求或响应正文。 |
 | `logs/calls/` | 不生成 | 保留并增加字段 | 每次尝试的完整请求、响应或异常。新增逻辑 ID、类别、attempt、is_retry 和三个 token 字段。 |
 | `logs/trace.json` | 不生成 | 保留 | workflow、criterion、LLM、MCP 执行树；调用记录通过 call_id/call_path 关联。 |
 | `logs/route_events/` | 不生成 | 保留，调整字段 | 路由规划、分步检索、扫描批次、回退及最终选中节点。 |
@@ -38,9 +38,13 @@ logging:
 
 ## 逻辑调用
 
-网络重试、JSON/schema 重试（包括 Agent）、单个扫描批次重试、层级建树同一批次的结构校验重试，共用一个 logical_call_id。不同批次、内容校验修订、反思反馈修订、工具请求与工具结果后的继续生成，以及要点整体重新执行，产生独立逻辑调用。工具执行期间不继承 Agent 的逻辑调用，工具内部模型请求独立记录。
+同一次模型结果的网络重试、JSON/schema 修复、扫描批次输出修复、层级批次输出修复及摘要压缩修复，共用一个 logical_call_id、截止时间和发送次数。不同独立批次、不同摘要节点、正常业务修订、反思反馈修订及工具结果后的继续生成分别建立逻辑调用。工具执行期间不继承 Agent 的逻辑调用，工具内部模型请求独立记录。失败要点不自动整条重跑，模型网络/超时错误也不能通过批量摘要转为逐节点摘要来重置预算。
+
+确定性的证据、锚点、覆盖或路由反馈属于业务修订，须在前次回答通过 schema 后进入；内部每次检查最多请求 2 次新结论，初始结论和反思后结论可以分别触发。它和传输/schema 重试分开记录，不表示整个要点只有一份 60 秒预算；合同仍受整任务硬时限约束。
 
 文件名为 `<source>__<stage>__<logical_call_id>.json`，例如 `docxindex_H12__scan-step1-batch2__a524...json`。保留下划线，其他不适合文件名的字符替换为连字符；每段最多 64 字符，完整 source/stage 仍在 JSON 中。每次请求前先写 pending；调用结束原子更新同一文件。
+
+下面展示主要汇总字段；实际文件还包含逐次 `attempts`。
 
 ```json
 {
@@ -53,15 +57,25 @@ logging:
   "started_at": "2026-10-12T12:00:00.000+08:00",
   "finished_at": "2026-10-12T12:00:02.000+08:00",
   "status": "succeeded",
-  "retry_count": 1,
+  "send_count": 1,
+  "retry_count": 0,
   "input_tokens": 1000,
   "output_tokens": 200,
   "input_output_tokens": 1200,
+  "known_input_tokens": 1000,
+  "known_output_tokens": 200,
+  "input_usage_complete": true,
+  "output_usage_complete": true,
+  "usage_complete": true,
   "error": null
 }
 ```
 
-retry_count 是额外实际发出的模型请求数，第一次不算重试；等待并发许可失败不增加已发送次数。token 只采用最终成功响应的 usage，不累加此前被替代的响应；最终失败时三个字段均为 null。成功但上游未提供 usage 时保留 null，不估算。embedding 不存在输出 token，output_tokens 为 null，input_output_tokens 等于已知 input_tokens。
+`send_count` 是实际发送数；`retry_count` 是首次发送之外的实际发送数。等待并发许可失败不增加发送次数。`input_tokens/output_tokens/input_output_tokens` 保留最终成功结果的 usage 语义，不累加此前被替代的响应；最终失败时这三个汇总字段为 null。embedding 不存在输出 token，`output_tokens` 为 null，`input_output_tokens` 等于已知 `input_tokens`。
+
+`known_input_tokens/known_output_tokens` 累加所有已发送尝试中已收到的 usage，包括最终校验失败或释放 Redis 失败的响应。未知用量不估算；已知总计为 0 不表示没有消耗，必须同时检查 `input_usage_complete/output_usage_complete/usage_complete`。LLM 缺少输出 usage 时不能标为完整；embedding 不要求输出 usage。统计成功任务的模型用量和重试成本时，应使用这些已知总计及完整性字段，不能只读最终结果的三个 token 字段。
+
+普通日志和详细日志都保留 `attempts` 的基础信息：`sent/send_number`、HTTP 状态、模型类型、信号量 key、预算、剩余时间、失败阶段、重试原因和等待/请求/退避/总耗时。只有详细模式记录完整请求和响应正文。
 
 失败 error 仅含 type、http_status、message（最多 200 字符）。本地请求超时而未收到响应时 http_status=null；服务返回 HTTP 错误时记录实际状态；收到 HTTP 成功响应但校验失败仍记为逻辑失败。成功 HTTP 状态也从实际响应读取，无法取得时不默认填写 200。
 
@@ -74,19 +88,19 @@ retry_count 是额外实际发出的模型请求数，第一次不算重试；�
 - `docxindex.retrieval.embedding`
 - `docxindex.retrieval.reranker`
 
-source 使用 SubAgent_H12、Reflector_H12 等角色加要点名称；Planner、Summarizer 是任务级角色。索引 LLM 和 Embedding 分别使用 docxindex_indexing_llm、docxindex_indexing_embedding；检索使用 docxindex_H12。归类按调用上下文和入口定义。当前 DocxIndex 的 rerank 使用检索 LLM 完成重排序，该类别表示用途；不改变当前模型或并发许可类型。
+source 使用 SubAgent_H12、Reflector_H12 等角色加要点名称；Planner、Summarizer 是任务级角色。索引 LLM 和 Embedding 分别使用 docxindex_indexing_llm、docxindex_indexing_embedding；检索使用 docxindex_H12。归类按调用上下文和入口定义。DocxIndex 的 rerank 使用 `rerank` 中配置的独立模型和 `reranker` 全局名额，支持 Higress Qwen、BGE、DashScope Qwen 协议，不再使用检索 LLM 排序。
 
 stage 标识请求用途：route-plan、scan-step1-batch2、structure-step1-part2、vector-query-step1、rerank-pass1-batch2、index-summary-batch1、index-embedding-batch1、index-hierarchy-节点和锚点范围等。SubAgent 使用 review-initial、review-initial-output-repair1、review-reflection-revision1；工具返回后的请求追加 tool-result1。Reflector 使用 reflection-round1。step 是检索动作，不是模型请求数；一个 step 的多个分批分别记录。
 
 reason 正常请求为 null；内容校验修订时写实际校验错误摘要，反思修订时写反馈摘要，工具后续请求写继续处理工具结果的说明。JSON/schema 重试在原逻辑调用的 reason 中补充校验原因。reason 最多 200 字符，不保存完整输入输出正文。
 
-详细 calls 文件名为 `<source>__<stage>__<UTC时间>__<call_id>.json`，source/stage 与逻辑调用一致，并保存 criterion_id、reason、logical_call_id、category、attempt（从 1 开始）、is_retry、input_tokens、output_tokens、input_output_tokens。失败尝试的标准 token 字段为 null，原始响应仍可用于排障。成功 http_status 位于顶层，失败位于 error.http_status。
+详细 calls 文件名为 `<source>__<stage>__<UTC时间>__<call_id>.json`，source/stage 与逻辑调用一致，并保存 criterion_id、reason、logical_call_id、category、attempt（从 1 开始）、is_retry、task_id、worker_pid 和 token 字段。未收到响应时 usage 未知；已收到响应后，即使输出校验或 Redis 释放失败，也保留实际 HTTP 状态及收到的 usage。`http_status` 表示收到的 HTTP 响应，`error.http_status` 表示错误所属响应；Redis 释放错误没有 HTTP 状态，不能用它覆盖已经收到的 HTTP 200。失败阶段用 `failure_stage` 区分。
 
 ## 检索与 route_events
 
 语义步骤先取结构候选；结构结果不足时按现有配置补充向量候选，按 node_id 去重。保留 structure_candidate_limit 和向量补足上限，但不在每步重排或按最终数量截取。所有步骤结果合并、按 node_id 去重并合并 sources 后，统一按同一审查问题重排，再截取 max_selected_nodes。完整区域、全文扫描及全部标题路线保持完整覆盖，跳过最终 TopK 截取。
 
-超出重排输入预算时，各批次先重排保留最多最终 K 个候选，合并幸存候选后再次重排；每个原候选均进入其批次。预算包含问题、提示词和候选信息。若连单个候选都放不下，或分批后不能缩小池子，明确失败并提示调整预算，不能按原顺序静默丢弃候选。模型必须对本批全部候选各评分一次；遗漏、重复或未知节点触发 schema 重试，不回填未经评分的顺序结果。关闭 rerank 时不调用模型，按去重后的合并顺序截取。
+超出重排输入预算时，各批次先重排保留最多最终 K 个候选，合并幸存候选后再次重排；每个原候选均进入其批次。预算按问题和候选信息估算。若连单个候选都放不下，或分批后不能缩小池子，明确失败并提示调整预算，不能按原顺序静默丢弃候选。模型必须对本批全部候选各评分一次；遗漏、重复或未知节点触发 schema 重试，不回填未经评分的顺序结果。关闭 rerank 时不调用模型，按去重后的合并顺序截取。
 
 每个 route_event 的外层字段仍为 operation_id、criterion_id、stage、event、at、payload。stage 标识实际步骤，如 route.1.region；最终结果为 route.result。
 
@@ -98,9 +112,9 @@ result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的�
 
 ## 配置与恢复
 
-索引参数、路由方法描述、rerank provider 名单、备用 llamaindex 参数、subagent 工具名单及 worker 禁止预取项从主 YAML 移入代码默认值，仍允许可选覆盖。模型、预算、重试、并发、业务和日志开关继续保留。
+索引参数、路由方法描述和备用 llamaindex 参数有代码默认值，允许可选覆盖。示例配置显式列出 rerank provider 名单、subagent 工具名单和 worker 禁止预取项，便于核对实际部署。模型名称及地址保留各部署自己的值；BGE embedding 和 reranker 的地址与 payload 约束见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md#61-bge-embedding-和-reranker-怎么配置)。
 
-model_semaphore 的 enabled、redis_url、wait_timeout_seconds、lease_seconds 共用，limits 分别配置 llm、embedding、reranker；key 按模型类型生成，poll_interval_seconds 默认 0.2。旧的分模型配置和可选覆盖继续兼容。租约仍用于模型并发许可到期释放与请求结束释放，不增加任务执行租约或续租机制。
+`model_semaphore.llm/embedding/reranker` 各自配置 `max_concurrent_requests`、`redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`。`enabled`、`wait_timeout_seconds` 和旧共享 `limits` 格式已移除，保留旧字段会在启动时明确报迁移错误。等待名额、HTTP、退避和同一结果的修复共同消耗 `workflow.model_call_timeout_seconds`，额外发送共同消耗 `workflow.model_call_max_retries`。请求结束主动释放名额；退出清理最多 2 秒，worker 强制终止或 Redis 不可用时依靠租约回收。完整配置和任务硬时限见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
 恢复契约版本为 6；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。新写入的 criterion output 删除 tokens；工作流内存结果和返回值中的 token_stats 保留兼容，不用于准确模型 usage 统计。准确用量读取 logical_calls。旧任务文件不改名、不补写字段；旧 Reflector 日志缺少要点归属，不能可靠补回 H 编号。
 

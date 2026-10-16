@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tools.docxindex.llm import LLMClient
+from tools.docxindex.llm.client import LLMResponseValidationError
 from tools.docxindex.llm.cache import JsonlCache, cache_key, text_hash
 from tools.docxindex.llm.prompts import (
     SUMMARY_BATCH_PROMPT_VERSION,
@@ -131,16 +132,13 @@ def _summarize_batch(tasks: list[_SummaryTask], client: LLMClient, cache: JsonlC
         }
         for task in tasks
     ]
-    try:
-        prompt = summary_batch_prompt(prompt_nodes, max_tokens=SUMMARY_OUTPUT_MAX_TOKENS)
-        response = client.complete_model(prompt, SummaryBatchResponse)
-        summaries = {
-            item.node_id: _truncate_summary(item.summary.strip())
-            for item in response.summaries
-            if item.summary.strip()
-        }
-    except (RuntimeError, ValueError):
-        summaries = {}
+    prompt = summary_batch_prompt(prompt_nodes, max_tokens=SUMMARY_OUTPUT_MAX_TOKENS)
+    response = client.complete_model(prompt, SummaryBatchResponse)
+    summaries = {
+        item.node_id: _truncate_summary(item.summary.strip())
+        for item in response.summaries
+        if item.summary.strip()
+    }
 
     fallback_nodes = 0
     for task in tasks:
@@ -172,30 +170,36 @@ def _store_summary(task: _SummaryTask, summary: str, cache: JsonlCache) -> None:
 def _generate_summary(client: LLMClient, node: DocumentNode, content: str) -> dict[str, str]:
     prompt = summary_prompt(node.title, node.node_type, content, max_tokens=SUMMARY_OUTPUT_MAX_TOKENS)
     last_summary = ""
-    for _attempt in range(3):
-        if _attempt:
-            stage = f"{current_call_stage() or 'index-summary'}-compress{_attempt}"
-            with call_stage(stage, f"摘要超过 {SUMMARY_OUTPUT_MAX_TOKENS} token 预算，要求压缩"):
-                response = client.complete_model(prompt, SummaryResponse)
-        else:
-            response = client.complete_model(prompt, SummaryResponse)
+
+    def check_length(response: SummaryResponse) -> SummaryResponse:
+        nonlocal last_summary
         summary = response.summary.strip()
         last_summary = summary
-        if estimate_tokens(summary) <= SUMMARY_OUTPUT_MAX_TOKENS:
-            return {"summary": summary}
-        prompt = (
-            f"{prompt}\n\n"
-            f"上一版摘要超过 {SUMMARY_OUTPUT_MAX_TOKENS} tokens，必须压缩。"
-            "只保留合同审查导航必需信息，返回同样 JSON schema。"
-        )
-    return {"summary": _truncate_summary(last_summary)}
+        if not summary:
+            raise ValueError("Summary must contain non-whitespace text.")
+        if estimate_tokens(summary) > SUMMARY_OUTPUT_MAX_TOKENS:
+            raise ValueError(f"Summary exceeds {SUMMARY_OUTPUT_MAX_TOKENS} tokens; shorten its text.")
+        return response
+
+    try:
+        response = client.complete_model(prompt, SummaryResponse, validate=check_length)
+    except LLMResponseValidationError as exc:
+        if getattr(exc, "failure_stage", None) != "output_validation" or not last_summary:
+            raise
+        # Reuse an already parsed candidate after output repairs are exhausted.
+        # Network/deadline failures must propagate instead of starting more calls.
+        return {"summary": _truncate_summary(last_summary)}
+    return {"summary": response.summary.strip()}
 
 
 def _truncate_summary(summary: str) -> str:
     if estimate_tokens(summary) <= SUMMARY_OUTPUT_MAX_TOKENS:
         return summary
     chars = max(120, int(len(summary) * SUMMARY_OUTPUT_MAX_TOKENS / max(estimate_tokens(summary), 1)))
-    return summary[:chars].rstrip()
+    result = summary[:chars].rstrip()
+    while estimate_tokens(result) > SUMMARY_OUTPUT_MAX_TOKENS:
+        result = result[: max(0, len(result) - max(1, len(result) // 10))].rstrip()
+    return result
 
 
 def _summary_content(node: DocumentNode) -> str:

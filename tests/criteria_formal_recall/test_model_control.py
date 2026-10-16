@@ -13,13 +13,13 @@ import time
 import unittest
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import redis
 
 from endpoints.runtime import llm_semaphore
-from endpoints.runtime.llm_semaphore import ModelSemaphoreConfig, RedisModelSemaphore
+from endpoints.runtime.llm_semaphore import ModelSemaphoreConfig, ModelSemaphoreLease, RedisModelSemaphore
 from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, task_execution
 from endpoints.runtime.model_calls import execute_model
 from loggers.call_log import logical_call
@@ -52,6 +52,15 @@ def _worker_requests(redis_url, prefix, http_url, result_queue):
         result_queue.put(None)
     except BaseException as exc:
         result_queue.put(repr(exc))
+
+
+def _worker_holds_slot(redis_url, key, lease_seconds, result_queue):
+    async def run():
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(redis_url, key, 1, lease_seconds, 0.005))
+        lease = await semaphore.acquire_async(caller_name="killed-owner", model="test", budget=ModelCallBudget())
+        result_queue.put(lease.member)
+        await asyncio.Event().wait()
+    asyncio.run(run())
 
 
 class _HTTPFixture:
@@ -126,6 +135,152 @@ class BudgetTests(unittest.TestCase):
             self.assertLessEqual(budget.remaining(), 0.1)
             self.assertEqual(os.getenv("CONTRACT_TASK_ID"), "budget-test")
         self.assertEqual(os.getenv("CONTRACT_TASK_DEADLINE"), before)
+
+
+class CleanupCancellationTests(unittest.IsolatedAsyncioTestCase):
+    def _slow_semaphore(self, delay):
+        class SlowSemaphore:
+            def __init__(self):
+                self.releasing = asyncio.Event()
+                self.released = False
+                self.cleanup_task = None
+
+            async def acquire_async(self, **kwargs):
+                return ModelSemaphoreLease("llm", "cleanup-probe", "own-member", 0, 1)
+
+            async def release_async(self, lease):
+                self.cleanup_task = asyncio.current_task()
+                self.releasing.set()
+                await asyncio.sleep(delay)
+                self.released = True
+        return SlowSemaphore()
+
+    async def test_deadline_during_release_waits_for_cleanup_before_returning(self):
+        semaphore = self._slow_semaphore(0.15)
+        async def send(_):
+            return {}, 200
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}):
+            with self.assertRaises(ModelCallTimeout) as caught:
+                await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                                    budget=ModelCallBudget(timeout_seconds=0.08, max_retries=0))
+        self.assertEqual(caught.exception.failure_stage, "semaphore_release")
+        self.assertTrue(semaphore.released)
+        self.assertTrue(semaphore.cleanup_task.done())
+
+    async def test_repeated_cancellation_during_release_finishes_same_cleanup(self):
+        semaphore = self._slow_semaphore(0.1)
+        async def operation():
+            async with llm_semaphore.model_semaphore("llm", "test", "test"):
+                pass
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}):
+            operation_task = asyncio.create_task(operation())
+            await semaphore.releasing.wait()
+            cleanup_task = semaphore.cleanup_task
+            operation_task.cancel()
+            await asyncio.sleep(0.01)
+            operation_task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await operation_task
+        self.assertTrue(semaphore.released)
+        self.assertIs(semaphore.cleanup_task, cleanup_task)
+        self.assertTrue(cleanup_task.done())
+
+    async def test_request_timeout_finishes_release_before_returning(self):
+        semaphore = self._slow_semaphore(0.04)
+        async def send(_):
+            await asyncio.Event().wait()
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}):
+            with self.assertRaises(ModelCallTimeout) as caught:
+                await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                                    budget=ModelCallBudget(timeout_seconds=0.04, max_retries=0))
+        self.assertEqual(caught.exception.failure_stage, "request")
+        self.assertTrue(semaphore.released)
+        self.assertTrue(semaphore.cleanup_task.done())
+
+    async def test_request_timeout_preserves_timeout_when_redis_release_fails(self):
+        semaphore = self._slow_semaphore(0)
+        sends = []
+        async def send(_):
+            sends.append(True)
+            await asyncio.Event().wait()
+        release = AsyncMock(side_effect=redis.RedisError("release unavailable"))
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), \
+                patch.object(semaphore, "release_async", release), \
+                self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+            with self.assertRaises(ModelCallTimeout) as caught:
+                await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                                    budget=ModelCallBudget(timeout_seconds=0.04, max_retries=3))
+        self.assertEqual(caught.exception.failure_stage, "request")
+        self.assertEqual(len(sends), 1)
+        release.assert_awaited_once()
+
+    async def test_external_cancellation_survives_redis_release_failure(self):
+        semaphore = self._slow_semaphore(0)
+        sending = asyncio.Event()
+        async def send(_):
+            sending.set()
+            await asyncio.Event().wait()
+        release = AsyncMock(side_effect=redis.RedisError("release unavailable"))
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), \
+                patch.object(semaphore, "release_async", release), \
+                self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+            operation = asyncio.create_task(execute_model(model_type="llm", model="test", caller="test",
+                request={}, send=send, budget=ModelCallBudget(timeout_seconds=1, max_retries=0)))
+            await sending.wait()
+            operation.cancel("external stop")
+            with self.assertRaisesRegex(asyncio.CancelledError, "external stop"):
+                await operation
+        release.assert_awaited_once()
+
+    async def test_repeated_cancellation_does_not_restart_cleanup_deadline(self):
+        started = asyncio.Event()
+        finished = asyncio.Event()
+        async def bounded_cleanup():
+            try:
+                async with asyncio.timeout(0.12):
+                    started.set()
+                    await asyncio.Event().wait()
+            finally:
+                finished.set()
+        operation = asyncio.create_task(llm_semaphore._finish_cleanup(bounded_cleanup()))
+        await started.wait()
+        before = time.monotonic()
+        operation.cancel()
+        await asyncio.sleep(0.03)
+        operation.cancel()
+        with self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+            with self.assertRaises(asyncio.CancelledError):
+                await operation
+        self.assertTrue(finished.is_set())
+        self.assertLess(time.monotonic() - before, 0.5)
+
+    async def test_acquisition_cancel_race_finishes_cleanup_despite_second_cancel(self):
+        acquiring = asyncio.Event()
+        cleaning = asyncio.Event()
+        cleaned = asyncio.Event()
+        removals = []
+        class PendingRedis:
+            async def eval(self, *args):
+                acquiring.set()
+                await asyncio.Event().wait()
+        async def slow_remove(member, *, include_owner):
+            removals.append((member, include_owner))
+            cleaning.set()
+            await asyncio.sleep(0.08)
+            cleaned.set()
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig("redis://unused/2", "own-key", 1, 30, 0.01))
+        with patch.object(semaphore, "_async_client", return_value=PendingRedis()), \
+                patch.object(semaphore, "_remove", slow_remove):
+            operation = asyncio.create_task(semaphore.acquire_async(caller_name="test", model="test", budget=ModelCallBudget()))
+            await acquiring.wait()
+            operation.cancel()
+            await cleaning.wait()
+            operation.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await operation
+        self.assertTrue(cleaned.is_set())
+        self.assertEqual(len(removals), 1)
+        self.assertTrue(removals[0][1], "A cancellation-raced EVAL may already have acquired the caller's slot")
 
 
 @unittest.skipUnless(os.getenv("TEST_MODEL_REDIS_URL"), "Set TEST_MODEL_REDIS_URL to an isolated Redis")
@@ -241,6 +396,68 @@ class ModelControlIntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(caught.exception.failure_stage, "retry_backoff")
         self.assertLess(time.monotonic() - started, 1.5)
         self.assertEqual(count, 1)
+
+    async def test_deadline_during_real_redis_release_leaves_no_cleanup_task(self):
+        original_release = self.semaphore.release_async
+        cleanup_tasks = []
+        async def slow_release(lease):
+            cleanup_tasks.append(asyncio.current_task())
+            await asyncio.sleep(0.15)
+            await original_release(lease)
+        async def send(_):
+            return {}, 200
+        with patch.object(self.semaphore, "release_async", slow_release):
+            with self.assertRaises(ModelCallTimeout) as caught:
+                await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                                    budget=ModelCallBudget(timeout_seconds=0.08, max_retries=0))
+        self.assertEqual(caught.exception.failure_stage, "semaphore_release")
+        self.assertEqual(len(cleanup_tasks), 1)
+        self.assertTrue(cleanup_tasks[0].done())
+        self.assertEqual(self.redis.zcard(self.semaphore.config.key), 0)
+        self._assert_no_waiters()
+
+    async def test_killed_slot_owner_is_reclaimed_after_lease_expiry(self):
+        context = multiprocessing.get_context("spawn")
+        result_queue = context.Queue()
+        key = self.prefix + ":killed-owner"
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, key, 1, 1, 0.005))
+        process = context.Process(target=_worker_holds_slot, args=(self.redis_url, key, 1, result_queue))
+        process.start()
+        try:
+            owner = await asyncio.to_thread(result_queue.get, True, 5)
+            process.terminate()
+            await asyncio.to_thread(process.join, 5)
+            self.assertFalse(process.is_alive())
+            self.assertEqual(self.redis.zcard(key), 1, "Hard process termination cannot actively release its slot")
+            lease = await semaphore.acquire_async(caller_name="successor", model="test",
+                                                   budget=ModelCallBudget(timeout_seconds=3, max_retries=0))
+            self.assertIsNone(self.redis.zscore(key, owner))
+            self.assertEqual(self.redis.zcard(key), 1)
+            await semaphore.release_async(lease)
+            self.assertEqual(self.redis.zcard(key), 0)
+            self.assertEqual(self.redis.zcard(key + ":waiting"), 0)
+            self.assertEqual(self.redis.zcard(key + ":deadlines"), 0)
+        finally:
+            if process.is_alive():
+                process.terminate()
+                await asyncio.to_thread(process.join, 5)
+            client = semaphore._clients.pop(asyncio.get_running_loop(), None)
+            if client:
+                await client.aclose()
+            result_queue.close()
+
+    async def test_real_slot_release_error_does_not_resend_model_request(self):
+        sends = []
+        async def send(_):
+            sends.append(True)
+            return {}, 200
+        with patch.object(self.semaphore, "_remove", AsyncMock(side_effect=redis.RedisError("release unavailable"))):
+            with self.assertRaisesRegex(redis.RedisError, "release unavailable") as caught:
+                await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                                    budget=ModelCallBudget(timeout_seconds=1, max_retries=3))
+        self.assertEqual(caught.exception.failure_stage, "semaphore_release")
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(self.redis.zcard(self.semaphore.config.key), 1, "An unavailable Redis requires lease recovery")
 
     async def test_three_processes_share_all_model_caps(self):
         context = multiprocessing.get_context("spawn")

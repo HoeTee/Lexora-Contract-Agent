@@ -96,7 +96,9 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
             record.failed(exc, stage=stage)
             raise
         except Exception as exc:
-            if isinstance(exc, TimeoutError):
+            # Synchronous validation cannot receive the timer cancellation until
+            # it yields. Its own error must not hide an already expired budget.
+            if isinstance(exc, TimeoutError) or (stage == "output_validation" and time.monotonic() >= budget.deadline):
                 expired = ModelCallTimeout(f"{model_type} operation exceeded its shared deadline during {stage}.")
                 expired.failure_stage = stage
                 exc = expired

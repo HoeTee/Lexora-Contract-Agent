@@ -44,6 +44,34 @@ class ModelSemaphoreLease:
 LLMGlobalSemaphoreLease = ModelSemaphoreLease
 
 
+async def _finish_cleanup(coroutine):
+    """Finish one bounded cleanup before propagating external cancellation.
+
+    Shielding once lets the caller leave while cleanup is still running. Keep
+    waiting for the same task if cancellation arrives during cleanup, including
+    repeated cancellation. The cleanup operation owns its existing two-second
+    deadline; cancellation never creates a new task or restarts that deadline.
+    """
+    cleanup = asyncio.create_task(coroutine)
+    cancellation = None
+    while True:
+        try:
+            result = await asyncio.shield(cleanup)
+        except asyncio.CancelledError as exc:
+            if cleanup.cancelled():
+                raise
+            cancellation = exc
+            continue
+        except Exception:
+            if cancellation is not None:
+                logging.getLogger(__name__).exception("Redis cleanup failed during cancellation; lease will reclaim its slot")
+                raise cancellation from None
+            raise
+        if cancellation is not None:
+            raise cancellation
+        return result
+
+
 class RedisModelSemaphore:
     # One atomic operation cleans expired owners/waiters, validates the shared
     # capacity policy, enqueues once, and gives the oldest waiter the next slot.
@@ -119,7 +147,7 @@ class RedisModelSemaphore:
         except BaseException as exc:
             # Also remove a slot if cancellation raced with a successful EVAL.
             try:
-                await asyncio.shield(self._remove(member, include_owner=True))
+                await _finish_cleanup(self._remove(member, include_owner=True))
             except (RedisError, TimeoutError):
                 logging.getLogger(__name__).exception("Redis slot cleanup failed; lease will reclaim %s", member)
             if isinstance(exc, TimeoutError):
@@ -154,10 +182,19 @@ _SEMAPHORES = {kind: RedisModelSemaphore(kind, ModelSemaphoreConfig(**raw))
 async def model_semaphore(model_type: str, caller_name: str, model: str, *, budget: ModelCallBudget | None = None):
     semaphore = _SEMAPHORES[model_type]
     lease = await semaphore.acquire_async(caller_name=caller_name, model=model, budget=budget or ModelCallBudget())
+    interrupted = False
     try:
         yield lease
+    except (asyncio.CancelledError, TimeoutError):
+        interrupted = True
+        raise
     finally:
-        await asyncio.shield(semaphore.release_async(lease))
+        try:
+            await _finish_cleanup(semaphore.release_async(lease))
+        except Exception:
+            if not interrupted:
+                raise
+            logging.getLogger(__name__).exception("Redis cleanup failed after interruption; lease will reclaim its slot")
 
 
 @contextmanager
