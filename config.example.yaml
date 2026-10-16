@@ -1,4 +1,6 @@
 llm:
+  # Production / Test:
+  # name: qwen3.6-35b-a3b
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   name: qwen3.6-27b
   enable_thinking: false
@@ -10,10 +12,28 @@ llm:
   top_p: 0.01
   seed: 42
 embedding:
+  # Production (BGE):
+  # base_url: "http://<production-embedding-host>/v1"
+  # name: bge-m3
+  #
+  # Test (Qwen):
+  # base_url: "http://<test-embedding-host>/v1"
+  # name: qwen3-embedding
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   name: text-embedding-v4
   max_input_tokens: 8000
 rerank:
+  # Production (BGE):
+  # base_url: "http://<production-reranker-host>/<rerank-path>"
+  # name: bge-reranker-v2-m3
+  # provider_model_names:
+  #   bge: [bge-reranker-v2-m3]
+  #
+  # Test (Qwen / Higress):
+  # base_url: "http://<test-reranker-host>/<rerank-path>"
+  # name: qwen3-reranker
+  # provider_model_names:
+  #   higress_qwen: [qwen3-reranker]
   base_url: http://higress.llmgateway.dev.qa.zrub.com/v1/rerank
   name: Qwen3-Reranker-8B
   # Model names select the request protocol; add the exact deployment name here.
