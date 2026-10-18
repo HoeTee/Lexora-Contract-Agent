@@ -120,7 +120,7 @@ result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的�
 
 `model_semaphore.llm/embedding/reranker` 各自配置 `max_concurrent_requests`、`redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`。逐类型 `enabled`、`wait_timeout_seconds` 和旧共享 `limits` 格式已移除，保留旧字段会在启动时明确报迁移错误。等待名额消耗 `workflow.model_wait_timeout_seconds`（默认 180 秒），暂停 `workflow.model_call_timeout_seconds`（默认 60 秒）的执行计时；HTTP、校验、退避和同一结果的修复继续消耗执行预算。重试共用两份剩余预算，额外发送共同消耗 `workflow.model_call_max_retries`。lease 在取得名额时开始，请求结束主动释放；退出清理最多 2 秒，worker 强制终止或 Redis 不可用时依靠租约回收。完整配置和任务硬时限见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
-恢复契约版本为 6；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。新写入的 criterion output 删除 tokens；工作流内存结果和返回值中的 token_stats 保留兼容，不用于准确模型 usage 统计。准确用量读取 logical_calls。旧任务文件不改名、不补写字段；旧 Reflector 日志缺少要点归属，不能可靠补回 H 编号。
+恢复契约版本为 7；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。新写入的 criterion output 删除 tokens；工作流内存结果和返回值中的 token_stats 保留兼容，不用于准确模型 usage 统计。准确用量读取 logical_calls。旧任务文件不改名、不补写字段；旧 Reflector 日志缺少要点归属，不能可靠补回 H 编号。
 
 具体日志路径、开关和恢复实现分别在 endpoints/review/task_store.py、loggers/call_log.py、endpoints/review/review_state.py。详细 calls 的文件名说明见 [任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。
 

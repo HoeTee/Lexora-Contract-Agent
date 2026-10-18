@@ -510,9 +510,9 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:71) | 类型、key、容量及等待预算 → Lua 原子名额申请/释放 |
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:43) | 外部取消 → 等待同一次有界清理结束后传播取消 |
 | [agents/base_agent.py](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:302) | Agent 生成请求 → 公共 LLM 并发和预算控制 |
-| [agents/json_utils.py](C:/Users/lenovo/Desktop/contract_agent/agents/json_utils.py:74) | JSON/schema 及模型响应 → 在同一操作的最多 3 次发送内生成和修复 |
+| [agents/json_utils.py](C:/Users/lenovo/Desktop/contract_agent/agents/json_utils.py:74) | JSON/schema 及模型响应 → 在同一操作的最多 6 次发送及 60 秒累计预算内生成和修复 |
 | [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:809) | schema 合法的结论及业务反馈 → 最多 2 次新的完整结论修订 |
-| [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:1259) | 要点及总尝试上限 → 复用成功结果，或最多执行该要点 2 次 |
+| [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:1259) | 要点及总尝试上限 → 复用成功结果，或最多执行该要点 3 次 |
 | [tools/docxindex/llm/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/llm/client.py:95) | DocxIndex 提示及校验函数 → 公共 LLM 并发和预算控制 |
 | [tools/docxindex/vector/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/vector/client.py:71) | 一批文本 → 公共 embedding 并发和预算控制 |
 | [tools/docxindex/reranker.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/reranker.py:67) | 查询和候选文档 → 独立重排模型的索引及分数 |

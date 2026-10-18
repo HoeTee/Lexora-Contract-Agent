@@ -26,10 +26,10 @@ POST /api/review/jobs/status
   -> 返回 pending、queued、running、succeeded、failed 或 cancelled
 
 POST /api/review/jobs/result
-  -> 仅 succeeded 后可输出结果 DOCX 文件流或 URL
+  -> succeeded 输出审查报告；failed/cancelled 输出原合同；支持文件流或已启用的 URL
 ```
 
-Web 和 API 固定将审查任务投递到 Redis DB 0 的 Celery 队列，由三个独立 worker 执行；每个 worker 同时执行一份合同。不存在 `queue.enabled` 或进程内审查回退分支，OA 入口已移除。状态查询仍然读取共享数据目录中的 `task.json`，外部 API 路径、鉴权方式和请求体不变。API 进程不直接承载 workflow、MCP、LLM 调用和 DOCX 生成。
+以下 DB 编号沿用部署模板，实际职责由 `queue.broker_url` 和 `model_semaphore.*.redis_url` 决定。Web 和 API 固定将审查任务投递到 Redis DB 0 的 Celery 队列，由三个独立 worker 执行；每个 worker 同时执行一份合同。不存在 `queue.enabled` 或进程内审查回退分支，OA 入口已移除。状态查询仍然读取共享数据目录中的 `task.json`，外部 API 路径、鉴权方式和请求体不变。API 进程不直接承载 workflow、MCP、LLM 调用和 DOCX 生成。
 
 worker 内的模型请求统一经过 Redis DB 2 限流。`workflow.model_wait_timeout_seconds` 默认 180 秒，限制同一逻辑调用累计等待模型名额的时间；`workflow.model_call_timeout_seconds` 默认 60 秒，限制排除名额等待后的 HTTP、校验、退避和输出修复时间。重试共用两份剩余预算及发送次数。`queue.queued_timeout_seconds` 默认 7200 秒，只控制等待 worker 接手；`queue.task_time_limit_seconds` 默认 1800 秒，控制 worker 执行整份合同的最长时间，包含执行中的模型等待。整任务到期优先于两份模型预算，硬超时后任务记录为失败，不自动重新提交；不配置软时限。各项配置及迁移说明见 [并发与超时配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
@@ -484,13 +484,13 @@ curl -X POST "https://upload.example.com/api/files" \
 
 | HTTP 状态码 | 返回场景 | 响应 |
 | --- | --- | --- |
-| `200` | 任务已成功，请求 `file` 输出。 | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` 响应体。 |
-| `200` | 任务已成功，请求 `url` 输出。 | `{ "task_id": "...", "status": "succeeded", "output_type": "url", "url": "..." }` |
+| `200` | 任务已结束，请求 `file` 输出；成功时为审查报告，失败或取消时为原合同。 | `application/vnd.openxmlformats-officedocument.wordprocessingml.document` 响应体。 |
+| `200` | 任务已结束，请求已启用的 `url` 输出。 | `{ "task_id": "...", "status": "failed", "output_type": "url", "output_kind": "source", "filename": "contract.docx", "url": "..." }` |
 | `400` | `output_type` 非 `file` / `url`，或 URL 输出未启用。 | `{ "detail": "..." }` |
 | `400` | 未传 `Authorization`，或平台 key 没有本地客户映射。 | `{ "detail": "..." }` |
 | `403` | 该客户映射已禁用。 | `{ "detail": "API client mapping is disabled." }` |
 | `404` | 任务 ID 不合法、不存在，或属于其他客户。 | `{ "detail": "Task not found." }` |
-| `409` | 任务状态不是 `succeeded`。 | `{ "detail": "Task is not finished. Current status: ..." }` |
+| `409` | 任务仍处于 pending、queued 或 running。 | `{ "detail": "Task is not finished. Current status: ..." }` |
 | `500` | 服务端结果源文件不存在，或客户鉴权映射异常。 | `{ "detail": "..." }` |
 | `502` | URL 输出上传失败，或上传响应中无法解析 URL。 | `{ "detail": "Result file URL upload failed." }` |
 
