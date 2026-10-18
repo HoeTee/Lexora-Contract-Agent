@@ -139,8 +139,13 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                     review_result=update.get("review_result"),
                     error=update.get("error") if isinstance(update.get("error"), dict) else None,
                 )
-            elif update.get("message"):
-                update_task(client_dir, task_id, message=str(update["message"]))
+            elif update.get("message") or isinstance(update.get("summary"), dict):
+                fields = {}
+                if update.get("message"):
+                    fields["message"] = str(update["message"])
+                if isinstance(update.get("summary"), dict):
+                    fields["summary"] = update["summary"]
+                update_task(client_dir, task_id, **fields)
 
         token = set_conversation_log_dir(task_conversation_log_dir(client_dir, task_id))
         try:
@@ -172,7 +177,9 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
         if not output_path.exists():
             raise RuntimeError("Output DOCX file was not found.")
 
-        completed = mark_succeeded(client_dir, task_id, criteria=result.get("criteria"))
+        completed = mark_succeeded(
+            client_dir, task_id, criteria=result.get("criteria"), summary=result.get("summary"),
+        )
         if completed.get("status") != "succeeded":
             return
         try:
@@ -183,6 +190,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                              elapsed_seconds=result.get("elapsed_seconds"),
                              criteria_count=result.get("criteria_count"),
                              issue_count=result.get("issue_count"),
+                             summary=result.get("summary"),
                              annotation_stats=result.get("annotation_stats"))
     except Exception as exc:
         try:

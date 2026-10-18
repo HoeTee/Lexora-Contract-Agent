@@ -740,9 +740,13 @@ class DocxReportGenerator:
         priority_comments = summary_sections.get("priority_comments", [])
         opening_notices = summary_sections.get("opening_notices", [])
         incomplete_reviews = summary_sections.get("incomplete_reviews", [])
+        summary_notice = str(summary_sections.get("summary_notice") or "").strip()
+
+        if summary_notice:
+            lines.extend(["总结生成说明：", summary_notice, ""])
 
         if overall_comment:
-            lines.append("总体审查结论：")
+            lines.append("审查统计：" if summary_notice else "总体审查结论：")
             lines.append(overall_comment)
 
         valid_priority_comments = [
@@ -753,7 +757,7 @@ class DocxReportGenerator:
         if valid_priority_comments:
             if lines:
                 lines.append("")
-            lines.append("优先修改建议：")
+            lines.append("已确认审查意见：" if summary_notice else "优先修改建议：")
             for index, item in enumerate(valid_priority_comments, start=1):
                 lines.append(f"{index}. {item}")
 

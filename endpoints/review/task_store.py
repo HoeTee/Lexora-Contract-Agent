@@ -599,6 +599,7 @@ def create_task(
         "error": None,
         "criteria": [],
         "quality": summarize_criteria([]),
+        "summary": {"status": "not_started", "error": None},
         "meta_fields": dict(meta_fields or {}),
         "input": {
             "contract_filename": contract_filename,
@@ -792,6 +793,7 @@ def mark_succeeded(
     task_id: str,
     *,
     criteria: list[dict[str, Any]] | None = None,
+    summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task = read_task(client_dir, task_id)
     if task is None:
@@ -800,6 +802,7 @@ def mark_succeeded(
     quality = summarize_criteria(final_criteria)
     incomplete_count = quality["incomplete_count"]
     error_count = quality["error_count"]
+    summary_state = summary if summary is not None else {"status": "completed", "error": None}
     if incomplete_count or error_count:
         message = (
             f"共{quality['total_count']}项：{quality['completed_count']}项完成，"
@@ -807,6 +810,8 @@ def mark_succeeded(
         )
     else:
         message = f"合同审查完成，共{quality['total_count']}项审查项。"
+    if summary_state.get("status") == "fallback":
+        message += "自动总结未生成，已提供审查统计并保留已确认意见。"
     def apply(current: dict[str, Any]) -> bool:
         current.update(
             status="succeeded",
@@ -814,6 +819,7 @@ def mark_succeeded(
             message=message,
             criteria=final_criteria,
             quality=quality,
+            summary=summary_state,
             error=None,
         )
         return True

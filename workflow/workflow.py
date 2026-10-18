@@ -28,12 +28,14 @@ from config import (
 from loggers.workflow_logger import WorkflowLogger, save_review_outputs_json
 from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_trace
 from loggers.call_log import set_call_context, reset_call_context
+from loggers.api_event_logger import append_api_event
 from agents.base_agent import Settings
+from agents.json_utils import AgentOutputValidationError
 from agents.planner import PlannerAgent, assemble_tasks, split_criteria_from_docx
 from agents.orchestrator import OrchestratorAgent, review_progress_from_result
 from agents.summarizer import SummarizerAgent, apply_summary_duplicate_groups
 from mcp_service.client.client import MinimalMCPClient
-from endpoints.runtime.errors import classify_model_call_error
+from endpoints.runtime.errors import ModelCallError, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
 from endpoints.review.task_store import summarize_criteria
 from routing import load_mandatory_tasks, mandatory_source_manifest
@@ -157,6 +159,23 @@ def _incomplete_review_notices(results: list[dict]) -> list[str]:
             )
             notices.append(f"{label}（本次未完成，{detail}）")
     return notices
+
+
+def _basic_review_summary(results: list[dict], quality: dict[str, Any]) -> dict:
+    """Report existing results without manufacturing a model-generated conclusion."""
+    issues = [issue for result in results for issue in result.get("issues") or []]
+    return {
+        "overall_comment": (
+            f"共{quality['total_count']}项：{quality['completed_count']}项完成，"
+            f"{quality['incomplete_count']}项未完整，{quality['error_count']}项失败；"
+            f"已确认审查意见{len(issues)}条。"
+        ),
+        "priority_comments": [
+            str(issue.get("issue_comment") or "").strip()
+            for issue in issues if str(issue.get("issue_comment") or "").strip()
+        ],
+        "duplicate_groups": [],
+    }
 
 
 class ContractReviewWorkflow:
@@ -295,12 +314,36 @@ class ContractReviewWorkflow:
 
                 public_criteria = _public_criteria(criteria_list, results)
                 quality = summarize_criteria(public_criteria)
+                # Preserve completed reviews even when later summarization or
+                # report generation fails. File errors must still fail the run.
+                review_outputs_path = self._save_review_outputs(results)
 
                 # Phase 5: Summarize
                 await self._emit_progress(progress_callback, "summarizing", "Creating summary comment")
                 async with self.trace.span("phase.summarize", run_type="phase", inputs={"result_count": len(results)}) as span:
                     raw_issue_count = sum(len(result.get("issues", [])) for result in results)
-                    summary_payload = await self._phase_summarize(results)
+                    summary_state = {"status": "completed", "error": None}
+                    try:
+                        summary_payload = await self._phase_summarize(results)
+                    except (ModelCallError, AgentOutputValidationError) as exc:
+                        if (
+                            getattr(exc, "failure_stage", None) == "task_deadline"
+                            or getattr(exc, "error_type", None) == "TaskDeadlineExceeded"
+                        ):
+                            raise
+                        summary_state = {
+                            "status": "fallback",
+                            "error": {"type": type(exc).__name__, "message": str(exc)},
+                        }
+                        summary_payload = _basic_review_summary(results, quality)
+                        reason = (
+                            "模型输出未通过格式校验"
+                            if isinstance(exc, AgentOutputValidationError) else "模型调用失败"
+                        )
+                        summary_payload["summary_notice"] = (
+                            f"自动总结未生成：{reason}。当前总览由程序根据审查统计和已确认意见生成；"
+                            "各审查项是否完成请以未完成审查项说明为准。"
+                        )
                     results, semantic_deduplication = apply_summary_duplicate_groups(
                         results,
                         summary_payload.pop("duplicate_groups", []),
@@ -310,8 +353,25 @@ class ContractReviewWorkflow:
                     final_review["opening_notices"] = opening_notices
                     final_review["incomplete_reviews"] = _incomplete_review_notices(results)
                     review_outputs_path = self._save_review_outputs(results)
+                    summary_state["deduplication"] = {
+                        **getattr(self, "_summary_metadata", {}),
+                        "application": semantic_deduplication,
+                    }
+                    if self.api_events_path:
+                        append_api_event(
+                            Path(self.api_events_path),
+                            "summary_fallback" if summary_state["status"] == "fallback" else "summary_completed",
+                            summary=summary_state,
+                        )
+                    await self._emit_progress(
+                        progress_callback, "summarizing",
+                        "自动总结未生成，已保留已确认意见。"
+                        if summary_state["status"] == "fallback" else "Summary completed",
+                        summary=summary_state,
+                    )
                     span.set_outputs(
                         {
+                            "summary": summary_state,
                             "summary_section_count": len(final_review),
                             "raw_issue_count": raw_issue_count,
                             "confirmed_issue_count": sum(
@@ -369,6 +429,7 @@ class ContractReviewWorkflow:
                         "report_docx": annotated_docx_path,
                         "criteria_count": len(results),
                         "quality": quality,
+                        "summary": summary_state,
                         "criteria": public_criteria,
                         "issue_count": sum(len(result.get("issues", [])) for result in results),
                         "error_count": sum(1 for result in results if result.get("status") == "ERROR"),
@@ -393,6 +454,7 @@ class ContractReviewWorkflow:
 
                 return {
                     "quality": quality,
+                    "summary": summary_state,
                     "criteria": public_criteria,
                     "report_docx": annotated_docx_path,
                     "criteria_count": len(results),
@@ -643,14 +705,19 @@ class ContractReviewWorkflow:
         start = time.time()
 
         summarizer = SummarizerAgent(settings=self.settings)
-        summary_sections = await summarizer.compile_summary_comment(results)
-
-        self._summarizer_tokens = summarizer.token_usage.get("total_tokens", 0)
+        try:
+            summary_sections = await summarizer.compile_summary_comment(results)
+        finally:
+            self._summarizer_tokens = summarizer.token_usage.get("total_tokens", 0)
+            self._summary_metadata = getattr(summarizer, "summary_metadata", {})
         self.logger.log(
             phase="Summarization", sender="Summarizer", receiver="Workflow",
             action="compile_summary_comment",
             input_summary=f"{len(results)} criterion results",
-            output_summary=f"{len(json.dumps(summary_sections, ensure_ascii=False))} chars summary",
+            output_summary=json.dumps({
+                "summary_chars": len(json.dumps(summary_sections, ensure_ascii=False)),
+                "deduplication": self._summary_metadata,
+            }, ensure_ascii=False),
             tokens=self._summarizer_tokens,
             duration=round(time.time() - start, 2)
         )

@@ -29,6 +29,7 @@ from agents.summarizer import (
     normalize_summary_output,
 )
 from endpoints.review.review_state import ReviewStateStore
+from endpoints.runtime.errors import ModelCallError
 from routing.schemas import ReviewExecutionPlan
 from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
@@ -1141,6 +1142,11 @@ class WorkflowPresentationTests(unittest.TestCase):
 
 
 class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        attempts = patch("agents.orchestrator.CRITERION_RETRY_MAX_ATTEMPTS", 3)
+        attempts.start()
+        self.addCleanup(attempts.stop)
+
     @staticmethod
     def _criteria() -> list[dict]:
         return [
@@ -1152,7 +1158,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 2)
+            self.assertEqual(max_attempts, 3)
             if criterion["id"] == "H11":
                 raise AgentOutputValidationError("invalid user-facing output")
             return {
@@ -1177,7 +1183,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(_criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 2)
+            self.assertEqual(max_attempts, 3)
             raise AgentOutputValidationError("invalid user-facing output")
 
         orchestrator._execute_criterion_with_recovery = execute  # type: ignore[method-assign]
@@ -1189,7 +1195,7 @@ class CriterionFailureIsolationTests(unittest.IsolatedAsyncioTestCase):
         orchestrator = OrchestratorAgent()
 
         async def execute(criterion: dict, *, max_attempts: int) -> dict:
-            self.assertEqual(max_attempts, 2)
+            self.assertEqual(max_attempts, 3)
             if criterion["id"] == "H01":
                 raise ValueError("post-revision validation failed")
             return {
@@ -1218,6 +1224,7 @@ class CriterionRetryRecoveryTests(unittest.IsolatedAsyncioTestCase):
             patch("endpoints.review.task_store.DATA_DIR", temporary.name),
             patch("endpoints.review.review_state.LOGGING_ENABLED", True),
             patch("endpoints.review.review_state.LOGGING_DETAILED", True),
+            patch("agents.orchestrator.CRITERION_RETRY_MAX_ATTEMPTS", 3),
         ):
             replacement.start()
             self.addCleanup(replacement.stop)
@@ -1245,7 +1252,7 @@ class CriterionRetryRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved["attempt"], 2)
         self.assertEqual(saved["status"], "COMPLIANT")
         history = json.loads(self.store.criterion_error_path("H18").read_text(encoding="utf-8"))
-        self.assertEqual(history["max_attempts"], 2)
+        self.assertEqual(history["max_attempts"], 3)
         self.assertEqual([attempt["attempt"] for attempt in history["attempts"]], [1])
         self.assertEqual(history["attempts"][0]["message"], "unpaired evidence")
 
@@ -1257,10 +1264,11 @@ class CriterionRetryRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resumed[0]["attempt"], 2)
         self.assertEqual(resumed[0]["status"], "COMPLIANT")
 
-    async def test_second_failure_stops_and_preserves_both_error_attempts(self) -> None:
+    async def test_third_failure_stops_and_preserves_all_error_attempts(self) -> None:
         execute = AsyncMock(side_effect=[
             AgentOutputValidationError("first invalid response"),
             AgentOutputValidationError("second invalid response"),
+            AgentOutputValidationError("third invalid response"),
             self.result,
         ])
         self.orchestrator.execute_single_criterion = execute
@@ -1268,15 +1276,33 @@ class CriterionRetryRecoveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(RuntimeError, "All criteria failed"):
             await self.orchestrator.execute_criteria([self.criterion])
 
-        self.assertEqual(execute.await_count, 2)
+        self.assertEqual(execute.await_count, 3)
         self.assertIsNone(self.store.load_criterion_output("H18"))
         history = json.loads(self.store.criterion_error_path("H18").read_text(encoding="utf-8"))
-        self.assertEqual(history["attempt"], 2)
-        self.assertEqual(history["max_attempts"], 2)
-        self.assertEqual([attempt["attempt"] for attempt in history["attempts"]], [1, 2])
-        self.assertEqual(history["latest_error"]["message"], "second invalid response")
+        self.assertEqual(history["attempt"], 3)
+        self.assertEqual(history["max_attempts"], 3)
+        self.assertEqual([attempt["attempt"] for attempt in history["attempts"]], [1, 2, 3])
+        self.assertEqual(history["latest_error"]["message"], "third invalid response")
         self.event.assert_called_once()
         self.assertEqual(self.event.call_args.args[2], "criterion_failed")
+
+    async def test_two_model_timeouts_can_recover_on_third_criterion_attempt(self) -> None:
+        execute = AsyncMock(side_effect=[
+            ModelCallError("agent", "first operation exhausted 60-second budget", error_type="ModelCallTimeout"),
+            ModelCallError("agent", "second operation exhausted 60-second budget", error_type="ModelCallTimeout"),
+            self.result,
+        ])
+        self.orchestrator.execute_single_criterion = execute
+
+        results = await self.orchestrator.execute_criteria([self.criterion])
+
+        self.assertEqual(results, [self.result])
+        self.assertEqual(execute.await_count, 3)
+        self.assertEqual(self.store.load_criterion_output("H18")["attempt"], 3)
+        history = json.loads(self.store.criterion_error_path("H18").read_text(encoding="utf-8"))
+        self.assertEqual(history["max_attempts"], 3)
+        self.assertEqual([item["attempt"] for item in history["attempts"]], [1, 2])
+        self.event.assert_not_called()
 
 
 class SummarizerPromptBudgetTests(unittest.TestCase):

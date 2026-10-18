@@ -38,9 +38,9 @@ logging:
 
 ## 逻辑调用
 
-同一次模型结果的网络重试、JSON/schema 修复、扫描批次输出修复、层级批次输出修复及摘要压缩修复，共用一个 logical_call_id、截止时间和发送次数。不同独立批次、不同摘要节点、正常业务修订、反思反馈修订及工具结果后的继续生成分别建立逻辑调用。工具执行期间不继承 Agent 的逻辑调用，工具内部模型请求独立记录。当前 `workflow.model_call_max_retries=2`，每次操作最多发送 3 次，网络和 schema 修复共享这 3 次；时间先用完时不继续发送。
+同一次模型结果的网络重试、JSON/schema 修复、扫描批次输出修复、层级批次输出修复及摘要压缩修复，共用一个 logical_call_id、截止时间和发送次数。不同独立批次、不同摘要节点、正常业务修订、反思反馈修订及工具结果后的继续生成分别建立逻辑调用。工具执行期间不继承 Agent 的逻辑调用，工具内部模型请求独立记录。当前 `workflow.model_call_max_retries=5`，每次操作最多发送 6 次，网络和 schema 修复共享这 6 次；60 秒累计执行预算先用完时不继续发送。
 
-失败要点按 `workflow.criterion_retry_max_attempts` 重新执行，默认 2 包含首次，最多重跑该要点一次。新一轮要点执行产生新的逻辑调用及模型预算，仍受原合同截止时间和相同的全局并发上限控制。已经保存且版本兼容的成功要点直接复用。详细模式下，`state/criteria/<ID>.error.json` 累积失败尝试，最终 output 的 `attempt` 记录成功属于哪次要点执行；单个逻辑调用的 `retry_count` 不能代替整要点重试统计。模型网络/超时错误不能在同一次要点执行中通过批量摘要转为逐节点摘要来重置预算。
+失败要点按 `workflow.criterion_retry_max_attempts` 重新执行，默认 3 包含首次，最多重跑该要点两次。新一轮要点执行产生新的逻辑调用及模型预算，仍受原合同截止时间和相同的全局并发上限控制。已经保存且版本兼容的成功要点直接复用。详细模式下，`state/criteria/<ID>.error.json` 累积失败尝试，最终 output 的 `attempt` 记录成功属于哪次要点执行；单个逻辑调用的 `retry_count` 不能代替整要点重试统计。模型网络/超时错误不能在同一次要点执行中通过批量摘要转为逐节点摘要来重置预算。
 
 确定性的证据、锚点、覆盖或路由反馈属于业务修订，须在前次回答通过 schema 后进入；内部每次检查最多请求 2 次新结论，初始结论和反思后结论可以分别触发。它和传输/schema 重试分开记录，不表示整个要点只有一份 60 秒预算；合同仍受整任务硬时限约束。
 
@@ -123,3 +123,7 @@ result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的�
 恢复契约版本为 6；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。新写入的 criterion output 删除 tokens；工作流内存结果和返回值中的 token_stats 保留兼容，不用于准确模型 usage 统计。准确用量读取 logical_calls。旧任务文件不改名、不补写字段；旧 Reflector 日志缺少要点归属，不能可靠补回 H 编号。
 
 具体日志路径、开关和恢复实现分别在 endpoints/review/task_store.py、loggers/call_log.py、endpoints/review/review_state.py。详细 calls 的文件名说明见 [任务日志文件名阅读指南](TASK_LOG_FILENAME_GUIDE.md)。
+
+## 汇总建议与失败回退日志（2026-10-18）
+
+汇总前保存已完成审查结果，去重应用后更新最终审查日志。去重候选数、接受数、跳过数及逐组原因记录到汇总 trace 和 `summary.deduplication`；错误去重建议不删除原意见。汇总调用或输出校验耗尽时记录原始错误及 `summary.status=fallback`，只生成程序基础总览，报告和 API 明确披露。未知程序或文件错误不适用这一回退。所有修复仍使用原 60 秒累计预算和最多 6 次发送，不通过基础总览追加模型请求。

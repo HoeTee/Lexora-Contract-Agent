@@ -337,7 +337,11 @@ curl.exe -X POST "http://localhost:5000/api/review/jobs/status" `
 }
 ```
 
-任务状态为 `succeeded` 表示输出 DOCX 已成功生成。`criteria` 始终展示全部审查项；`execution_status` 为 `not_started / running / completed / incomplete / error`。`incomplete` 仅表示 Reflector 达到最大轮次后仍未完成确认。模型调用超时、结构化输出错误等异常先按统一模型预算处理；该次要点执行仍失败时，按 `workflow.criterion_retry_max_attempts` 再决定是否重跑该要点，默认共执行 2 次（含首次）。两次都失败后记为 `error`，已成功的其他要点不重跑。`review_result` 仅在执行产生有效审查结果时填写。调用方应同时读取 `quality` 汇总和 `criteria` 明细，不能只根据任务级 `status` 判断所有标准均已完成。
+任务状态为 `succeeded` 表示输出 DOCX 已成功生成。`criteria` 始终展示全部审查项；`execution_status` 为 `not_started / running / completed / incomplete / error`。`incomplete` 仅表示 Reflector 达到最大轮次后仍未完成确认。模型调用超时、结构化输出错误等异常先按统一模型预算处理；该次要点执行仍失败时，按 `workflow.criterion_retry_max_attempts` 再决定是否重跑该要点，默认共执行 3 次（含首次）。三次都失败后记为 `error`，已成功的其他要点不重跑。`review_result` 仅在执行产生有效审查结果时填写。调用方应同时读取 `quality` 汇总和 `criteria` 明细，不能只根据任务级 `status` 判断所有标准均已完成。
+
+汇总结果另以 `summary` 返回：新任务初始为 `status=not_started`，旧任务没有该字段时返回 null；正常为 `status=completed`；已知汇总模型或输出校验失败并交付程序基础总览时为 `status=fallback`，同时返回错误和可用的去重诊断。回退不会把失败要点改成完成；API 消息和报告均说明自动总结未生成，已确认审查意见保留。
+
+`output.kind` 表示下载内容身份：成功生成的审查报告为 `report`；任务失败或取消后提供的原合同为 `source`，使用原文件名。`output.ready=true` 仅表示可以下载，不能替代任务状态、要点质量与 summary 状态。
 
 | HTTP 状态码 | 返回场景 | 响应 |
 | --- | --- | --- |

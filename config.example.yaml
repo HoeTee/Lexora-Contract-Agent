@@ -47,8 +47,8 @@ workflow:
   max_orchestrator_concurrency: 2
   model_wait_timeout_seconds: 180
   model_call_timeout_seconds: 60
-  model_call_max_retries: 2
-  criterion_retry_max_attempts: 2
+  model_call_max_retries: 5
+  criterion_retry_max_attempts: 3
   subagent_allowed_tools:
   - contract_search
 queue:

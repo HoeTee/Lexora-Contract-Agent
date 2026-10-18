@@ -353,7 +353,7 @@ MODEL_CALL_MAX_RETRIES = _as_int(
     "workflow.model_call_max_retries",
 )
 CRITERION_RETRY_MAX_ATTEMPTS = _as_int(
-    cfg_optional("workflow", "criterion_retry_max_attempts", 2),
+    cfg_optional("workflow", "criterion_retry_max_attempts", 3),
     "workflow.criterion_retry_max_attempts",
 )
 if CRITERION_RETRY_MAX_ATTEMPTS < 1:

@@ -14,6 +14,19 @@ def present_submit_response(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def review_output_identity(task: dict[str, Any]) -> dict[str, Any]:
+    """Describe whether the downloadable file is an actual review or the source."""
+    status = task["status"]
+    source = status in {"failed", "cancelled"}
+    return {
+        "kind": "source" if source else "report" if status == "succeeded" else None,
+        "result_filename": (
+            task["input"]["contract_filename"] if source
+            else task["output"]["result_filename"]
+        ),
+    }
+
+
 def present_review_task(
     task: dict[str, Any],
     *,
@@ -36,6 +49,7 @@ def present_review_task(
         "message": task["message"],
         "error": task["error"],
         "quality": summarize_criteria(task.get("criteria") or []),
+        "summary": task.get("summary"),
         "criteria": task.get("criteria", []),
         "input": {
             "contract_filename": task["input"]["contract_filename"],
@@ -44,7 +58,7 @@ def present_review_task(
             "stored": "input" in Path(task["input"]["contract_path"]).parts,
         },
         "output": {
-            "result_filename": task["output"]["result_filename"],
+            **review_output_identity(task),
             "ready": (
                 terminal_status
                 and (result_path.exists() or source_fallback_available)

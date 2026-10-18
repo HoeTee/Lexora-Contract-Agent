@@ -43,7 +43,7 @@
 | ReflectorAgent | `agents/reflector.py` | 逐条质量复核 finding，按明确审计模式检查覆盖，并检查当前标准范围内有证据的实质漏检 | criterion + subagent_output + 检索证据 + finding_history + audit_mode | `{ status, feedback, finding_decisions[], coverage_gaps[] }` |
 | SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；程序只接受 edit anchor 与 placement 完全相同的重复组，不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题及 `incomplete_reviews` 未完成范围 | `{ overall_comment, priority_comments, duplicate_groups }` |
 
-同一审查要点在 Reflector 修订后由程序按原文 edit anchor 恢复已有 `issue_id`；新增问题若占用了已有编号，程序分配无碰撞后缀。Reflector 或修订模型调用失败、修订结果校验失败时抛回 criterion 恢复流程；完整重试耗尽后记录为该要点 `ERROR`。只要仍有至少一个有效要点，工作流继续生成总结和 DOCX；只有全部要点均失败时才终止整份任务。
+同一审查要点在 Reflector 修订后由程序按原文 edit anchor 恢复已有 `issue_id`；新增问题若占用了已有编号，程序分配无碰撞后缀。Reflector 或修订模型调用失败、修订结果校验失败时抛回 criterion 恢复流程；完整重试耗尽后记录为该要点 `ERROR`。只要仍有至少一个有效要点，工作流继续生成总结和 DOCX；执行阶段仅在全部要点均失败时中止。未知程序、状态保存、文件读写和 DOCX 生成错误仍导致任务失败。
 
 SubAgent 的一个 issue 含多个 edit anchor 时，FindingLedger 按锚点拆成独立 finding，并为拆分结果生成唯一的局部 `issue_id`；原 issue 的判断内容不变，每个位置仍分别进入 Reflector 与批注写入器。
 
@@ -129,7 +129,7 @@ class SummaryOutput:
 - `asyncio.gather` 负责并发调度：多条 criterion 可以同时进入等待队列，并在外部模型调用、检索或反思等待期间交错推进。
 - `asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)` 负责并发限制：同一时间最多允许指定数量的 criterion 进入 `execute_single_criterion()`；其余 coroutine 会等待 semaphore 释放。
 - 因此，当前并发边界是“多条 criterion / 多个 SubAgent 审查任务并发”，不是单个 SubAgent 内部把同一条标准拆成多个并发步骤。
-- 模型请求和输出修复共用 `workflow.model_call_timeout_seconds` 与 `model_call_max_retries`，当前默认每次操作 60 秒执行预算、最多发送 3 次。名额等待使用独立的 `workflow.model_wait_timeout_seconds`，默认累计 180 秒，不扣执行预算；两份预算和发送次数均不因重试重置。额度耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 交给要点恢复流程；`workflow.criterion_retry_max_attempts` 默认 2，包含首次，最多重新执行该失败要点一次。整要点尝试耗尽后该条记为 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
+- 模型请求和输出修复共用 `workflow.model_call_timeout_seconds` 与 `model_call_max_retries`，当前默认每次操作 60 秒执行预算、最多发送 6 次。名额等待使用独立的 `workflow.model_wait_timeout_seconds`，默认累计 180 秒，不扣执行预算；两份预算和发送次数均不因重试重置。额度耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 交给要点恢复流程；`workflow.criterion_retry_max_attempts` 默认 3，包含首次，最多重新执行该失败要点两次。整要点尝试耗尽后该条记为 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
 - 未知程序异常保持任务级失败；全部 criterion 都失败时也不生成伪成功结果。部分 criterion 失败时任务为 `succeeded`，同时以 `criteria[].execution_status=error`、`quality.error_criteria` 和 DOCX“未完成审查项”披露缺口。
 
 简化结构如下：
@@ -172,6 +172,16 @@ Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` �
 
 要点未完成时，已确认问题仍进入相同的批注和总结流程，包括写在总结位置的确认意见。Summarizer 同时收到 `incomplete_reviews`（要点名称、执行状态、已确认意见数），不能只因问题列表为空就称全部合规。报告首部独立列出“未完成审查项”；若已有部分确认意见，提示这些意见已列出、剩余内容尚未完成，避免把部分意见说成完整结论。
 
+## 汇总失败与去重建议的边界
+
+Summarizer 接收所有已确认意见，但不能自由配对不同原文位置。程序按完整 edit anchor 签名（type、id、去空白的 quoted_text）及 placement 生成至少包含两个不同 issue_key 的候选组，模型仅判断候选内是否属于同一事实、同一风险和同一修改动作。候选不包含无锚点问题或编号歧义项。
+
+汇总文字与可选去重建议分别校验。单个去重建议仍使用严格的 `SummaryDuplicateGroup` 检查；空合并列表、未知键、错位置、自合并及跨组重复或循环不会删除任何相关原意见。无效建议被跳过，原因记录到 `summary_metadata.skipped_group_details`；合法建议在应用时再次验证。新增的候选和审计字段属于内部执行数据，不是用户配置。
+
+工作流在调用汇总模型之前先保存审查结果，成功应用去重后再保存最终结果。汇总模型调用或 JSON/schema 修复耗尽时，只有已知 `ModelCallError` 和 `AgentOutputValidationError` 可以触发程序基础总览；不再发送新的模型请求，不重置预算。基础总览只列统计、已确认意见和未完成范围，报告独立注明“自动总结未生成”。原要点的 completed/incomplete/error 和质量统计不改变，H04 等失败项仍保持失败。
+
+工作流返回并在任务/API 中保存 `summary.status=completed|fallback`、错误信息及可用的去重诊断。回退时 API 消息与报告说明保持一致。真正整任务失败或取消后返回原件时，API 的 `output.kind=source` 并使用原文件名；正常审查报告为 `output.kind=report`。下载就绪不代表已完成全部审查。
+
 ## 架构边界
 
 - 简化工作流：无 web search、无制度 RAG，检索后端由 `retrieval.backend` 选择。
@@ -179,6 +189,8 @@ Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` �
 - 正文与附件分别审查；只有审查标准明确要求时才扩展正文与附件内容一致性检查。
 
 ## API 队列与进程边界
+
+下述 DB 0/DB 2 编号沿用部署模板；实际职责由 broker_url 和模型 redis_url 决定。本地当前配置为 broker DB 2、模型名额 DB 0，本轮不调整地址。
 
 `/web` 和 `/api` 是仅有的服务执行入口，OA 已移除。CLI 也通过 `/api` 提交。Web/API 写入 `task.json` 后，固定通过 `task_queue.review_queue` 投递到 Redis DB 0；Celery worker 执行 `review.run_job`。Broker 只保存 `client_dir + task_id` 调度消息，不保存合同、审查结果或恢复状态。入队失败明确报错，不回退到 API 进程执行。
 
@@ -205,7 +217,7 @@ state/
     <criterion_id>.error.json
 ```
 
-成功的 criterion 输出保留为恢复数据，版本兼容时直接复用。当前 `review_contract_version=7`；旧版计划和输出不复用，当前版计划还须通过共享 `ReviewExecutionPlan` 校验，不对旧平铺执行字段做兼容猜测。失败 criterion 按 `workflow.criterion_retry_max_attempts` 执行，默认 2 包含首次，即最多整条重跑一次；重跑的模型操作建立新预算，仍受原合同截止时间和同一全局并发上限约束。详细模式下，`error.json` 保留失败尝试，`output.json` 的 `attempt` 记录成功属于哪次执行。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败，也不提供硬超时后的自动整合同重投。
+成功的 criterion 输出保留为恢复数据，版本兼容时直接复用。当前 `review_contract_version=7`；旧版计划和输出不复用，当前版计划还须通过共享 `ReviewExecutionPlan` 校验，不对旧平铺执行字段做兼容猜测。失败 criterion 按 `workflow.criterion_retry_max_attempts` 执行，默认 3 包含首次，即最多整条重跑两次；重跑的模型操作建立新预算，仍受原合同截止时间和同一全局并发上限约束。详细模式下，`error.json` 保留失败尝试，`output.json` 的 `attempt` 记录成功属于哪次执行。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败，也不提供硬超时后的自动整合同重投。
 
 ## 全局模型并发
 

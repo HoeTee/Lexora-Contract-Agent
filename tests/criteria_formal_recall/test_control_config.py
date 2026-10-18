@@ -47,7 +47,7 @@ class ControlConfigurationTests(unittest.TestCase):
                 with patch.object(config, "CONFIG", raw), self.assertRaisesRegex(RuntimeError, "Removed configuration"):
                     config._validate_control_config()
 
-    def test_criterion_attempts_are_configurable_and_default_to_two(self):
+    def test_criterion_attempts_are_configurable_and_default_to_three(self):
         for value in (None, 2, 3):
             raw = deepcopy(config.CONFIG)
             if value is None:
@@ -56,7 +56,7 @@ class ControlConfigurationTests(unittest.TestCase):
                 raw["workflow"]["criterion_retry_max_attempts"] = value
             with self.subTest(value=value), patch("yaml.safe_load", return_value=raw), redirect_stdout(StringIO()), redirect_stderr(StringIO()):
                 loaded = runpy.run_path(config.__file__)
-                self.assertEqual(loaded["CRITERION_RETRY_MAX_ATTEMPTS"], value or 2)
+                self.assertEqual(loaded["CRITERION_RETRY_MAX_ATTEMPTS"], value or 3)
 
     def test_criterion_attempts_must_be_a_positive_integer(self):
         for value in (0, -1, 1.5, True):

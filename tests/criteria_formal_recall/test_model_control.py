@@ -539,7 +539,10 @@ class ModelControlIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.Event().wait()
             finally:
                 request_cancelled.set()
-        with task_execution(time.time() + 0.7):
+        # Redis round trips can exceed the old 0.7-second fixture deadline on
+        # Docker Desktop. Leave time to enter the request before testing its
+        # cancellation by the original contract deadline.
+        with task_execution(time.time() + 3):
             budget = ModelCallBudget(timeout_seconds=5, wait_timeout_seconds=5)
             operation = asyncio.create_task(execute_model(model_type="llm", model="test", caller="test",
                 request={}, send=send, budget=budget))
@@ -547,6 +550,7 @@ class ModelControlIntegrationTests(unittest.IsolatedAsyncioTestCase):
                 await self._wait_for_waiters(1)
                 await asyncio.sleep(0.3)
                 await self.semaphore.release_async(owner)
+                await asyncio.wait_for(request_started.wait(), timeout=2)
                 with self.assertRaises(TaskDeadlineExceeded) as caught:
                     await operation
             finally:

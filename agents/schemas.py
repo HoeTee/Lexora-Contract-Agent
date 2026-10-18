@@ -3,7 +3,7 @@ Pydantic schemas for validating structured agent outputs.
 """
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
@@ -258,6 +258,13 @@ class SummaryDuplicateGroup(StrictOutputModel):
     canonical_comment: str = Field(min_length=1, max_length=300)
     reason: str = Field(min_length=1)
 
+    @field_validator("keep_issue_key", "canonical_comment", "reason")
+    @classmethod
+    def nonblank_group_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("duplicate group text must not be blank")
+        return value
+
     @model_validator(mode="after")
     def validate_distinct_keys(self):
         if self.keep_issue_key in self.merge_issue_keys:
@@ -271,7 +278,9 @@ class SummaryDuplicateGroup(StrictOutputModel):
 class SummaryContentOutput(StrictOutputModel):
     overall_comment: str = "" # 总体审查总结
     priority_comments: list[str] = Field(default_factory=list) # 优先修改建议；使用 default_factory 来确保 priority_comments 字段默认为一个空列表，而不是 None
-    duplicate_groups: list[SummaryDuplicateGroup] = Field(default_factory=list)
+    # Optional merge suggestions are validated separately. A malformed suggestion
+    # must not discard otherwise valid summary text or consume another model send.
+    duplicate_groups: Any = Field(default_factory=list)
 
     @field_validator("priority_comments") # 字段验证
     @classmethod # 在实例方法创建前检验某字段
@@ -281,19 +290,14 @@ class SummaryContentOutput(StrictOutputModel):
         return value # 如果验证通过，返回原始值
 
     @model_validator(mode="after")
-    def validate_duplicate_group_membership(self):
-        merged_keys = [
-            issue_key
-            for group in self.duplicate_groups
-            for issue_key in group.merge_issue_keys
-        ]
-        if len(merged_keys) != len(set(merged_keys)):
-            raise ValueError("an issue may be merged by at most one duplicate group")
+    def validate_summary_has_text(self):
+        if not self.overall_comment.strip() and not self.priority_comments:
+            raise ValueError("summary must contain a nonblank overall_comment or priority comment")
         return self
 
 
 class SummaryOutput(SummaryContentOutput):
-    """Preferred concise summary shape used for the first three attempts."""
+    """Preferred concise summary; the final attempt may relax only its length."""
 
     @model_validator(mode="after") # 总体验证
     def validate_total_length(self):

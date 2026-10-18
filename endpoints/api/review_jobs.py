@@ -27,6 +27,7 @@ from endpoints.review.meta import (
 from endpoints.review.response import (
     present_review_task,
     present_submit_response,
+    review_output_identity,
 )
 from endpoints.review.result_upload import ResultUploadError, upload_result_file
 from endpoints.review.task_store import (
@@ -260,9 +261,12 @@ async def _export_review_job_result(
 
     task_id = task["task_id"]
     result_path = Path(task["output"]["result_path"])
-    if status in {"failed", "cancelled"} and not result_path.exists():
+    identity = review_output_identity(task)
+    if status in {"failed", "cancelled"}:
         source_path = Path(task["input"]["contract_path"])
         if source_path.exists():
+            # Failed output may contain a partially written report. Always
+            # restore the source when it is still available.
             copy_contract_to_result(source_path, result_path)
     if not result_path.exists():
         raise HTTPException(status_code=500, detail="Result file does not exist.")
@@ -271,7 +275,7 @@ async def _export_review_job_result(
         if not API_RESULT_UPLOAD_ENABLED:
             raise HTTPException(status_code=400, detail="Result URL output is disabled.")
         try:
-            result_url = await upload_result_file(result_path, result_path.name)
+            result_url = await upload_result_file(result_path, identity["result_filename"])
         except HTTPException as exc:
             write_task_log_event(
                 client_dir,
@@ -311,7 +315,8 @@ async def _export_review_job_result(
                 "task_id": task["task_id"],
                 "status": task["status"],
                 "output_type": "url",
-                "filename": result_path.name,
+                "filename": identity["result_filename"],
+                "output_kind": identity["kind"],
                 "url": result_url,
             }
         )
@@ -319,7 +324,11 @@ async def _export_review_job_result(
     return FileResponse(
         path=result_path,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=result_path.name,
+        filename=identity["result_filename"],
+        headers={
+            "X-Review-Output-Kind": str(identity["kind"]),
+            "X-Review-Task-Status": status,
+        },
     )
 
 

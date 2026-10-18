@@ -1,6 +1,6 @@
 # 并发、超时与重试配置说明
 
-更新日期：2026-10-17。本文包括模型等待与执行分开计时的修改；尚未部署到公司内网，尚未复测内网模型的耗时和审查质量。第 13.1—13.3 节保留此前版本的验证记录，本次计时修改的验证见第 13.4 节。
+更新日期：2026-10-18。当前模型额外发送上限为 5、要点总尝试次数为 3，模型累计执行预算仍为 60 秒；没有新增配置。尚未部署到公司内网。第 13 节保留各历史版本验证记录，不代表当前配置的运行结果。
 
 本文说明合同任务、模型调用和 Redis 名额的配置，列出旧配置的迁移方式。配置解释以当前代码为准。地址、凭据和模型名称继续使用各部署自己的设置，不把本地开发机的模型配置套用到内网。
 
@@ -30,7 +30,7 @@ Web 提交 / HTTP API 提交（CLI 也作为 HTTP API 客户）
 | Redis DB 2 | 模型名额、等待顺序、等待截止时间和共享容量策略 | 项目模型控制代码及 Redis Lua |
 | 共享数据挂载目录 | 输入文件、`task.json`、要点进度、日志、报告 | 项目工作流和任务存储 |
 
-DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存和故障范围。分库便于区分职责，不提供独立资源隔离。Kombu 是 Celery 的依赖库，不需要单独部署服务。
+上表按提交的部署模板说明 DB 职责；实际由 `queue.broker_url` 和 `model_semaphore.*.redis_url` 决定。本地当前配置使用 broker DB 2、模型名额 DB 0，本轮保留这两个地址，不因文档示意修改部署。DB 0、DB 2 是同一个 Redis 服务内的逻辑数据库，共享 CPU、内存和故障范围。分库便于区分职责，不提供独立资源隔离。Kombu 是 Celery 的依赖库，不需要单独部署服务。
 
 任务消息携带 `client_dir` 和 `task_id`，不携带整份合同。`client_dir` 是数据范围标识：API 任务目前位于 `<DATA_DIR>/api/<task_id>/`；Web 标识 `web:<tenant_id>` 对应 `<DATA_DIR>/web/<tenant_id>/<task_id>/`。本次不调整数据目录结构。
 
@@ -66,7 +66,7 @@ DocxIndex 的索引摘要、embedding 建库和检索扫描仍使用现有内部
 | `max_reflection_rounds` | 内网值 10 保留 | 每个要点的业务反思轮数，不是网络错误重试次数 |
 | `subagent_allowed_tools` | 保留 `contract_search` | 子 Agent 的可用工具列表，不控制网络并发 |
 | `max_api_concurrent_reviews` | 移除 | 合同执行数量统一由三个 worker 决定 |
-| `criterion_retry_max_attempts` | 恢复，默认 2 | 每个要点的总尝试次数，包含首次；首次执行抛出异常后，最多重新执行该失败要点一次。已保存且版本兼容的成功结果直接复用 |
+| `criterion_retry_max_attempts` | 当前值及缺省值 3 | 每个要点的总尝试次数，包含首次；首次执行抛出异常后，最多重新执行该失败要点两次。已保存且版本兼容的成功结果直接复用 |
 
 ### 3.3 `model_semaphore.<类型>`
 
@@ -104,7 +104,7 @@ DocxIndex 的索引摘要、embedding 建库和检索扫描仍使用现有内部
 | --- | --- | --- |
 | `workflow.model_wait_timeout_seconds` | 新增，默认 180 | 同一次逻辑操作累计等待 Redis 名额的预算，LLM、embedding、reranker 共用此配置；必须是大于 0 的有限数 |
 | `workflow.model_call_timeout_seconds` | 保留 60，排除名额等待 | 一次模型操作的累计执行预算，作用于 LLM、embedding、reranker，包含请求、校验、输出修复和重试退避 |
-| `workflow.model_call_max_retries` | 当前默认 2 | 首次发送之外最多再发送两次，即每次操作最多发送 3 次；网络重试、JSON/schema 修复共用次数 |
+| `workflow.model_call_max_retries` | 当前值及示例值 5 | 首次发送之外最多再发送五次，即每次操作最多发送 6 次；网络重试、JSON/schema 修复共用次数，仍共用 60 秒累计执行预算 |
 
 一次操作从进入模型调度开始，分别累计两种时间：
 
@@ -124,9 +124,9 @@ DocxIndex 的索引摘要、embedding 建库和检索扫描仍使用现有内部
 
 一个 scan 批次的一次判断是一次模型操作；不同独立批次分别计时。Agent 正常进入下一步、工具结果续写或业务反思时产生新的操作。同一结果的 JSON/结构修复继续使用原操作预算。
 
-每个失败要点默认最多两次执行，第二次执行中的新逻辑操作建立新的等待预算、60 秒执行预算和默认最多 3 次发送额度，但仍使用相同的 Redis 并发上限，且截止时间不超过原合同的任务截止时间。其他已经成功的要点不重跑。取消及合同硬时限不会因此获得新的一份执行时间。
+每个失败要点默认最多三次执行，第二、三次执行中的新逻辑操作建立新的等待预算、60 秒执行预算和最多 6 次发送额度，但仍使用相同的 Redis 并发上限，且截止时间不超过原合同的任务截止时间。其他已经成功的要点不重跑。取消及合同硬时限不会因此获得新的一份执行时间。
 
-这次恢复的是默认发送上限和整要点尝试次数，未恢复旧版各层独立叠加重试。若首次请求出现一次网络错误，已经使用 2 次发送，随后 JSON/schema 修复只剩 1 次发送；若剩余时间不足，即使还剩次数也不能发送。无网络错误且时间足够时，JSON/schema 允许首次生成加两次修复，共 3 次发送。
+这次恢复的是默认发送上限和整要点尝试次数，未恢复旧版各层独立叠加重试。若一次网络重试已使用 2 次发送，随后 JSON/schema 修复最多再发送 4 次；若剩余时间不足，即使还剩次数也不能发送。无网络错误且时间足够时，JSON/schema 允许首次生成加五次修复，共 6 次发送。首次请求已耗尽 60 秒时，该操作没有剩余时间重试；由要点恢复机制决定是否开始下一次整要点尝试，不把单次操作预算延长成 360 秒。
 
 各入口的边界如下。同一行中的所有请求仍使用同一类 Redis 全局名额；“独立操作”只表示有自己的截止时间和发送次数，不增加并发上限。
 
@@ -310,7 +310,7 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 
 旧共享格式 `model_semaphore.limits`、共享的 Redis/lease 等字段需要迁到逐类型结构；旧 `llm.global_semaphore_*` 和 `llm.max_global_concurrent_requests` 不再接收。单独的模型 timeout、rerank 重试退避字段也不再接收。配置加载明确报迁移错误，防止旧字段被静默忽略。
 
-已移除内部独立次数：DocxIndex 限流错误额外重试、`complete_model()` 独立修复次数、scan 整批重试。HTTP 时限统一从剩余预算派生，不再沿用 DocxIndex 默认 120 秒。`workflow.criterion_retry_max_attempts` 已恢复为有效配置，不再属于迁移时删除的字段；当前默认和示例值均为 2。
+已移除内部独立次数：DocxIndex 限流错误额外重试、`complete_model()` 独立修复次数、scan 整批重试。HTTP 时限统一从剩余预算派生，不再沿用 DocxIndex 默认 120 秒。`workflow.criterion_retry_max_attempts` 已恢复为有效配置，不再属于迁移时删除的字段；当前缺省值和示例值均为 3。
 
 | 保留配置 | 作用边界 |
 | --- | --- |
@@ -357,8 +357,8 @@ workflow:
   max_orchestrator_concurrency: 2
   model_wait_timeout_seconds: 180
   model_call_timeout_seconds: 60
-  model_call_max_retries: 2
-  criterion_retry_max_attempts: 2
+  model_call_max_retries: 5
+  criterion_retry_max_attempts: 3
   subagent_allowed_tools:
     - "contract_search"
 
