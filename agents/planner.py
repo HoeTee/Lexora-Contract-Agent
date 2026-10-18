@@ -12,6 +12,7 @@ from agents.json_utils import chat_until_valid_json
 from agents.prompts import get_prompt, render_prompt
 from agents.schemas import StrategyExtractionOutput
 from routing.criteria import split_criteria_from_docx
+from routing.schemas import ReviewExecutionPlan
 
 
 __all__ = ["PlannerAgent", "assemble_tasks", "split_criteria_from_docx"]
@@ -59,18 +60,15 @@ def assemble_tasks(skeletons: list[dict], strategies: dict[str, dict]) -> list[d
     criteria_list: list[dict] = []
     for item in skeletons:
         strategy = strategies.get(item["id"]) or {}
-        route = strategy.get("route")
-        placement = strategy.get("placement")
+        execution = ReviewExecutionPlan.model_validate(strategy.get("execution") or {})
+        execution.review_instruction = execution.review_instruction.strip()
         criteria_list.append({
             "id": item["id"],
             "number": item["number"],
             "section": item["section"],
             "criterion": item["criterion"],
             "check_points": [item["criterion"]],
-            "review_instruction": (strategy.get("review_instruction") or "").strip(),
-            "route": route,
-            "placement": placement,
-            "fallback_llm_route": route is None,
+            "execution": execution.model_dump(mode="json"),
             "review_source": "uploaded",
             "policy_id": "",
         })

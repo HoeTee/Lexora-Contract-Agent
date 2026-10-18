@@ -19,7 +19,7 @@ from endpoints.review.task_store import (
 
 
 CRITERION_ID_PATTERN = re.compile(r"^[A-Za-z0-9_.-]+$")
-REVIEW_CONTRACT_VERSION = 6
+REVIEW_CONTRACT_VERSION = 7
 
 
 def _safe_criterion_id(criterion_id: str) -> str:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import unittest
 
 from agents.orchestrator import OrchestratorAgent
+from routing.schemas import ReviewExecutionPlan
 from tools.docxindex.retriever import _format_anchor_context
 
 
@@ -162,7 +163,7 @@ class AttachmentContextTests(unittest.TestCase):
         context = _format_anchor_context(index, [
             _evidence(41, 41, "body/section"), _evidence(180, 180),
         ])
-        criterion = {"comparison_audit": True, "evidence_region": "attachments"}
+        execution = ReviewExecutionPlan(audit_mode={"comparison": True}, evidence_region="attachments")
         opinion = {
             "status": "compliant", "issues": [],
             "comparison_decisions": [{
@@ -172,10 +173,10 @@ class AttachmentContextTests(unittest.TestCase):
             }],
         }
 
-        self.assertEqual(OrchestratorAgent._policy_output_errors(opinion, criterion, context), [])
+        self.assertEqual(OrchestratorAgent._execution_output_errors(opinion, execution, context), [])
 
         opinion["comparison_decisions"][0]["evidence_anchor_id"] = "path:body/p999"
-        self.assertTrue(OrchestratorAgent._policy_output_errors(opinion, criterion, context))
+        self.assertTrue(OrchestratorAgent._execution_output_errors(opinion, execution, context))
 
     def test_unstructured_or_conflicting_identity_stays_unknown(self) -> None:
         index = _index()

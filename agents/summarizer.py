@@ -203,6 +203,20 @@ class SummarizerAgent(Agent):
             "criteria_count": len(results),
             "issue_count": len(issues),
             "issues": issues,
+            "incomplete_reviews": [
+                {
+                    "criterion_id": result.get("criterion_id", ""),
+                    "section": result.get("section", ""),
+                    "criterion": result.get("criterion", ""),
+                    "execution_status": (
+                        "error" if result.get("status") == "ERROR" else "incomplete"
+                    ),
+                    "confirmed_issue_count": len(result.get("issues") or []),
+                }
+                for result in results
+                if result.get("status") == "ERROR"
+                or result.get("quality_status") == "incomplete"
+            ],
         }
         prompt = render_prompt(
             "SUMMARIZER_TASK_PROMPT",

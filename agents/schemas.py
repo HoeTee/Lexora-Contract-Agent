@@ -7,7 +7,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
-from routing.schemas import RoutePlan
+from routing.schemas import ReviewExecutionPlan
 
 
 _INTERNAL_LOCATION_PATTERN = re.compile(
@@ -49,20 +49,11 @@ class PlannerOutput(StrictOutputModel):
     criteria: list[PlannerCriterion] = Field(min_length=1)
 
 
-class ExtractedPlacement(StrictOutputModel):
-    """Where the review findings of one criterion should be written."""
-
-    target: Literal["summary", "inline", "inline_at_title", "tail", "body_end"]
-    note: str = ""
-
-
 class CriterionStrategy(StrictOutputModel):
     """Planner-extracted execution strategy for one criterion."""
 
     id: str = Field(min_length=1)
-    review_instruction: str = ""
-    route: RoutePlan
-    placement: ExtractedPlacement
+    execution: ReviewExecutionPlan
 
 
 class StrategyExtractionOutput(StrictOutputModel):
@@ -207,12 +198,11 @@ class SubAgentOutput(StrictOutputModel):
                 decision.edit_anchor_id,
                 decision.evidence_anchor_type,
                 decision.evidence_anchor_id,
-                decision.decision,
             )
             for decision in self.comparison_decisions
         ]
         if len(comparison_keys) != len(set(comparison_keys)):
-            raise ValueError("comparison_decisions must not repeat the same edit/evidence comparison")
+            raise ValueError("comparison_decisions must not repeat the same edit/evidence pair")
         return self
 
 
@@ -248,17 +238,6 @@ class ReflectorOutput(StrictOutputModel):
         if len(finding_ids) != len(set(finding_ids)):
             raise ValueError("finding_decisions must contain each finding_id at most once")
         context = info.context or {}
-        missing_finding_ids = set(context.get("missing_finding_ids", ()))
-        needs_revision = any(item.decision == "revise" for item in self.finding_decisions)
-        needs_restoration = any(
-            item.finding_id in missing_finding_ids and item.decision == "confirm"
-            for item in self.finding_decisions
-        )
-        if self.status == "PASS" and (self.coverage_gaps or needs_revision):
-            raise ValueError("PASS accepts the result after confirm/remove and must not contain revise or coverage_gaps")
-        if self.status == "REJECT" and not (needs_revision or needs_restoration or self.coverage_gaps):
-            raise ValueError("REJECT requires a finding_decision=revise, a confirmed missing finding to restore, or a concrete coverage_gap; use PASS when confirm/remove resolves every finding")
-
         if "required_finding_ids" in context:
             required_ids = set(context["required_finding_ids"])
             returned_ids = set(finding_ids)
@@ -268,11 +247,8 @@ class ReflectorOutput(StrictOutputModel):
                 raise ValueError(
                     f"finding_decisions must cover exactly the input findings; unknown={unknown_ids}; missing={missing_ids}"
                 )
-        if self.status == "PASS" and any(
-            item.finding_id in missing_finding_ids and item.decision != "remove"
-            for item in self.finding_decisions
-        ):
-            raise ValueError("PASS requires remove for missing_previous_findings; use REJECT with confirm/revise if a missing finding must be restored")
+        # Aggregate PASS/REJECT is advisory. The orchestrator resolves individual
+        # decisions and pending work without asking the model to change a label.
         return self
 
 

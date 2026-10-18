@@ -10,6 +10,7 @@ from docx import Document
 from agents.orchestrator import OrchestratorAgent
 from agents.schemas import SubAgentOutput
 from routing import load_mandatory_tasks
+from routing.schemas import ReviewExecutionPlan
 from tools.document.reporting.docx_report import deduplicate_review_results_by_range
 from workflow.workflow import ContractReviewWorkflow
 
@@ -21,11 +22,12 @@ class MandatoryRoutingTests(unittest.TestCase):
         self.assertEqual(len(tasks), 18)
         self.assertEqual([task["id"] for task in tasks], [f"H{i:02d}" for i in range(1, 19)])
         self.assertTrue(all(task["review_source"] == "mandatory" for task in tasks))
-        self.assertTrue(all(not task["fallback_llm_route"] for task in tasks))
+        self.assertTrue(all(task["execution"]["route"] is not None for task in tasks))
+        self.assertTrue(all("fallback_llm_route" not in task for task in tasks))
         self.assertEqual(tasks[11]["dedupe_domain"], "language_quality")
         self.assertEqual(tasks[14]["dedupe_domain"], "language_quality")
-        self.assertEqual(tasks[10]["evidence_region"], "attachments")
-        methods = {step["method"] for task in tasks for step in task["route"]["steps"]}
+        self.assertEqual(tasks[10]["execution"]["evidence_region"], "attachments")
+        methods = {step["method"] for task in tasks for step in task["execution"]["route"]["steps"]}
         self.assertEqual(methods, {"title", "region", "rule", "scan", "hybrid"})
 
     def test_h01_handles_basic_fields_without_subject_name_ownership(self) -> None:
@@ -41,10 +43,10 @@ class MandatoryRoutingTests(unittest.TestCase):
     def test_h10_owns_subject_validity_and_consistency(self) -> None:
         task = load_mandatory_tasks()[9]
 
-        self.assertEqual(task["placement"]["target"], "inline")
-        self.assertEqual(task["edit_region"], "")
-        self.assertEqual(task["evidence_region"], "")
-        self.assertTrue(task["coverage_audit"])
+        self.assertEqual(task["execution"]["placement"]["target"], "inline")
+        self.assertEqual(task["execution"]["edit_region"], "")
+        self.assertEqual(task["execution"]["evidence_region"], "")
+        self.assertTrue(task["execution"]["audit_mode"]["coverage"])
         self.assertNotIn("redacted_subject_audit", task)
         joined_check_points = "\n".join(task["check_points"])
         self.assertIn("每一处甲方、乙方等主体名称", joined_check_points)
@@ -78,7 +80,9 @@ xml_anchor_id: path:body/p111
             ],
         }
 
-        errors = OrchestratorAgent._policy_output_errors(incomplete, task, context)
+        errors = OrchestratorAgent._execution_output_errors(
+            incomplete, ReviewExecutionPlan.model_validate(task["execution"]), context,
+        )
 
         self.assertEqual(errors, [])
 
@@ -109,13 +113,15 @@ xml_anchor_id: path:body/p111
             ],
         }
 
-        self.assertEqual(OrchestratorAgent._policy_output_errors(complete, task, context), [])
+        self.assertEqual(OrchestratorAgent._execution_output_errors(
+            complete, ReviewExecutionPlan.model_validate(task["execution"]), context,
+        ), [])
 
     def test_h07_scopes_date_and_term_checks_without_attachments(self) -> None:
         task = load_mandatory_tasks()[6]
 
         self.assertEqual(
-            task["route"]["steps"],
+            task["execution"]["route"]["steps"],
             [
                 {
                     "method": "region",
@@ -144,16 +150,24 @@ xml_anchor_id: path:body/p111
     def test_h06_only_section_level_problem_uses_payment_title(self) -> None:
         task = load_mandatory_tasks()[5]
 
-        self.assertEqual(task["placement"]["target"], "inline")
+        self.assertEqual(task["execution"]["placement"]["target"], "inline")
         joined_check_points = "\n".join(task["check_points"])
         self.assertIn("同一个标题 edit 最多承载一个章节整体问题", joined_check_points)
         self.assertIn("必须锚定直接包含该问题的具体原文", joined_check_points)
+
+    def test_h11_keeps_original_checkpoints(self) -> None:
+        task = load_mandatory_tasks()[10]
+
+        self.assertEqual(task["check_points"], [
+            "仅寻找正文与附件对同一事项的约定；附件作为客观基准，正文与附件不一致时修改正文。不检查正文内部两条之间的矛盾。",
+            "每个问题必须同时提供正文 edit 和附件 evidence；不得把正文不存在的额外要求补写到附件，也不得在没有两侧证据时编造一致性问题。",
+        ])
 
     def test_h18_compares_body_references_with_titles_without_attachment_bodies(self) -> None:
         task = load_mandatory_tasks()[17]
 
         self.assertEqual(
-            task["route"]["steps"],
+            task["execution"]["route"]["steps"],
             [
                 {
                     "method": "scan",
@@ -175,8 +189,8 @@ xml_anchor_id: path:body/p111
                 },
             ],
         )
-        self.assertTrue(task["comparison_audit"])
-        self.assertEqual(task["evidence_region"], "attachments")
+        self.assertTrue(task["execution"]["audit_mode"]["comparison"])
+        self.assertEqual(task["execution"]["evidence_region"], "attachments")
 
     def test_h18_comparison_audit_requires_complete_paired_decisions(self) -> None:
         task = load_mandatory_tasks()[17]
@@ -193,10 +207,11 @@ xml_anchor_type: paragraph
 xml_anchor_id: path:body/p219
 内容：
 附件一：服务清单"""
-        missing = OrchestratorAgent._policy_output_errors(
-            {"issues": [], "comparison_decisions": []}, task, context
+        missing = OrchestratorAgent._execution_output_errors(
+            {"issues": [], "comparison_decisions": []},
+            ReviewExecutionPlan.model_validate(task["execution"]), context,
         )
-        self.assertTrue(any("缺少正文引用锚点" in error for error in missing))
+        self.assertTrue(any("comparison_decisions" in error and "path:body/p70" in error for error in missing))
 
         valid = SubAgentOutput.model_validate({
             "status": "issues_found",
@@ -222,7 +237,9 @@ xml_anchor_id: path:body/p219
                 "reason": "正文为产品清单，实际附件为服务清单。",
             }],
         }).model_dump(mode="json")
-        self.assertEqual(OrchestratorAgent._policy_output_errors(valid, task, context), [])
+        self.assertEqual(OrchestratorAgent._execution_output_errors(
+            valid, ReviewExecutionPlan.model_validate(task["execution"]), context,
+        ), [])
 
     def test_h18_allows_one_paragraph_to_reference_multiple_attachments(self) -> None:
         base = {
@@ -276,8 +293,10 @@ xml_anchor_id: path:body/p219
         planner = SimpleNamespace(
             extract_strategies=AsyncMock(return_value={
                 "U01": {
-                    "route": {"steps": [{"method": "scan"}], "fallback": False},
-                    "placement": {"target": "inline", "note": ""},
+                    "execution": {
+                        "route": {"steps": [{"method": "scan"}], "fallback": False},
+                        "placement": {"target": "inline", "note": ""},
+                    },
                 }
             }),
             token_usage={"total_tokens": 12},

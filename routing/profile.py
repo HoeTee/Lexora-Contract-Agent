@@ -2,24 +2,17 @@
 
 import hashlib
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
-from routing.schemas import RoutePlan
+from routing.schemas import AuditMode, Placement, ReviewExecutionPlan, RoutePlan
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MANDATORY_PROFILE_PATH = PROJECT_ROOT / "resources" / "criteria" / "criteria-routes.yaml"
 MANDATORY_CRITERIA_COUNT = 18
-
-
-class Placement(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    target: Literal["summary", "inline", "inline_at_title", "tail", "body_end"]
-    note: str = ""
 
 
 class MandatoryPolicy(BaseModel):
@@ -73,21 +66,25 @@ def load_mandatory_tasks() -> list[dict[str, Any]]:
         raise ValueError("mandatory route profile policies must be ordered H01..H18")
     tasks: list[dict[str, Any]] = []
     for policy in profile.policies:
+        execution = ReviewExecutionPlan(
+            route=policy.route,
+            placement=policy.placement,
+            review_instruction=policy.review_instruction,
+            audit_mode=AuditMode(
+                coverage=policy.coverage_audit,
+                comparison=policy.comparison_audit,
+            ),
+            edit_region=policy.edit_region,
+            evidence_region=policy.evidence_region,
+        )
         tasks.append({
             "id": policy.id,
             "section": policy.section,
             "criterion": policy.criterion,
             "check_points": policy.check_points,
-            "review_instruction": policy.review_instruction,
-            "route": policy.route.model_dump(mode="json"),
-            "placement": policy.placement.model_dump(mode="json"),
-            "fallback_llm_route": False,
+            "execution": execution.model_dump(mode="json"),
             "review_source": "mandatory",
             "policy_id": policy.id,
-            "coverage_audit": policy.coverage_audit,
-            "comparison_audit": policy.comparison_audit,
-            "edit_region": policy.edit_region,
-            "evidence_region": policy.evidence_region,
             "dedupe_priority": policy.dedupe_priority,
             "dedupe_domain": policy.dedupe_domain,
         })

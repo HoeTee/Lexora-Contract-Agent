@@ -28,6 +28,7 @@ from endpoints.review.review_state import ReviewStateStore
 from endpoints.review.task_store import write_task_log_event
 from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_info
 from loggers.trace_logger import get_current_trace
+from routing.schemas import ReviewExecutionPlan
 from tools.docxindex.indexing import estimate_tokens
 
 
@@ -179,34 +180,33 @@ class _FindingLedger:
             for finding_id, decision in decisions.items()
             if finding_id in required_ids
         })
-        self.history.append(
-            {
-                "round": round_number,
-                "opinion": deepcopy(opinion),
-                "review": deepcopy(review),
-                "unknown_finding_ids": unknown_ids,
-                "undecided_finding_ids": missing_ids,
-            }
-        )
         current_ids = {item["finding_id"] for item in current}
         all_resolved = all(
             self.decisions.get(finding_id, {}).get("decision") in {"confirm", "remove"}
             for finding_id in current_ids
-            if finding_id in decisions
         )
         removed_missing = all(
             self.decisions.get(item["finding_id"], decisions.get(item["finding_id"], {})).get("decision") == "remove"
             for item in missing
-            if item["finding_id"] in decisions
         )
-        return (
-            review["status"] == "PASS"
-            and not review.get("coverage_gaps")
+        passed = (
+            not review.get("coverage_gaps")
             and not unknown_ids
             and not missing_ids
             and all_resolved
             and removed_missing
+            and len(decisions) == len(review.get("finding_decisions", []))
+            and (bool(required_ids) or review["status"] == "PASS")
         )
+        self.history.append({
+            "round": round_number,
+            "opinion": deepcopy(opinion),
+            "review": deepcopy(review),
+            "unknown_finding_ids": unknown_ids,
+            "undecided_finding_ids": missing_ids,
+            "effective_status": "PASS" if passed else "REJECT",
+        })
+        return passed
 
     def apply_removals(self, opinion: dict) -> dict:
         """Remove rejected findings and reconcile their explicit audit dispositions."""
@@ -709,18 +709,20 @@ class OrchestratorAgent:
     @staticmethod
     def _comparison_audit_errors(
         parsed_opinion: dict,
-        criterion: dict,
+        execution: ReviewExecutionPlan,
         context: str,
     ) -> list[str]:
         """Require every source-side candidate to be paired with objective evidence."""
-        if not criterion.get("comparison_audit"):
+        if not execution.audit_mode.comparison:
             return []
-        evidence_region = str(criterion.get("evidence_region") or "").strip()
+        evidence_region = execution.evidence_region
+        edit_region = execution.edit_region
         evidence = OrchestratorAgent._retrieval_anchor_evidence(context)
         expected_edits = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
             for item in evidence
-            if item.get("source_region") != evidence_region
+            if (item.get("source_region") == edit_region if edit_region
+                else item.get("source_region") != evidence_region)
         }
         allowed_evidence = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
@@ -756,6 +758,16 @@ class OrchestratorAgent:
             issue_edits.update(edits)
             for edit in edits:
                 issue_evidence.setdefault(edit, set()).update(evidences)
+            if edits - expected_edits:
+                errors.append(render_prompt(
+                    "ORCHESTRATOR_ERROR_POLICY_EDIT_REGION", issue_id=issue.get("issue_id"),
+                    region=edit_region or "待检查证据范围", anchors=sorted(edits - expected_edits),
+                ))
+            if evidences - allowed_evidence:
+                errors.append(render_prompt(
+                    "ORCHESTRATOR_ERROR_POLICY_EVIDENCE_REGION", issue_id=issue.get("issue_id"),
+                    region=evidence_region, anchors=sorted(evidences - allowed_evidence),
+                ))
 
         for decision in decisions:
             edit = (
@@ -783,21 +795,21 @@ class OrchestratorAgent:
         return errors
 
     @staticmethod
-    def _policy_output_errors(
+    def _execution_output_errors(
         parsed_opinion: dict,
-        criterion: dict,
+        execution: ReviewExecutionPlan,
         context: str = "",
     ) -> list[str]:
-        """Validate output invariants explicitly declared by a routing policy."""
+        """Validate output requirements shared by every review execution."""
         comparison_errors = OrchestratorAgent._comparison_audit_errors(
             parsed_opinion,
-            criterion,
+            execution,
             context,
         )
-        if criterion.get("comparison_audit"):
+        if execution.audit_mode.comparison:
             return comparison_errors
-        edit_region = str(criterion.get("edit_region") or "").strip()
-        evidence_region = str(criterion.get("evidence_region") or "").strip()
+        edit_region = execution.edit_region
+        evidence_region = execution.evidence_region
         if not edit_region and not evidence_region:
             return comparison_errors
         retrieved_evidence = OrchestratorAgent._retrieval_anchor_evidence(context)
@@ -854,20 +866,20 @@ class OrchestratorAgent:
         sub_agent: Agent,
         parsed_opinion: dict,
         raw_output: str,
-        criterion: dict,
+        execution: ReviewExecutionPlan,
         base_context: str,
         *,
-        coverage_audit: bool,
         anchor_validation: dict[str, int] | None = None,
         max_revisions: int = 2,
     ) -> tuple[dict, str, str, dict[str, int]]:
         """Run all deterministic output checks and request complete revisions on failure."""
+        coverage_audit = execution.audit_mode.coverage
         totals = anchor_validation if anchor_validation is not None else {}
         for revision in range(max_revisions + 1):
-            # Only the criterion can enable audit modes, not unsolicited model fields.
+            # Only execution requirements can enable audits, not model output.
             if not coverage_audit and "coverage_decisions" in parsed_opinion:
                 parsed_opinion["coverage_decisions"] = []
-            if not criterion.get("comparison_audit") and "comparison_decisions" in parsed_opinion:
+            if not execution.audit_mode.comparison and "comparison_decisions" in parsed_opinion:
                 parsed_opinion["comparison_decisions"] = []
             review_context = self._review_evidence_context(base_context, sub_agent)
             sub_agent._review_context = review_context
@@ -885,7 +897,7 @@ class OrchestratorAgent:
                 grouped_errors.extend(
                     render_prompt("ORCHESTRATOR_ERROR_GROUP_COVERAGE", error=error) for error in coverage_errors
                 )
-            policy_errors = self._policy_output_errors(parsed_opinion, criterion, review_context)
+            policy_errors = self._execution_output_errors(parsed_opinion, execution, review_context)
             grouped_errors.extend(
                 render_prompt("ORCHESTRATOR_ERROR_GROUP_POLICY", error=error) for error in policy_errors
             )
@@ -1047,14 +1059,13 @@ class OrchestratorAgent:
         start = time.time()
         evidence_tokens = 0
 
-        route_override = None
-        if criterion.get("route") and not criterion.get("fallback_llm_route"):
-            route_override = criterion["route"]
-        placement = criterion.get("placement") if isinstance(criterion.get("placement"), dict) else {}
+        execution = ReviewExecutionPlan.model_validate(criterion.get("execution") or {})
+        route_override = execution.route.model_dump(mode="json") if execution.route else None
+        placement = execution.placement.model_dump(mode="json") if execution.placement else {}
         placement_target = placement.get("target", "inline")
-        review_instruction = (criterion.get("review_instruction") or "").strip()
-        coverage_audit = bool(criterion.get("coverage_audit"))
-        comparison_audit = bool(criterion.get("comparison_audit"))
+        review_instruction = execution.review_instruction
+        coverage_audit = execution.audit_mode.coverage
+        comparison_audit = execution.audit_mode.comparison
 
         # Step 1: Retrieve relevant contract sections
         context, evidence_tokens = await self._retrieve_context(
@@ -1086,7 +1097,11 @@ class OrchestratorAgent:
         if coverage_audit:
             task_prompt += get_prompt("ORCHESTRATOR_COVERAGE_AUDIT")
         if comparison_audit:
-            task_prompt += get_prompt("ORCHESTRATOR_COMPARISON_AUDIT")
+            task_prompt += render_prompt(
+                "ORCHESTRATOR_COMPARISON_AUDIT",
+                edit_region=execution.edit_region or "对照证据范围之外的检索原文",
+                evidence_region=execution.evidence_region,
+            )
         if review_instruction:
             task_prompt += render_prompt(
                 "ORCHESTRATOR_TRIGGER_INSTRUCTION", review_instruction=review_instruction,
@@ -1110,9 +1125,8 @@ class OrchestratorAgent:
                 sub_agent,
                 parsed_opinion,
                 sub_agent_opinion,
-                criterion,
+                execution,
                 context,
-                coverage_audit=coverage_audit,
             )
         )
 
@@ -1155,8 +1169,8 @@ class OrchestratorAgent:
         quality_status = "incomplete"
         reflector_tokens = 0
         for round_num in range(MAX_REFLECTION_ROUNDS):
-            if criterion.get("review_source") == "mandatory":
-                missing_text_review_notes = get_prompt("ORCHESTRATOR_MANDATORY_EVIDENCE_NOTES")
+            if execution.route is not None:
+                missing_text_review_notes = get_prompt("ORCHESTRATOR_ROUTED_EVIDENCE_NOTES")
             else:
                 missing_text_review_notes = await self._build_missing_text_review_notes(parsed_opinion, cid)
             reflector = ReflectorAgent(criterion_id=cid, settings=self.settings)
@@ -1194,28 +1208,36 @@ class OrchestratorAgent:
                     + gap_feedback
                 ).strip()
             status = review["status"]
-            if self.logger:
-                self.logger.log(
-                    phase="Reflect", sender="Reflector", receiver=f"SubAgent_{cid}",
-                    action=f"reflect({cid}, round={round_num+1})",
-                    input_summary=reflector_input,
-                    output_summary=f"{status}: {review.get('feedback', '')}",
-                    tokens=reflector.token_usage.get("total_tokens", 0),
-                    duration=round(time.time() - start, 2)
-                )
             passed = ledger.review(parsed_opinion, review, round_num + 1)
             if passed:
                 resolved_opinion = ledger.apply_removals(parsed_opinion)
                 errors = self._anchor_validation_errors(resolved_opinion, review_context)
                 if coverage_audit:
                     errors += self._coverage_audit_errors(resolved_opinion, context)
-                errors += self._policy_output_errors(resolved_opinion, criterion, review_context)
+                errors += self._execution_output_errors(resolved_opinion, execution, review_context)
                 if errors:
                     passed = False
+                    ledger.history[-1]["effective_status"] = "REJECT"
                     ledger.history[-1]["validation_errors"] = errors
                     review["feedback"] += "\n" + "\n".join(errors)
                 else:
                     parsed_opinion = resolved_opinion
+            if self.logger:
+                self.logger.log(
+                    phase="Reflect", sender="Reflector", receiver=f"SubAgent_{cid}",
+                    action=f"reflect({cid}, round={round_num+1})",
+                    input_summary=reflector_input,
+                    output_summary=json.dumps({
+                        "reported_status": status,
+                        "effective_status": ledger.history[-1]["effective_status"],
+                        "finding_decisions": review.get("finding_decisions", []),
+                        "coverage_gaps": review.get("coverage_gaps", []),
+                        "validation_errors": ledger.history[-1].get("validation_errors", []),
+                        "feedback": review.get("feedback", ""),
+                    }, ensure_ascii=False),
+                    tokens=reflector.token_usage.get("total_tokens", 0),
+                    duration=round(time.time() - start, 2),
+                )
             if passed:
                 quality_status = "passed"
                 print(f"[Orchestrator] {cid}: PASS after {round_num+1} round(s)")
@@ -1248,9 +1270,8 @@ class OrchestratorAgent:
                                 sub_agent,
                                 parsed_opinion,
                                 sub_agent_opinion,
-                                criterion,
+                                execution,
                                 context,
-                                coverage_audit=coverage_audit,
                                 anchor_validation=anchor_validation,
                             )
                         )
@@ -1284,8 +1305,9 @@ class OrchestratorAgent:
         confirmed_issues = ledger.confirmed_issues(parsed_opinion)
         unresolved_issues = ledger.unresolved_issues(parsed_opinion)
         final_status = (
-            "ISSUES_FOUND" if confirmed_issues or unresolved_issues
-            else status_map["not_applicable" if parsed_opinion["status"] == "not_applicable" else "compliant"]
+            ("ISSUES_FOUND" if confirmed_issues else
+             status_map["not_applicable" if parsed_opinion["status"] == "not_applicable" else "compliant"])
+            if quality_status == "passed" else None
         )
 
         return {
@@ -1462,7 +1484,7 @@ class OrchestratorAgent:
         return final_results
 
 
-def _criterion_progress_from_result(result: dict) -> dict:
+def review_progress_from_result(result: dict) -> dict:
     status = str(result.get("status") or "").lower()
     execution_status = "error" if status == "error" else (
         "incomplete" if result.get("quality_status") == "incomplete" else "completed"
@@ -1470,7 +1492,7 @@ def _criterion_progress_from_result(result: dict) -> dict:
     return {
         "criterion_id": str(result.get("criterion_id") or ""),
         "execution_status": execution_status,
-        "review_result": None if execution_status == "error" else status,
+        "review_result": (status or None) if execution_status == "completed" else None,
         "error": (
             {
                 "type": str(result.get("error_type") or "CriterionError"),
@@ -1480,6 +1502,10 @@ def _criterion_progress_from_result(result: dict) -> dict:
             else None
         ),
     }
+
+
+# Existing internal callers can use the same implementation during migration.
+_criterion_progress_from_result = review_progress_from_result
 
 
 async def _emit_criterion_progress(

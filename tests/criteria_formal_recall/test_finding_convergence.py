@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from agents.orchestrator import OrchestratorAgent, _FindingLedger
+from routing.schemas import ReviewExecutionPlan
 
 
 def opinion():
@@ -44,7 +45,7 @@ class FindingConvergenceTests(unittest.TestCase):
         self.assertEqual(value["status"], "issues_found")
 
     def test_pass_cannot_hide_pending_work_or_unknown_findings(self):
-        for change in ("revise", "gap", "unknown", "missing", "reject"):
+        for change in ("revise", "gap", "unknown", "missing", "duplicate"):
             with self.subTest(change=change):
                 value = opinion()
                 review = decision()
@@ -57,8 +58,21 @@ class FindingConvergenceTests(unittest.TestCase):
                 elif change == "missing":
                     review["finding_decisions"] = []
                 else:
-                    review["status"] = "REJECT"
+                    review["finding_decisions"] *= 2
                 self.assertFalse(_FindingLedger(value).review(value, review, 10))
+
+    def test_empty_rejection_never_finishes_via_empty_all(self):
+        value = {"status": "compliant", "issues": []}
+        self.assertFalse(_FindingLedger(value).review(value, {
+            "status": "REJECT", "finding_decisions": [], "coverage_gaps": [],
+        }, 10))
+
+    def test_missing_historical_confirmation_requires_restoration(self):
+        value = opinion()
+        ledger = _FindingLedger(value)
+        empty = {"status": "compliant", "issues": []}
+        self.assertFalse(ledger.review(empty, decision("confirm"), 10))
+        self.assertTrue(ledger.review(empty, decision("remove", "REJECT"), 10))
 
     def test_removed_finding_keeps_bounded_reasons_for_next_reviewer(self):
         value = opinion()
@@ -85,13 +99,13 @@ class FindingConvergenceTests(unittest.TestCase):
             "\n\n---\n\nsource_region: attachments\nxml_anchor_type: paragraph\nxml_anchor_id: path:body/p2\n内容：\nTwo-year warranty"
         )
         self.assertEqual(resolved["comparison_decisions"][0]["decision"], "mismatch")
-        self.assertTrue(OrchestratorAgent._policy_output_errors(
-            resolved, {"comparison_audit": True, "evidence_region": "attachments"}, context,
+        self.assertTrue(OrchestratorAgent._execution_output_errors(
+            resolved, ReviewExecutionPlan(audit_mode={"comparison": True}, evidence_region="attachments"), context,
         ))
 
 
 class OrchestratorConvergenceTests(unittest.IsolatedAsyncioTestCase):
-    async def test_last_round_remove_produces_consistent_completed_result(self):
+    async def run_final_round(self, review):
         value = opinion()
         context = "source_region: body\nxml_anchor_type: paragraph\nxml_anchor_id: path:body/p1\n内容：\nThree-year warranty"
 
@@ -108,23 +122,41 @@ class OrchestratorConvergenceTests(unittest.IsolatedAsyncioTestCase):
             async def review(self, agent_output, **kwargs):
                 data = json.loads(agent_output)
                 self_outer.assertEqual(data["audit_mode"], {"coverage": True, "comparison": False})
-                return decision()
+                return copy.deepcopy(review)
 
         self_outer = self
-        orchestrator = OrchestratorAgent()
+        self.events = []
+        logger = SimpleNamespace(log=lambda **event: self.events.append(event))
+        orchestrator = OrchestratorAgent(logger=logger)
         with patch("agents.orchestrator.Agent", FakeAgent), patch("agents.orchestrator.ReflectorAgent", FakeReflector), \
                 patch("agents.orchestrator.chat_until_valid_json", AsyncMock(return_value=(value, json.dumps(value)))), \
                 patch.object(orchestrator, "_retrieve_context", AsyncMock(return_value=(context, 0))), \
                 patch.object(orchestrator, "_get_tools", AsyncMock(return_value=[])), \
                 patch("agents.orchestrator.MAX_REFLECTION_ROUNDS", 1):
             result = await orchestrator.execute_single_criterion({
-                "id": "H11", "criterion": "Consistency", "review_source": "mandatory",
-                "coverage_audit": True,
+                "id": "U77", "criterion": "Consistency", "review_source": "uploaded",
+                "execution": {"audit_mode": {"coverage": True}},
             })
+        return result
+
+    async def test_last_round_rejected_removal_finishes_without_another_model_call(self):
+        result = await self.run_final_round(decision(status="REJECT"))
         self.assertEqual(result["quality_status"], "passed")
         self.assertEqual(result["status"], "COMPLIANT")
         self.assertEqual(result["issues"], [])
         self.assertEqual(result["unresolved_issues"], [])
+        self.assertEqual(result["quality_history"][-1]["review"]["status"], "REJECT")
+        self.assertEqual(result["quality_history"][-1]["effective_status"], "PASS")
+        event = next(event for event in self.events if event["phase"] == "Reflect")
+        logged = json.loads(event["output_summary"])
+        self.assertEqual((logged["reported_status"], logged["effective_status"]), ("REJECT", "PASS"))
+
+    async def test_last_round_pass_with_pending_revision_has_no_final_conclusion(self):
+        result = await self.run_final_round(decision(action="revise", status="PASS"))
+        self.assertEqual(result["quality_status"], "incomplete")
+        self.assertIsNone(result["status"])
+        self.assertEqual(len(result["unresolved_issues"]), 1)
+        self.assertEqual(result["quality_history"][-1]["effective_status"], "REJECT")
 
     async def test_revision_discards_old_feedback_and_preserves_current_evidence(self):
         value = opinion()
@@ -151,7 +183,7 @@ class OrchestratorConvergenceTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(orchestrator, "_validate_and_repair_anchors", return_value={}), \
                 patch.object(orchestrator, "_anchor_validation_errors", return_value=[]):
             output, _, _, _ = await orchestrator._validate_and_revise_output(
-                SimpleNamespace(), value, "raw", {}, "", coverage_audit=False,
+                SimpleNamespace(), value, "raw", ReviewExecutionPlan(), "",
             )
         self.assertEqual(output["coverage_decisions"], [])
         self.assertEqual(output["comparison_decisions"], [])

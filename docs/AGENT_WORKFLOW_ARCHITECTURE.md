@@ -30,18 +30,18 @@
 - “照抄”等编辑指令不作为最终意见，也不能在目标文字不明确时编造提示语。通用提醒返回 `anchors=[]` 进入总结；具体缺陷才锚定问题原文。
 - 字段是否未填写由 LLM 结合字段名称、相邻文字、表格关系和合同语境判断，不由业务正则硬匹配。`[合同中心-合同编码]`、`#乙方合同号#【     】`、字段后的 `XX` 是提示词示例；`【5‰】`、`【5%】` 等已有值和条件性补件说明是反例。批注必须直接引用对应字段和未填写位置。
 - 分公司签约授权与代理人签署授权分别审查。条件句不证明条件成立，未检索到外部授权书不等于未授权。有对应主体事实且仍需外部材料确认时，以待核实事项和空 anchors 进入总结；不将纯假设写成缺陷。
-- H11 只报告正文与附件在同一事项、同一条件、同一指标上的互斥约定。概括与细则互补不直接构成冲突，响应、到场处理和最终修复分别比较。`quoted_text` 定位现有原文，`comment_text` 提供修改建议；附件编号和标题以证据提供的归属为准。
+- 审查业务范围以输入的原 checkpoint 为准，不为某个要点编号在 Agent 代码内增加判断分支。`quoted_text` 定位现有原文，`comment_text` 提供修改建议；附件编号、标题和归属由检索证据提供，模型不能自行编造。
 - Summarizer 必须保留输入中的不确定性，不将“待核实”升级成“授权缺失”或“签署无效”。输出字段和工作流阶段不变。
 
 这些是模型行为约束，不是确定性正确率保证；需要正式审查产物验证，不能以提示词文本测试代替实际准确度评估。
 
 | Agent | 文件 | 职责 | 输入 | 输出 |
 | --- | --- | --- | --- | --- |
-| PlannerAgent | `agents/planner.py` | 只为用户上传标准提取五种路线和批注去向 | 用户标准 skeleton | `CriterionStrategy` |
+| PlannerAgent | `agents/planner.py` | 只为用户上传标准提取执行计划，固定标准从已有 YAML 转换同一种计划 | 用户标准 skeleton | `CriterionStrategy.execution` |
 | OrchestratorAgent | `agents/orchestrator.py` | 逐条派发 SubAgent，串联检索、反思、并发控制 | `criteria_list` | `results` |
 | SubAgent | `agents/base_agent.py` 的 `Agent` + `SUB_AGENT_BASE_PROMPT` | 审查单条标准；配置完整覆盖审计时逐证据返回判断 | 标准 + 检索上下文 + 可见工具 | `SubAgentOutput`（status / issues / coverage_decisions） |
 | ReflectorAgent | `agents/reflector.py` | 逐条质量复核 finding，按明确审计模式检查覆盖，并检查当前标准范围内有证据的实质漏检 | criterion + subagent_output + 检索证据 + finding_history + audit_mode | `{ status, feedback, finding_decisions[], coverage_gaps[] }` |
-| SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；程序只接受 edit anchor 与 placement 完全相同的重复组，不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题 | `{ overall_comment, priority_comments, duplicate_groups }` |
+| SummarizerAgent | `agents/summarizer.py` | 生成总览并标记跨要点语义重复；程序只接受 edit anchor 与 placement 完全相同的重复组，不改变锚点，不删除独立问题 | 带稳定 issue_key 的已确认问题及 `incomplete_reviews` 未完成范围 | `{ overall_comment, priority_comments, duplicate_groups }` |
 
 同一审查要点在 Reflector 修订后由程序按原文 edit anchor 恢复已有 `issue_id`；新增问题若占用了已有编号，程序分配无碰撞后缀。Reflector 或修订模型调用失败、修订结果校验失败时抛回 criterion 恢复流程；完整重试耗尽后记录为该要点 `ERROR`。只要仍有至少一个有效要点，工作流继续生成总结和 DOCX；只有全部要点均失败时才终止整份任务。
 
@@ -51,21 +51,25 @@ SubAgent 的一个 issue 含多个 edit anchor 时，FindingLedger 按锚点拆�
 
 ## 智能体结构化输出 schema
 
-各 agent 的输出由 `agents/schemas.py` 的 Pydantic 模型严格校验（`extra=forbid`，不接受未定义字段）。类与字段如下：
+各 agent 的输出由 `agents/schemas.py` 的 Pydantic 模型严格校验（`extra=forbid`，不接受未定义字段）。检索与执行能力类型统一定义在 `routing/schemas.py`；Agent schema 复用共享类型，不再重复定义批注位置。主要类与字段如下：
 
 ```python
-class PlannerCriterion:
-    id: str
-    section: str
-    criterion: str
-    check_points: list[str]
+class ReviewExecutionPlan:                 # routing/schemas.py，共享内部执行计划
+    route: RoutePlan | None = None
+    placement: Placement | None = None
+    review_instruction: str = ""
+    audit_mode: AuditMode                  # coverage / comparison，默认 false
+    edit_region: str = ""
+    evidence_region: str = ""
 
-class PlannerOutput:
-    criteria: list[PlannerCriterion]
+class CriterionStrategy:
+    id: str
+    execution: ReviewExecutionPlan
 
 class SubAgentIssue:
     issue_id: str
     risk_level: Literal["high", "medium", "low"]
+    issue_comment: str
     anchors: list[SubAgentAnchor]
     reasoning: str
     criterion: str
@@ -73,7 +77,6 @@ class SubAgentIssue:
 
 class SubAgentAnchor:
     role: Literal["edit", "evidence"]    # 修改位置 / 对照证据
-    defect_type: Literal["missing_value", "inconsistency", "wording", "other"]
     xml_anchor_type: Literal["paragraph", "table"]
     xml_anchor_id: str
     quoted_text: str
@@ -83,6 +86,8 @@ class SubAgentOutput:
     status: Literal["compliant", "issues_found", "not_applicable"]
     applicability_reason: str = ""
     issues: list[SubAgentIssue] = []
+    coverage_decisions: list[EvidenceCoverageDecision] = []
+    comparison_decisions: list[EvidenceComparisonDecision] = []
 
 class ReflectorOutput:
     status: Literal["PASS", "REJECT"]
@@ -97,20 +102,26 @@ class SummaryOutput:
 
 ## 单条标准的执行与反思循环
 
+固定 YAML 的 `route/placement/review_instruction/coverage_audit/comparison_audit/edit_region/evidence_region` 由 `routing/profile.py` 一次性转换为 `task.execution`。用户上传标准由 Planner 返回同一种 `ReviewExecutionPlan`。原用户配置文件写法不变，不新增配置，也不保留一套旧平铺执行字段供运行时猜测。
+
+`execution.route` 负责怎样取原文；`execution.audit_mode` 负责是否要求逐项记录和成对比较；`execution.edit_region/evidence_region` 限定批注与佐证的来源；`execution.placement` 指定报告去向。检索方法不能代替审查要求：同一个 `scan` 路线可以服务不同检查能力。启用成对比较时必须明确对照证据范围；不能默认所有比较都是正文与附件。Orchestrator 读取执行计划，不按 H 编号或固定/上传来源选择检查规则。`route=None` 明确表示由通用检索流程选择路线，取代重复的 `fallback_llm_route` 标记。
+
 `OrchestratorAgent.execute_single_criterion` 负责一条审查标准的完整处理：
 
 1. 检索：调用 MCP `contract_search`（query = 标准 + 检查要点），由 `retrieval.backend` 选择 LlamaIndex 或 docxindex，得到合同相关片段 `context`。检索证据不添加展示序号，只提供 `xml_anchor_type/xml_anchor_id` 给 SubAgent 逐字符复用，避免展示序号与真实段落锚点混淆。
 2. SubAgent 审查：以 `SUB_AGENT_BASE_PROMPT` 创建 `SubAgent_<cid>`，只向模型暴露 `workflow.subagent_allowed_tools` 白名单中的 MCP 工具，输出 `SubAgentOutput`，`status` 为 `compliant` / `issues_found` / `not_applicable`，`issues[].anchors` 含 `xml_anchor_type`、`xml_anchor_id`、`quoted_text`、`comment_text` 等字段。
 3. 若 `status == compliant` 且未启用完整覆盖审计：短路，跳过反思直接返回。
 4. 否则进入反思循环，最多 `MAX_REFLECTION_ROUNDS` 轮：
-   - 固定任务直接使用强制路由已提供的证据，不对 `anchors=[]` 问题反复执行缺失文本补充检索；用户上传要点仍可执行该补充检索。每轮 Reflector 使用独立会话，并接收每个 finding 最近两次裁决、理由和位置组成的 `finding_history`；改变前轮判断时须说明新增证据或前轮具体错误。
-   - `audit_mode.coverage/comparison` 直接来自当前 criterion 的审计标记。模型自行返回的 `coverage_decisions/comparison_decisions` 不能开启完整审计；当前标准范围内有证据的实质漏检仍须检查。
-   - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`。`PASS` 接受执行 confirm 保留、remove 删除后的结果，允许当轮删除当前问题；不得同时包含 revise、漏检或需要恢复的历史问题。裁决必须完整、编号合法。程序应用删除后再次校验原文锚点、已启用的覆盖要求和标准约束，通过后才结束。
+   - 已有明确执行路线时使用路线提供的证据，不对 `anchors=[]` 问题反复执行缺失文本补充检索；路线为空时可执行通用补充检索。这一行为与要点来源无关。每轮 Reflector 使用独立会话，并接收每个 finding 最近两次裁决、理由和位置组成的 `finding_history`；改变前轮判断时须说明新增证据或前轮具体错误。
+   - `audit_mode.coverage/comparison` 来自 `execution.audit_mode`。模型自行返回的 `coverage_decisions/comparison_decisions` 不能开启完整审计；当前标准范围内有证据的实质漏检仍须检查。
+   - `Reflector.review` 对每个 finding 返回 `confirm/revise/remove`，含义分别为保留、修改、撤销。schema 检查字段、枚举、重复或未知编号、漏裁决等结构要求；是否完成由 Orchestrator 检查具体待办与结果，不能只看模型返回的 `PASS/REJECT`。全部当前问题均确认或撤销，没有待修改、待恢复或漏检事项时，程序应用删除，再次校验原文锚点、已启用的覆盖/比较要求和标准约束，通过才结束。即使模型原始总标记为 `REJECT`，满足这些条件也能当轮完成；原始 `PASS` 带待修改事项则仍不能结束。空拒绝而无具体处理内容不能自动完成。原始总标记保留在 `quality_history[].review.status`，程序有效结论记为 `quality_history[].effective_status`。
    - 需要修订时重建 SubAgent 会话，保留系统提示、原任务和最新检索证据，附上当前完整输出及本轮指令；反思修订以结构化裁决和问题映射为准，旧相反反馈不再叠加。修订仍指向同一 edit 原文缺陷时，Orchestrator 恢复原 `issue_id`，避免模型改号导致 finding 身份漂移。
    - 达到轮次上限时标记 `quality_status=incomplete`，但已确认 finding 仍可交付，未确认 finding 只留在状态和日志中。反思调用异常会进入 criterion 恢复流程，重试耗尽后记录为 `ERROR`。
 
 每次 Planner、SubAgent、Reflector、Summarizer 等 `Agent` 调用在发送前统一计算完整消息及工具 schema 的 token 预算。`llm.max_prompt_tokens` 默认 88k 且配置值必须小于 90k；超限请求不会发送，trace 的 LLM input 记录 `estimated_prompt_tokens` 和 `prompt_token_limit`。
-5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。存在已确认或未解决问题时 `status=ISSUES_FOUND`；最后一个问题删除后同步为 `COMPLIANT`（仍不适用时为 `NOT_APPLICABLE`），不沿用删除前的状态。`quality_status` 独立记录复核是否通过，不能仅凭问题数组为空认定审查完整。
+5. 返回该 criterion 结果：`issues` 只含已确认问题，`unresolved_issues` 只供日志诊断；另含 `criterion_id`、`section`、`status`、`quality_status`、`quality_history` 和 `finding_decisions`。复核完成且保留问题时为 `ISSUES_FOUND + passed`，全部问题撤销时为 `COMPLIANT + passed`；不适用时保留 `NOT_APPLICABLE`。初审合规短路仍为 `COMPLIANT + not_required`。仍有待办且达到轮数上限时为 `status=null + quality_status=incomplete`，不会把尚未完成的范围标成合规或完整的问题结论；已确认问题仍可写入报告。模型或输出校验重试耗尽则为 `ERROR`。
+
+运行中要点更新与最终 API 列表都通过 `review_progress_from_result()` 转换。未完成项统一为 `execution_status=incomplete, review_result=null`，错误项为 `error/null`，已完成项才公开 `compliant/issues_found/not_applicable`。这不改变 Celery 或整份任务的 `status`；部分要点未完成时，整份任务仍按已有规则返回可下载的部分结果，并由 `quality.incomplete_count` 和报告“未完成审查项”披露缺口。
 
 并发与容错（`execute_criteria`）：
 
@@ -148,7 +159,7 @@ results = await asyncio.gather(
 ```text
 固定 criteria-routes.yaml -> 18个 mandatory tasks
 用户上传标准 DOCX -> deterministic split -> Planner -> uploaded tasks
-mandatory tasks + uploaded tasks -> criteria_list
+mandatory tasks + uploaded tasks -> criteria_list（共享 execution 结构）
 合同 DOCX     -> DOCX XML anchor nodes -> 按 retrieval.backend 构建临时索引
 每条 criterion: 检索 context -> SubAgent(可调用白名单工具) -> (Reflector 反思循环) -> 单条结果
 所有单条结果 -> Workflow 按 placement 和 edit/evidence 分流
@@ -158,6 +169,8 @@ mandatory tasks + uploaded tasks -> criteria_list
 ```
 
 Workflow 只把已确认问题交给 Summarizer 和 DOCX Writer；`role=edit` 才能写原文批注，`role=evidence` 只保留为审查证据。完全相同字符范围只保留一条：固定任务优先于上传任务，同来源按路线配置的 `dedupe_priority` 选择，顺序仅作为同优先级兜底。对显式配置为同一 `dedupe_domain` 的不同强制要点，同段中一个字符范围完全包含另一范围时，也按优先级保留一条；未配置领域、同一要点内或仅部分相交时不自动合并。其他不同范围只有在 Summarizer 明确判定为同一事实、同一风险和同一修改动作时才合并。固定提示来自路线配置的 `review_instruction`，不由正则猜测去向。
+
+要点未完成时，已确认问题仍进入相同的批注和总结流程，包括写在总结位置的确认意见。Summarizer 同时收到 `incomplete_reviews`（要点名称、执行状态、已确认意见数），不能只因问题列表为空就称全部合规。报告首部独立列出“未完成审查项”；若已有部分确认意见，提示这些意见已列出、剩余内容尚未完成，避免把部分意见说成完整结论。
 
 ## 架构边界
 
@@ -192,7 +205,7 @@ state/
     <criterion_id>.error.json
 ```
 
-成功的 criterion 输出保留为恢复数据，版本兼容时直接复用。失败 criterion 按 `workflow.criterion_retry_max_attempts` 执行，默认 2 包含首次，即最多整条重跑一次；重跑的模型操作建立新预算，仍受原合同截止时间和同一全局并发上限约束。详细模式下，`error.json` 保留失败尝试，`output.json` 的 `attempt` 记录成功属于哪次执行。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败，也不提供硬超时后的自动整合同重投。
+成功的 criterion 输出保留为恢复数据，版本兼容时直接复用。当前 `review_contract_version=7`；旧版计划和输出不复用，当前版计划还须通过共享 `ReviewExecutionPlan` 校验，不对旧平铺执行字段做兼容猜测。失败 criterion 按 `workflow.criterion_retry_max_attempts` 执行，默认 2 包含首次，即最多整条重跑一次；重跑的模型操作建立新预算，仍受原合同截止时间和同一全局并发上限约束。详细模式下，`error.json` 保留失败尝试，`output.json` 的 `attempt` 记录成功属于哪次执行。Redis broker 不承担业务状态持久化。当前恢复边界不覆盖 ingest、build_index 和 plan 失败，也不提供硬超时后的自动整合同重投。
 
 ## 全局模型并发
 

@@ -18,6 +18,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
+from pydantic import ValidationError
+
 from config import (
     LOGGING_ENABLED,
     MCP_SERVER_TARGET,
@@ -28,13 +30,14 @@ from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_t
 from loggers.call_log import set_call_context, reset_call_context
 from agents.base_agent import Settings
 from agents.planner import PlannerAgent, assemble_tasks, split_criteria_from_docx
-from agents.orchestrator import OrchestratorAgent
+from agents.orchestrator import OrchestratorAgent, review_progress_from_result
 from agents.summarizer import SummarizerAgent, apply_summary_duplicate_groups
 from mcp_service.client.client import MinimalMCPClient
 from endpoints.runtime.errors import classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
 from endpoints.review.task_store import summarize_criteria
 from routing import load_mandatory_tasks, mandatory_source_manifest
+from routing.schemas import ReviewExecutionPlan
 from tools.document.reporting.docx_report import deduplicate_review_results_by_range
 
 
@@ -49,29 +52,20 @@ def _public_criteria(criteria_list: list[dict], results: list[dict]) -> list[dic
         criterion_id = str(criterion["id"])
         result = by_id.get(criterion_id)
         if result is None:
-            execution_status = "not_started"
-            review_result = None
-            error = None
-        elif str(result.get("status") or "").upper() == "ERROR":
-            execution_status = "error"
-            review_result = None
-            error = {
-                "type": str(result.get("error_type") or "CriterionError"),
-                "message": str(result.get("error_message") or "Criterion execution failed."),
+            progress = {
+                "execution_status": "not_started",
+                "review_result": None,
+                "error": None,
             }
         else:
-            execution_status = (
-                "incomplete" if result.get("quality_status") == "incomplete" else "completed"
-            )
-            review_result = str(result.get("status") or "").lower() or None
-            error = None
+            progress = review_progress_from_result(result)
         entries.append(
             {
                 "id": criterion_id,
                 "criterion": str(criterion.get("criterion") or ""),
-                "execution_status": execution_status,
-                "review_result": review_result,
-                "error": error,
+                "execution_status": progress["execution_status"],
+                "review_result": progress["review_result"],
+                "error": progress["error"],
             }
         )
     return entries
@@ -81,8 +75,6 @@ def _confirmed_review_instruction(result: dict) -> str | None:
     """Return a fixed summary instruction only when a confirmed issue authorizes it."""
     placement = result.get("placement") or {}
     if placement.get("target", "inline") != "summary":
-        return None
-    if str(result.get("status") or "").upper() != "ISSUES_FOUND":
         return None
     if not result.get("issues"):
         return None
@@ -146,16 +138,24 @@ def _prepare_inline_results(results: list[dict]) -> tuple[list[dict], list[str]]
 
 
 def _incomplete_review_notices(results: list[dict]) -> list[str]:
-    """Build user-facing notices for criteria that produced no valid result."""
+    """Disclose missing conclusions while retaining any confirmed partial issues."""
     notices: list[str] = []
     for result in results:
-        if result.get("status") != "ERROR":
+        if (
+            result.get("status") != "ERROR"
+            and result.get("quality_status") != "incomplete"
+        ):
             continue
         criterion = str(result.get("criterion") or "").strip()
         section = str(result.get("section") or "").strip()
         label = f"{section}：{criterion}" if section and criterion else criterion or section
         if label:
-            notices.append(f"{label}（本次未完成，审查结果不包含该项结论。）")
+            detail = (
+                "已确认意见已列出，其余内容尚未完成审查。"
+                if result.get("issues")
+                else "审查结果不包含该项结论。"
+            )
+            notices.append(f"{label}（本次未完成，{detail}）")
     return notices
 
 
@@ -699,7 +699,16 @@ class ContractReviewWorkflow:
         criteria = plan.get("criteria")
         if not isinstance(criteria, list):
             return None
-        return [item for item in criteria if isinstance(item, dict)]
+        validated: list[dict] = []
+        for item in criteria:
+            if not isinstance(item, dict) or not isinstance(item.get("execution"), dict):
+                return None
+            try:
+                execution = ReviewExecutionPlan.model_validate(item["execution"])
+            except ValidationError:
+                return None
+            validated.append({**item, "execution": execution.model_dump(mode="json")})
+        return validated
 
     async def _phase_generate_annotated_docx(
         self,

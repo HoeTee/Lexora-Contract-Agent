@@ -48,19 +48,18 @@ class ReflectorOutputContractTests(unittest.TestCase):
                 self.assertEqual(parsed.status, "PASS")
                 self.assertEqual(parsed.finding_decisions[0].decision, decision)
 
-    def test_pass_cannot_leave_a_revision_or_coverage_gap(self):
-        for output in (
-            reflection(decision="revise"),
-            reflection(gaps=[coverage_gap()]),
-        ):
-            with self.subTest(output=output), self.assertRaises(ValidationError):
-                ReflectorOutput.model_validate(output)
+    def test_aggregate_labels_do_not_discard_structured_work(self):
+        for output in (reflection(decision="revise"), reflection(gaps=[coverage_gap()])):
+            with self.subTest(output=output):
+                parsed = ReflectorOutput.model_validate(output)
+                self.assertEqual(parsed.status, "PASS")
+                self.assertEqual(parsed.model_dump()["finding_decisions"], output["finding_decisions"])
 
-    def test_reject_must_identify_executable_remaining_work(self):
+    def test_reject_label_is_preserved_for_program_resolution(self):
         for decisions in ([], reflection()["finding_decisions"], reflection(decision="confirm")["finding_decisions"]):
             output = {"status": "REJECT", "finding_decisions": decisions}
-            with self.subTest(decisions=decisions), self.assertRaisesRegex(ValidationError, "REJECT requires"):
-                ReflectorOutput.model_validate(output)
+            with self.subTest(decisions=decisions):
+                self.assertEqual(ReflectorOutput.model_validate(output).status, "REJECT")
 
     def test_reject_accepts_a_revision_or_a_concrete_gap(self):
         for output in (
@@ -79,13 +78,11 @@ class ReflectorOutputContractTests(unittest.TestCase):
         output["finding_decisions"].append(reflection(finding_id="F002")["finding_decisions"][0])
         self.assertEqual(len(ReflectorOutput.model_validate(output, context=context).finding_decisions), 2)
 
-    def test_pass_cannot_confirm_a_missing_historical_finding(self):
+    def test_missing_historical_decision_reaches_the_program_unchanged(self):
         context = {"required_finding_ids": {"F001"}, "missing_finding_ids": {"F001"}}
-        with self.assertRaisesRegex(ValidationError, "missing_previous_findings"):
-            ReflectorOutput.model_validate(reflection(decision="confirm"), context=context)
-        self.assertEqual(ReflectorOutput.model_validate(reflection(), context=context).status, "PASS")
-        rejected = reflection(status="REJECT", decision="revise")
-        self.assertEqual(ReflectorOutput.model_validate(rejected, context=context).status, "REJECT")
+        parsed = ReflectorOutput.model_validate(reflection(decision="confirm"), context=context)
+        self.assertEqual(parsed.finding_decisions[0].decision, "confirm")
+        self.assertEqual(parsed.status, "PASS")
 
     def test_duplicate_finding_ids_remain_invalid(self):
         output = reflection()
@@ -99,8 +96,7 @@ class ReflectorOutputContractTests(unittest.TestCase):
         parsed = ReflectorOutput.model_validate(output, context=context)
         self.assertEqual(parsed.status, "REJECT")
         self.assertEqual(parsed.finding_decisions[0].decision, "confirm")
-        with self.assertRaisesRegex(ValidationError, "REJECT requires"):
-            ReflectorOutput.model_validate(output, context={"required_finding_ids": {"F001"}})
+        self.assertEqual(ReflectorOutput.model_validate(output, context={"required_finding_ids": {"F001"}}).status, "REJECT")
 
 
 class ReflectorSchemaRepairTests(unittest.IsolatedAsyncioTestCase):
@@ -157,12 +153,18 @@ class ReflectorSchemaRepairTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(budgets[0].sends, len(sent_requests))
         return result, sent_requests, records[0]
 
-    async def test_remove_only_rejection_repairs_to_pass_within_one_logical_call(self):
-        result, requests, record = await self.run_reflector([reflection(status="REJECT"), reflection()])
-        self.assertEqual((result["status"], result["finding_decisions"][0]["decision"]), ("PASS", "remove"))
-        self.assertIn("REJECT requires", requests[1]["messages"][-1]["content"])
-        self.assertEqual((record["status"], record["retry_count"]), ("succeeded", 1))
-        self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2])
+    async def test_remove_only_rejection_does_not_send_a_label_repair_request(self):
+        result, requests, record = await self.run_reflector([reflection(status="REJECT")])
+        self.assertEqual((result["status"], result["finding_decisions"][0]["decision"]), ("REJECT", "remove"))
+        self.assertEqual(len(requests), 1)
+        self.assertEqual((record["status"], record["retry_count"]), ("succeeded", 0))
+        self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1])
+
+    async def test_pass_with_revision_does_not_send_a_label_repair_request(self):
+        result, requests, record = await self.run_reflector([reflection(decision="revise")])
+        self.assertEqual(result["finding_decisions"][0]["decision"], "revise")
+        self.assertEqual(len(requests), 1)
+        self.assertEqual(record["retry_count"], 0)
 
     async def test_unknown_and_missing_finding_decisions_repair_in_existing_loop(self):
         result, requests, record = await self.run_reflector([reflection(finding_id="F999"), reflection()])
@@ -172,7 +174,7 @@ class ReflectorSchemaRepairTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_invalid_reflection_never_resets_the_send_allowance(self):
         _, requests, record = await self.run_reflector(
-            [reflection(status="REJECT")] * 3, expected_failure=True,
+            [reflection(finding_id="F999")] * 3, expected_failure=True,
         )
         self.assertEqual(len(requests), 2)
         self.assertEqual((record["status"], record["retry_count"]), ("failed", 1))

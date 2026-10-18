@@ -29,6 +29,7 @@ from agents.summarizer import (
     normalize_summary_output,
 )
 from endpoints.review.review_state import ReviewStateStore
+from routing.schemas import ReviewExecutionPlan
 from tests.criteria_formal_recall.prepare_cases import select_contract_title_group
 from tools.document.docx_anchor_index import build_docx_anchor_nodes
 from tools.document.reporting.docx_report import DocxReportGenerator
@@ -328,9 +329,8 @@ class AnchorEvidenceValidationTests(unittest.TestCase):
                 sub_agent,
                 invalid,
                 "invalid",
-                {},
+                ReviewExecutionPlan(),
                 context,
-                coverage_audit=False,
             )
         )
 
@@ -832,9 +832,9 @@ class WorkflowPresentationTests(unittest.TestCase):
             "内容：\n附件对照原文。"
         )
         self.assertEqual(
-            len(OrchestratorAgent._policy_output_errors(
+            len(OrchestratorAgent._execution_output_errors(
                 opinion,
-                {"evidence_region": "attachments"},
+                ReviewExecutionPlan(evidence_region="attachments"),
                 context,
             )),
             1,
@@ -848,9 +848,9 @@ class WorkflowPresentationTests(unittest.TestCase):
         })
 
         self.assertEqual(
-            OrchestratorAgent._policy_output_errors(
+            OrchestratorAgent._execution_output_errors(
                 opinion,
-                {"evidence_region": "attachments"},
+                ReviewExecutionPlan(evidence_region="attachments"),
                 context,
             ),
             [],
@@ -882,11 +882,11 @@ class WorkflowPresentationTests(unittest.TestCase):
                 },
             ],
         }
-        policy = {"edit_region": "tail", "evidence_region": "frontmatter"}
+        execution = ReviewExecutionPlan(edit_region="tail", evidence_region="frontmatter")
 
-        errors = OrchestratorAgent._policy_output_errors(
+        errors = OrchestratorAgent._execution_output_errors(
             {"status": "issues_found", "issues": [issue]},
-            policy,
+            execution,
             context,
         )
 
@@ -922,9 +922,9 @@ class WorkflowPresentationTests(unittest.TestCase):
         }
 
         self.assertEqual(
-            OrchestratorAgent._policy_output_errors(
+            OrchestratorAgent._execution_output_errors(
                 {"status": "issues_found", "issues": [issue]},
-                {"edit_region": "tail", "evidence_region": "frontmatter"},
+                ReviewExecutionPlan(edit_region="tail", evidence_region="frontmatter"),
                 context,
             ),
             [],

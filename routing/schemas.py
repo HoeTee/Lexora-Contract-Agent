@@ -62,5 +62,42 @@ class RoutePlan(BaseModel):
         return self
 
 
+class Placement(BaseModel):
+    """Where a completed review opinion is written in the report."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    target: Literal["summary", "inline", "inline_at_title", "tail", "body_end"]
+    note: str = ""
+
+
+class AuditMode(BaseModel):
+    """Checks requested by the review plan, independent of retrieval methods."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    coverage: bool = False
+    comparison: bool = False
+
+
+class ReviewExecutionPlan(BaseModel):
+    """Shared execution input for fixed and uploaded review criteria."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    route: RoutePlan | None = None
+    placement: Placement | None = None
+    review_instruction: str = ""
+    audit_mode: AuditMode = Field(default_factory=AuditMode)
+    edit_region: str = ""
+    evidence_region: str = ""
+
+    @model_validator(mode="after")
+    def validate_comparison_scope(self) -> "ReviewExecutionPlan":
+        if self.audit_mode.comparison and not self.evidence_region.strip():
+            raise ValueError("comparison audit requires an explicit evidence_region")
+        return self
+
+
 # Compatibility name for callers that previously consumed the docxindex schema.
 RouteResponse = RoutePlan
