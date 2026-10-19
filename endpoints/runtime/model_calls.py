@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from contextvars import ContextVar
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 
@@ -19,6 +20,14 @@ from endpoints.runtime.model_budget import (
     TaskDeadlineExceeded,
 )
 from loggers.call_log import current_logical_call, new_call
+
+
+_ACTIVE_CALL = ContextVar("active_model_call", default=None)
+
+
+def active_model_call():
+    """Return the attempt currently holding a slot and a running request timer."""
+    return _ACTIVE_CALL.get()
 
 
 def _retryable(exc: Exception) -> bool:
@@ -88,7 +97,11 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                                               budget_seconds=budget.timeout_seconds,
                                               remaining_seconds=budget.remaining(), send_number=budget.sends)
                         record.sent()
-                        response, status = await send(budget.remaining())
+                        token = _ACTIVE_CALL.set(record)
+                        try:
+                            response, status = await send(budget.remaining())
+                        finally:
+                            _ACTIVE_CALL.reset(token)
                 finally:
                     request_finished = time.monotonic()
                     budget.finish_request()

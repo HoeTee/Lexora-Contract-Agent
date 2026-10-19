@@ -8,9 +8,10 @@ from typing import Any, TypeVar
 from openai import AsyncOpenAI
 from endpoints.runtime.model_budget import run_sync
 from endpoints.runtime.model_calls import execute_model
+from endpoints.runtime.llm_client import request_llm
 from endpoints.runtime.model_http import async_http_client
 from pydantic import BaseModel, ConfigDict, ValidationError
-from loggers.call_log import logical_call, request_model_async
+from loggers.call_log import logical_call
 
 from .config import env_api_key, find_local_env, find_project_config, load_env_file, load_yaml
 
@@ -102,7 +103,7 @@ class LLMClient:
                               temperature=self.settings.temperature)
                 if self.settings.enable_thinking is not None:
                     kwargs["extra_body"] = {"enable_thinking": self.settings.enable_thinking}
-                return await request_model_async(client.chat.completions, **kwargs)
+                return await request_llm(client.chat.completions, **kwargs)
 
         def check(response):
             nonlocal current_prompt

@@ -3,6 +3,7 @@ llm:
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   name: qwen3.6-27b
   enable_thinking: false
+  stream: false
   max_context_tokens: 254000
   max_prompt_tokens: 88000
   max_result_tokens: 64000

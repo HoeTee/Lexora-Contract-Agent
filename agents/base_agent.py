@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI, RateLimitError, APITimeoutError, APIConnectionError, InternalServerError, APIStatusError
 from redis.exceptions import RedisError
 from loggers.agent_logger import agent_call_log_dir, log_agent_step, log_conversation
-from loggers.call_log import LogicalCall, current_events_path, logical_call, request_model_async
+from loggers.call_log import LogicalCall, current_events_path, logical_call
+from endpoints.runtime.llm_client import request_llm
 from loggers.trace_helpers import llm_inputs, llm_outputs
 from loggers.trace_logger import get_current_trace
 from config import (
@@ -311,8 +312,8 @@ class Agent:
             if grouped:
                 self._validation_call = logical
             async def send(remaining):
-                return await request_model_async(self.client.chat.completions,
-                                                 **{**request_kwargs, "timeout": remaining})
+                return await request_llm(self.client.chat.completions,
+                                         **{**request_kwargs, "timeout": remaining})
             try:
                 completion = await execute_model(model_type="llm", model=self.settings.model,
                     caller="agent", request=request_kwargs, send=send,

@@ -1,6 +1,6 @@
 # 并发、超时与重试配置说明
 
-更新日期：2026-10-19。当前每次实际模型 HTTP 请求独立使用 60 秒时限，模型额外发送上限为 5、要点总尝试次数为 3；没有新增配置。尚未部署到公司内网。第 13.1—13.4 节保留历史版本验证记录，其中的累计执行预算是当时的实现；本次逐请求时限的验证见第 13.5 节。
+更新日期：2026-10-19。当前每次实际模型 HTTP 请求独立使用 60 秒时限，模型额外发送上限为 5、要点总尝试次数为 3。本次只新增 `llm.stream`，默认 `false`，所有 LLM 共用同一发送与响应接收模块。尚未部署到公司内网。第 13 节保留各轮实现的验证记录；较早记录中的累计执行预算不代表当前逐请求时限。
 
 本文说明合同任务、模型调用和 Redis 名额的配置，列出旧配置的迁移方式。配置解释以当前代码为准。地址、凭据和模型名称继续使用各部署自己的设置，不把本地开发机的模型配置套用到内网。
 
@@ -158,9 +158,33 @@ SDK 自带重试关闭。DocxIndex 和保留的 LlamaIndex 网络调用全部接
 
 正在传播的超时或取消不会被随后的 Redis 清理错误覆盖，清理故障另行记录。若模型已经正常返回，但释放 Redis 失败，则报告释放故障，不再次发送模型请求。
 
-LlamaIndex 当前业务不使用流式请求。其流式入口明确报不支持，防止继承方法绕过控制。
+LlamaIndex 的普通 `chat/achat/complete/acomplete` 与其他 LLM 入口使用相同的 `llm.stream`。它们向业务返回完整响应。公开的分块生成器 `stream_chat/astream_chat/stream_complete/astream_complete` 继续明确报不支持，防止继承实现绕过统一控制；这不影响普通接口内部按配置使用流式通信。
 
 取消本地 HTTP 是否同步停止公司内网服务端推理，尚未验证。不能仅凭客户端连接关闭认定服务端已经停止推理。
+
+### 4.1 LLM 流式开关
+
+```yaml
+llm:
+  stream: false
+```
+
+这是本轮唯一新增的配置。省略时使用 `false`；显式值必须能解析为布尔值，`null` 和空值被拒绝。生产目录的 `config.yaml`、`deploy/config.yaml` 及版本库模板 `config.example.yaml` 都已补充默认值。修改后重启 API 和全部三个 worker；没有热更新，也没有各 Agent 独立的流式开关。
+
+| 值 | 与模型服务的通信 | 交给业务层的结果 |
+| --- | --- | --- |
+| `false` | `stream=false`，等待完整响应 | 完整 SDK 响应，包含文本、工具调用和服务返回的 usage |
+| `true` | `stream=true`，请求 `stream_options.include_usage=true`，逐块接收 | 拼接完成后的同一种完整响应；工具调用按 choice/tool 索引合并，参数拼接完成后才执行工具 |
+
+作用范围包括 SubAgent、Reflector、Summarizer、自定义要点 Planner、DocxIndex 附件层级与摘要、结构检索与正文扫描，以及保留的 LlamaIndex LLM 分支。`base_agent.py` 是 Agent 公共底座；Orchestrator 负责调度，未增加一类独立模型请求。Embedding 和 reranker 使用各自接口，不受该开关控制。Web/API 仍按原来的任务状态及报告接口交互，该开关不表示浏览器逐字显示。
+
+三处适配器均调用 `endpoints/runtime/llm_client.py:request_llm()`。输入是 SDK resource、模型及 messages/prompt/tools 等请求参数；输出是 `(完整响应, HTTP 状态)`。该函数必须在 `execute_model(model_type="llm")` 的实际发送阶段调用，否则在发送前报错。它读取部署配置，覆盖调用参数或 `extra_body` 中的 stream 设置，防止某个调用自行切换模式。SDK 自带重试仍为 0。
+
+流式接收和非流式接收均包含在同一次 HTTP 请求的 60 秒内：取得名额后开始，完整接收后结束。连接、等待首块、后续全部数据块和拼接都在这个时限内；收到新块不会重新计时。等待名额仍单独消耗累计 180 秒预算，合同截止时间仍优先。
+
+流式请求在所有 choice 获得 `finish_reason` 后才构造完整响应。连接错误、数据未完整结束、无有效 choice 或不合法的数据块按现有发送上限重试；本次部分文本、工具参数不能作为成功结果，也不带到下一次尝试。退出流式接收时关闭 HTTP 响应，随后由公共控制器释放本次名额。请求超时、断流、取消均遵守同样的释放顺序；Redis 自身不可用时仍按既有租约回收规则处理。每次重试重新排队并独立获得 60 秒。
+
+模型服务必须支持 OpenAI 兼容的流式协议及所发送的 usage 参数。接口明确拒绝这些参数时记录真实错误，不自动切换为非流式。服务未返回 usage 时 token 数记录为未知，不用估算值或 0 补齐。
 
 ## 5. Celery、队列等待及整任务硬时限
 
@@ -318,6 +342,7 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 | `llm/embedding/rerank` 的地址、模型名和凭据来源 | 保留部署自己的模型服务选择 |
 | `rerank.instruct/provider_model_names` | 独立重排请求和协议适配 |
 | `llm.enable_thinking/temperature/top_p/seed` | 保留模型请求参数 |
+| `llm.stream` | 本轮唯一新增；默认 `false`，统一全部 LLM 的通信模式，见第 4.1 节 |
 | `llm.max_context_tokens/max_prompt_tokens/max_result_tokens` | 保留当前上下文、提示、结果处理逻辑，本轮不重新定义 |
 | `llm.max_tool_calls`、`embedding.max_input_tokens` | 保留工具调用次数及输入约束 |
 | 检索 token、分块、候选数、阈值、路由、索引增强 | 除明确移除项外保留原值及算法职责 |
@@ -353,6 +378,9 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 该片段对应本次实现。部署时保留原有模型、检索、API 等其他分组，并删除第 7 节的旧字段。
 
 ```yaml
+llm:
+  stream: false
+
 workflow:
   max_reflection_rounds: 10
   max_orchestrator_concurrency: 2
@@ -395,6 +423,16 @@ model_semaphore:
 ## 10. 日志统计
 
 每次逻辑操作记录多次实际发送的 `attempts`，包括模型类型、HTTP 状态、阶段、等待/请求/退避/总耗时、预算、原因及 token usage。普通日志模式也保留基础统计，完整请求正文仍由详细日志控制。
+
+LLM 每次实际发送还记录下表字段。这些字段同时保存在普通模式的 `logical_calls/*.json` 的 `attempts` 和详细模式的 `calls/*.json`；无需增加日志配置。
+
+| 字段 | 含义 |
+| --- | --- |
+| `transport` | `unified_llm` 表示经过统一 LLM 发送模块 |
+| `stream` | 此次实际使用的部署流式开关值 |
+| `first_chunk_seconds` | 流式发送开始至收到首个 SDK 数据块的耗时，可能只是角色或思考信息，不等于首个正文 token；非流式或首块前失败为 `null` |
+| `response_seconds` | 统一发送函数的耗时；包含接收或失败退出，不含名额等待及 Redis 清理 |
+| `stream_complete` | 流式完整接收并构造响应后为 `true`，流式失败为 `false`；非流式为 `null` |
 
 等待名额超时、单次 HTTP 请求超时、合同执行到期和 Redis 连接失败分别记录，不能把 Redis 无法连接解释为模型推理太慢。逐次发送的 HTTP 耗时与逻辑操作累计耗时分开统计；多次发送累计超过 60 秒属于允许范围。等待计入日志总耗时和整任务耗时，不计入任一次 HTTP 请求时限。等待耗尽记录在 `semaphore_wait` 阶段，合同到期记录在 `task_deadline` 阶段，这两类情况不触发请求重试。
 
@@ -520,24 +558,58 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 
 这些测试验证请求计时与恢复控制，不证明 H01/H12 在内网模型上一定能在 60 秒内返回；内网实际耗时仍需部署后复测。
 
+### 13.6 统一 LLM 发送与流式开关（2026-10-19）
+
+本轮最终本地回归共 384 项：383 项通过，1 项 Linux Celery 硬时限专项因 Windows 环境跳过；0 失败、0 错误，耗时 83.355 秒。总数已经包含 20 项隔离 Redis 与本地 HTTP 集成测试，不另行相加。修改文件的编译检查和 Ruff 检查均通过。
+
+- 启动校验覆盖省略开关、`false`、`true`、无效值及 `null`；省略时确认为非流式。
+- 两种模式均经过实际 OpenAI SDK 解析；验证分段文本、并行工具参数、服务返回的 usage，以及缺失 usage 保持未知。
+- 两种模式各启动三个独立进程，每进程并发发送 5 个 LLM 请求，15 个请求竞争同一个 Redis 上限 5；HTTP 服务观测并发不超过 5，结束后持有名额、等待与截止记录均为 0。
+- 真实本地 HTTP 服务注入非流式/流式持续慢响应与断开连接，配合真实 Redis 验证：超时和断流后按发送上限重试，连接关闭，名额主动释放。逐块返回不会延长单次请求时限。取消不触发重试；单位测试还覆盖无有效结束标记的流式响应及丢弃部分结果。
+- Agent、DocxIndex 和保留的 LlamaIndex 三类适配器都在两种模式下验证。业务入口的所有实际 LLM 发送均经过 `execute_model` 和 `request_llm`；公开的分块生成器不参与业务流程。
+
+真实合同采用本地独立 Compose 项目：API、三个 Celery worker、独立 Redis，共享修改后的源码和独立数据目录。运行环境复用本地镜像中的 Python 及依赖；没有替换原有 v6/v7 容器。调用开发配置的外部 `qwen3.6-35b-a3b` 模型，合同为 `deploy/test_contract.docx`；未连接公司内网。每轮保持单次请求 60 秒、LLM 并发 5，只有测试副本的 `llm.stream` 在两轮之间切换，详细日志用于核对实际请求。
+
+非流式一轮三份合同全部成功，均为 18/18 要点完成，报告下载成功；总计 242 次实际 LLM 发送，包含输出校验后的修复。三个 worker 的所有发送均记录 `transport=unified_llm`、`stream=false`，每次独立请求预算为 60 秒。该轮总墙钟约 347 秒，Redis 采样 LLM 峰值为 5，结束后名额及等待记录均为 0。
+
+流式一轮三份合同也全部成功，均为 18/18 要点完成，报告下载成功；总计 270 次实际 LLM 发送。所有发送均记录 `transport=unified_llm`、`stream=true`，成功接收的响应均有 `stream_complete=true`。该轮总墙钟约 410 秒，Redis 采样 LLM 峰值为 5，结束后名额及等待记录均为 0。逐轮耗时包含业务反思及输出修复，不作为两种接收方式的性能结论。
+
+| 模式 | 同时提交的真实任务 | 最终要点状态 | 实际 LLM 发送 |
+| --- | --- | --- | --- |
+| 非流式 | `20261019-181811-1705`、`20261019-181812-c21c`、`20261019-181811-4354` | 每份 18/18，无失败要点 | 84、79、79 |
+| 流式 | `20261019-182409-0a33`、`20261019-182409-013c`、`20261019-182409-b0da` | 每份 18/18，无失败要点 | 95、72、103 |
+
+流式任务 `20261019-182409-013c` 的 H18 提供了实际模型超时后的恢复记录，同一逻辑操作内依次发生：
+
+1. 首次请求首块耗时约 0.506 秒，接收未在 60 秒内完成；约 60.001 秒处记录 `ModelCallTimeout`，`stream_complete=false`，usage 未知。
+2. 退避约 0.5 秒后，重新取得名额，获得新的约 60 秒；约 11.869 秒完整返回，但 JSON 校验不通过。
+3. 修复请求重新取得名额，再获得新的约 60 秒；约 3.329 秒返回并通过校验。逻辑操作及合同最终均成功。
+
+这证明收到首块不代表完整响应已经成功，也不重置 60 秒时限；传输超时和输出修复共用发送额度，但每次发送独立计时。该轮总时长小于 600 秒租约，结束名额已为 0，没有等待租约自然到期。断流恢复另由真实本地 HTTP 与 Redis 故障注入验证，不把它称为外部模型实际发生的故障。
+
+Linux 合同容器使用 OpenAI SDK 2.54.0、Celery 5.6.3、Kombu 5.6.2、redis-py 8.1.0。新增的 12 项测试在该容器中也全部通过，使用隔离的测试 DB 15，不触碰合同正在使用的模型 DB 0 和队列 DB 2。本地完整回归的 OpenAI SDK 为 2.44.0；两套已安装 SDK 均验证了统一发送代码。内网镜像及模型服务的流式兼容性仍需内网部署后确认，默认配置保持非流式。
+
+完整请求、API 状态、报告、Redis 采样和独立核对结果保存在本地验证目录：`C:\Users\lenovo\AppData\Local\Temp\contract-stream-live-20261019-slj_qwsi`，汇总见其中的 `verification.json`，真实超时恢复见 `real-timeout-recovery.json`。测试临时服务在验证后清理，原有 v6/v7 服务保留。
+
 ## 14. 代码入口
 
 | 文件与入口 | 输入 → 输出或作用 |
 | --- | --- |
-| [config.py](C:/Users/lenovo/Desktop/contract_agent/config.py:244) | 配置字典 → 拒绝旧字段和冲突格式 |
-| [config.py](C:/Users/lenovo/Desktop/contract_agent/config.py:480) | 已加载配置 → 不含 Redis 密码的运行审计 |
+| [config.py](C:/Users/lenovo/Desktop/contract_agent/config.py:247) | 配置字典 → 拒绝旧字段和冲突格式 |
+| [config.py](C:/Users/lenovo/Desktop/contract_agent/config.py:483) | 已加载配置 → 不含 Redis 密码的运行审计 |
 | [task_queue/review_queue.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_queue.py:9) | client_dir、task_id → 持久化消息编号并入 DB 0 |
 | [task_queue/review_tasks.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_tasks.py:21) | 任务参数 → worker 执行及真实业务状态 |
 | [task_queue/review_request.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_request.py:39) | Celery 超时/进程失败事件 → 父进程业务失败处理 |
 | [endpoints/runtime/model_budget.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_budget.py:73) | 累计等待预算、单次请求时限与任务截止时间 → 剩余时间及发送额度 |
-| [endpoints/runtime/model_calls.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_calls.py:57) | 模型类型、发送和校验函数 → 每次 HTTP 独立计时，并在共同发送上限内重试 |
+| [endpoints/runtime/model_calls.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_calls.py:66) | 模型类型、发送和校验函数 → 每次 HTTP 独立计时，并在共同发送上限内重试 |
+| [endpoints/runtime/llm_client.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_client.py:68) | SDK resource 和请求参数 → 按 `llm.stream` 接收、拼接完整响应，禁止绕过公共控制器 |
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:71) | 类型、key、容量及等待预算 → Lua 原子名额申请/释放 |
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:43) | 外部取消 → 等待同一次有界清理结束后传播取消 |
-| [agents/base_agent.py](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:302) | Agent 生成请求 → 公共 LLM 并发和预算控制 |
+| [agents/base_agent.py](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:304) | Agent 生成请求 → 公共 LLM 并发和预算控制 |
 | [agents/json_utils.py](C:/Users/lenovo/Desktop/contract_agent/agents/json_utils.py:74) | JSON/schema 及模型响应 → 在同一操作最多 6 次发送内生成和修复，每次请求独立使用 60 秒 |
 | [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:809) | schema 合法的结论及业务反馈 → 最多 2 次新的完整结论修订 |
 | [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:1259) | 要点及总尝试上限 → 复用成功结果，或最多执行该要点 3 次 |
-| [tools/docxindex/llm/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/llm/client.py:95) | DocxIndex 提示及校验函数 → 公共 LLM 并发和预算控制 |
+| [tools/docxindex/llm/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/llm/client.py:96) | DocxIndex 提示及校验函数 → 公共 LLM 并发和预算控制 |
 | [tools/docxindex/vector/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/vector/client.py:71) | 一批文本 → 公共 embedding 并发和预算控制 |
 | [tools/docxindex/reranker.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/reranker.py:67) | 查询和候选文档 → 独立重排模型的索引及分数 |
 | [tools/docxindex/indexing/llm_summary.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/indexing/llm_summary.py:119) | 批量摘要结果 → 保存有效摘要，独立生成未覆盖节点 |

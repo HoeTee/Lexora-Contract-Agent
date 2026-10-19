@@ -1,4 +1,4 @@
-"""Non-streaming LlamaIndex LLM adapter using the common model controller."""
+"""LlamaIndex adapter using the common model controller and LLM transport."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from openai import AsyncOpenAI
 
 from endpoints.runtime.model_budget import run_sync
 from endpoints.runtime.model_calls import execute_model
+from endpoints.runtime.llm_client import request_llm
 from endpoints.runtime.model_http import async_http_client
 from loggers.call_log import logical_call
 
@@ -23,8 +24,8 @@ from loggers.call_log import logical_call
 class UnifiedOpenAILike(OpenAILike):
     """Override network paths, retaining LlamaIndex callback conversions.
 
-    Retrieval uses non-streaming requests. Streaming is explicitly rejected so
-    inherited streaming methods cannot bypass the shared deadline and slots.
+    llm.stream controls network streaming; the adapter returns complete results.
+    Public chunk generators remain disabled to prevent bypassing shared control.
     """
 
     def __init__(self, **kwargs: Any) -> None:
@@ -34,12 +35,10 @@ class UnifiedOpenAILike(OpenAILike):
     async def _request(self, payload: dict[str, Any], *, chat: bool):
         payload = dict(payload)
         payload.pop("use_chat_completions", None)
-        if payload.pop("stream", False):
-            raise ValueError("Streaming is not supported by the contract retrieval LLM adapter.")
+        payload.pop("stream", None)
         if any(key in payload for key in ("timeout", "max_retries")):
             raise ValueError("LLM timeout and retries must use the common model controller.")
         payload.pop("stream_options", None)
-        payload["stream"] = False
 
         async def send(remaining: float):
             async with AsyncOpenAI(
@@ -51,8 +50,7 @@ class UnifiedOpenAILike(OpenAILike):
                 http_client=async_http_client(remaining),
             ) as client:
                 endpoint = client.chat.completions if chat else client.completions
-                raw = await endpoint.with_raw_response.create(**payload)
-                return raw.parse(), raw.status_code
+                return await request_llm(endpoint, chat=chat, **payload)
 
         def validate(response):
             if not response.choices:

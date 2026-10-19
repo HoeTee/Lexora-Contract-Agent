@@ -227,6 +227,9 @@ SESSION_SECRET_KEY = env_required("SESSION_SECRET_KEY")
 LLM_BASE_URL = _as_str(cfg("llm", "base_url"), "llm.base_url")
 LLM_NAME = env_optional("LLM_MODEL_NAME") if API_REQUIRE_REQUEST_MODEL_CONFIG and env_optional("LLM_MODEL_NAME") else _as_str(cfg("llm", "name"), "llm.name")
 LLM_ENABLE_THINKING = _parse_bool(cfg("llm", "enable_thinking"), "llm.enable_thinking")
+LLM_STREAM = _parse_bool(cfg_optional("llm", "stream", False), "llm.stream")
+if not isinstance(LLM_STREAM, bool):
+    raise RuntimeError("llm.stream must be true or false.")
 MAX_CONTEXT_TOKENS = _as_int(cfg("llm", "max_context_tokens"), "llm.max_context_tokens")
 MAX_PROMPT_TOKENS = _as_int(
     cfg_optional("llm", "max_prompt_tokens", 88_000),
@@ -482,6 +485,7 @@ def control_configuration_summary() -> dict[str, Any]:
         parsed = urlsplit(url)
         return f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 6379}{parsed.path}"
     return {
+        "llm": {"stream": LLM_STREAM},
         "queue": {
             "broker": safe_redis_url(QUEUE_BROKER_URL),
             "pending_timeout_seconds": QUEUE_PENDING_TIMEOUT_SECONDS,

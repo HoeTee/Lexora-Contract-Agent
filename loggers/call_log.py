@@ -282,7 +282,8 @@ class LogicalCall:
             {key: record.payload.get(key) for key in
              ("call_id", "status", "sent", "send_number", "http_status", "model_type", "semaphore_key", "budget_seconds",
               "remaining_seconds", "input_tokens", "output_tokens", "input_output_tokens",
-              "failure_stage", "error", "timing", "retry_reason", "retry_delay_seconds")}
+              "failure_stage", "error", "timing", "retry_reason", "retry_delay_seconds",
+              "transport", "stream", "first_chunk_seconds", "response_seconds", "stream_complete")}
             for record in self.attempt_records
         ]
         sent = [record.payload for record in self.attempt_records if record.payload.get("sent")]
