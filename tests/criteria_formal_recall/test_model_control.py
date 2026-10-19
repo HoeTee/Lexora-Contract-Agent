@@ -255,6 +255,9 @@ class CleanupCancellationTests(unittest.IsolatedAsyncioTestCase):
             async def acquire_async(self, **kwargs):
                 return ModelSemaphoreLease("llm", "cleanup-probe", "own-member", 0, 1)
 
+            async def keep_alive(self, lease):
+                await asyncio.Event().wait()
+
             async def release_async(self, lease):
                 self.cleanup_task = asyncio.current_task()
                 self.releasing.set()
@@ -401,6 +404,9 @@ class RequestRetryTests(unittest.IsolatedAsyncioTestCase):
                 case.acquired += 1
                 case.active += 1
                 return ModelSemaphoreLease("llm", "request-retry", str(case.acquired), 0, 1)
+
+            async def keep_alive(self, lease):
+                await asyncio.Event().wait()
 
             async def release_async(self, lease):
                 case.active -= 1

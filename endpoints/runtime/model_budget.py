@@ -16,7 +16,7 @@ from config import MODEL_CALL_MAX_RETRIES, MODEL_CALL_TIMEOUT_SECONDS, MODEL_WAI
 
 
 class ModelCallTimeout(TimeoutError):
-    """One model HTTP request reached its execution deadline."""
+    """A request exceeded its total time or its streaming content-idle time."""
 
 
 class ModelSemaphoreTimeout(ModelCallTimeout):
@@ -83,6 +83,7 @@ class ModelCallBudget:
     _request_started: float | None = field(default=None, init=False, repr=False)
     _request_finished: float | None = field(default=None, init=False, repr=False)
     _request_seconds: float = field(default=0.0, init=False, repr=False)
+    streaming: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         outer = task_deadline()
@@ -170,7 +171,13 @@ class ModelCallBudget:
         self.sends += 1
         self._request_started = time.monotonic()
         self._request_finished = None
+        self.streaming = False
         self.deadline = self._request_started + self.timeout_seconds
+
+    def received_content(self) -> None:
+        """Extend a streaming request only while its current deadline is valid."""
+        self.remaining()
+        self.deadline = time.monotonic() + self.timeout_seconds
 
     def finish_request(self) -> None:
         """Freeze this request's duration before releasing its slot or validating."""
@@ -188,6 +195,8 @@ class ModelCallBudget:
         """Classify an asyncio deadline without hiding the enclosing task deadline."""
         if self._task_deadline is not None and time.monotonic() >= self._task_deadline:
             return TaskDeadlineExceeded("Contract task reached its execution deadline.")
+        if self.streaming:
+            return ModelCallTimeout(f"LLM stream received no new content for {self.timeout_seconds:g} seconds during {stage}.")
         return ModelCallTimeout(f"Model HTTP request reached its execution deadline during {stage}.")
 
 

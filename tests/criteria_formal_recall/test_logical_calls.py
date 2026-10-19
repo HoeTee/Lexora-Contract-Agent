@@ -145,7 +145,8 @@ class LogicalCallTests(unittest.TestCase):
 
     def test_timeout_after_invalid_response_does_not_inherit_previous_http_status(self):
         client = self.client(lambda request: httpx.Response(200, json=chat_response("invalid")))
-        with patch("endpoints.runtime.model_calls.model_semaphore", side_effect=[available_slot(), TimeoutError("lease wait timeout")]):
+        with patch("loggers.call_log.LOGGING_DETAILED", False), \
+                patch("endpoints.runtime.model_calls.model_semaphore", side_effect=[available_slot(), TimeoutError("lease wait timeout")]):
             with self.assertRaises(LLMClientError) as raised:
                 client.complete_model("query", Answer)
         record, = self.records()

@@ -283,7 +283,10 @@ class LogicalCall:
              ("call_id", "status", "sent", "send_number", "http_status", "model_type", "semaphore_key", "budget_seconds",
               "remaining_seconds", "input_tokens", "output_tokens", "input_output_tokens",
               "failure_stage", "error", "timing", "retry_reason", "retry_delay_seconds",
-              "transport", "stream", "first_chunk_seconds", "response_seconds", "stream_complete")}
+              "transport", "stream", "first_chunk_seconds", "response_seconds", "stream_complete",
+              "timeout_kind", "stream_chunk_count", "content_chars", "reasoning_chars", "tool_chars",
+              "first_content_seconds", "last_content_seconds", "max_content_gap_seconds",
+              "finish_reasons", "usage_received", "lease_renewals")}
             for record in self.attempt_records
         ]
         sent = [record.payload for record in self.attempt_records if record.payload.get("sent")]

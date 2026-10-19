@@ -35,9 +35,16 @@ class ModelSemaphoreLease:
     wait_seconds: float
     max_concurrent_requests: int
     acquired: bool = True
+    renewals: int = 0
 
 
 LLMGlobalSemaphoreLease = ModelSemaphoreLease
+
+
+class ModelLeaseLost(RuntimeError):
+    """The request must stop because its shared slot cannot be renewed."""
+
+    failure_stage = "semaphore_renewal"
 
 
 async def _finish_cleanup(coroutine):
@@ -98,6 +105,21 @@ class RedisModelSemaphore:
         return 1
     end
     return 0
+    """
+
+    _RENEW_SCRIPT = """
+    local clock = redis.call('TIME')
+    local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+    local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+    if not score or tonumber(score) <= now then
+        return 0
+    end
+    if redis.call('GET', KEYS[5]) ~= ARGV[4] then
+        return 0
+    end
+    redis.call('ZADD', KEYS[1], 'XX', now + tonumber(ARGV[2]), ARGV[1])
+    for index = 1, 5 do redis.call('EXPIRE', KEYS[index], ARGV[3]) end
+    return 1
     """
 
     def __init__(self, model_type: str, config: ModelSemaphoreConfig):
@@ -169,6 +191,26 @@ class RedisModelSemaphore:
             await self._remove(lease.member, include_owner=True)
             lease.acquired = False
 
+    async def keep_alive(self, lease: ModelSemaphoreLease):
+        """Renew this owner every third of a lease; never recreate a lost slot."""
+        while True:
+            await asyncio.sleep(self.config.lease_seconds / 3)
+            key = self.config.key
+            try:
+                async with asyncio.timeout(min(2, self.config.lease_seconds / 3)):
+                    renewed = await self._async_client().eval(
+                        self._RENEW_SCRIPT, 5, key, key + ':waiting', key + ':deadlines',
+                        key + ':sequence', key + ':policy', lease.member,
+                        int(self.config.lease_seconds * 1000),
+                        int(self.config.lease_seconds) + 60,
+                        f"{self.config.max_concurrent_requests}:{self.config.lease_seconds}",
+                    )
+            except (RedisError, TimeoutError) as exc:
+                raise ModelLeaseLost(f"Cannot renew {self.model_type} model slot: {exc}") from exc
+            if renewed != 1:
+                raise ModelLeaseLost(f"The {self.model_type} model slot expired, was removed, or its policy changed.")
+            lease.renewals += 1
+
     def acquire_sync(self, *, caller_name: str, model: str, budget: ModelCallBudget):
         return run_sync(self.acquire_async(caller_name=caller_name, model=model, budget=budget))
 
@@ -186,8 +228,21 @@ async def model_semaphore(model_type: str, caller_name: str, model: str, *, budg
     lease = await semaphore.acquire_async(caller_name=caller_name, model=model, budget=budget or ModelCallBudget())
     interrupted = False
     try:
-        yield lease
-    except (asyncio.CancelledError, TimeoutError):
+        try:
+            async with asyncio.TaskGroup() as group:
+                renewal = group.create_task(semaphore.keep_alive(lease))
+                try:
+                    yield lease
+                finally:
+                    renewal.cancel()
+        except BaseExceptionGroup as exc:
+            # TaskGroup stops the HTTP coroutine if renewal fails. Preserve
+            # ordinary request/timeout exception types for the shared retry
+            # controller instead of wrapping them in a one-element group.
+            if len(exc.exceptions) == 1:
+                raise exc.exceptions[0] from None
+            raise
+    except (asyncio.CancelledError, TimeoutError, ModelLeaseLost):
         interrupted = True
         raise
     finally:

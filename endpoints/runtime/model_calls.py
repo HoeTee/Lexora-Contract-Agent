@@ -5,6 +5,7 @@ import asyncio
 import math
 import time
 from contextvars import ContextVar
+from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from datetime import datetime, timezone
 
@@ -19,14 +20,25 @@ from endpoints.runtime.model_budget import (
     ModelSemaphoreTimeout,
     TaskDeadlineExceeded,
 )
-from loggers.call_log import current_logical_call, new_call
+from loggers.call_log import CallRecord, current_logical_call, new_call
 
 
 _ACTIVE_CALL = ContextVar("active_model_call", default=None)
 
 
+@dataclass
+class ModelRequest:
+    record: CallRecord
+    budget: ModelCallBudget
+    timer: asyncio.Timeout
+
+    def received_content(self) -> None:
+        self.budget.received_content()
+        self.timer.reschedule(asyncio.get_running_loop().time() + self.budget.remaining())
+
+
 def active_model_call():
-    """Return the attempt currently holding a slot and a running request timer."""
+    """Return the record, budget and timer of the attempt holding a model slot."""
     return _ACTIVE_CALL.get()
 
 
@@ -92,12 +104,12 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                 stage = "request"
                 request_started = time.monotonic()
                 try:
-                    async with asyncio.timeout(budget.remaining()):
+                    async with asyncio.timeout(budget.remaining()) as timer:
                         record.payload.update(model_type=model_type, semaphore_key=lease.key,
                                               budget_seconds=budget.timeout_seconds,
                                               remaining_seconds=budget.remaining(), send_number=budget.sends)
                         record.sent()
-                        token = _ACTIVE_CALL.set(record)
+                        token = _ACTIVE_CALL.set(ModelRequest(record, budget, timer))
                         try:
                             response, status = await send(budget.remaining())
                         finally:
@@ -167,4 +179,5 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                 "wait_remaining_seconds": round(budget.wait_remaining_seconds, 6),
                 "remaining_seconds": round(budget.remaining_seconds, 6),
             }
+            record.payload["lease_renewals"] = getattr(lease, "renewals", 0) if request_started else 0
             record._write()

@@ -502,10 +502,13 @@ def control_configuration_summary() -> dict[str, Any]:
                      "criterion_retry_max_attempts": CRITERION_RETRY_MAX_ATTEMPTS,
                      "model_wait_timeout_seconds": MODEL_WAIT_TIMEOUT_SECONDS,
                      "model_request_timeout_seconds": MODEL_CALL_TIMEOUT_SECONDS,
+                     "llm_timeout_mode": "content_idle" if LLM_STREAM else "request_total",
                      "model_extra_send_limit": MODEL_CALL_MAX_RETRIES},
         "model_semaphore": {
             kind: {**{key: value for key, value in raw.items() if key != "redis_url"},
                    "redis_url": safe_redis_url(raw["redis_url"]),
+                   "lease_auto_renew": True,
+                   "lease_renew_interval_seconds": raw["lease_seconds"] / 3,
                    "key_ttl_seconds": int(raw["lease_seconds"]) + 60}
             for kind, raw in MODEL_SEMAPHORE_CONFIGS.items()
         },

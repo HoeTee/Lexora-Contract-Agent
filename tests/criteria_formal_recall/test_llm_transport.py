@@ -29,8 +29,8 @@ import yaml
 from agents.base_agent import Agent, Settings
 from endpoints.runtime import llm_client
 from endpoints.runtime import llm_semaphore
-from endpoints.runtime.llm_semaphore import ModelSemaphoreConfig, RedisModelSemaphore
-from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout
+from endpoints.runtime.llm_semaphore import ModelLeaseLost, ModelSemaphoreConfig, RedisModelSemaphore
+from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, TaskDeadlineExceeded, task_execution
 from endpoints.runtime.model_calls import execute_model
 from loggers.call_log import logical_call, reset_call_context, set_call_context
 from tools.docxindex.llm.client import LLMClient, LLMSettings
@@ -55,8 +55,9 @@ def event(data):
 
 
 class ResponseBody(httpx.AsyncByteStream):
-    def __init__(self, parts, *, delay=0, error=None):
+    def __init__(self, parts, *, delay=0, error=None, tail_delay=0):
         self.parts, self.delay, self.error = parts, delay, error
+        self.tail_delay = tail_delay
         self.closed = False
 
     async def __aiter__(self):
@@ -66,6 +67,8 @@ class ResponseBody(httpx.AsyncByteStream):
             yield part
         if self.error:
             raise self.error
+        if self.tail_delay:
+            await asyncio.sleep(self.tail_delay)
 
     async def aclose(self):
         self.closed = True
@@ -202,12 +205,12 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.active, 0)
         self.assertTrue(all(body.closed for body in self.bodies))
 
-    async def test_timeout_covers_all_chunks_and_each_retry_has_a_new_timer(self):
+    async def test_total_or_content_idle_timeout_retries_with_a_new_timer(self):
         for mode in (False, True):
             before = self.acquired
             def handler(_, *, mode=mode):
                 if mode:
-                    response, body = streamed([chunk({"content": "x"})] * 50, delay=0.02)
+                    response, body = streamed([chunk({"role": "assistant", "content": " "})] * 50, delay=0.02)
                 else:
                     body = ResponseBody([b" "] * 50, delay=0.02)
                     response = httpx.Response(200, stream=body)
@@ -222,6 +225,84 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(attempt["timing"]["request_seconds"] >= 0.10 for attempt in attempts))
             self.assertTrue(all(attempt["input_tokens"] is None for attempt in attempts))
         self.assertTrue(all(body.closed for body in self.bodies))
+
+    async def test_stream_content_can_outlive_the_nonstreaming_total_deadline(self):
+        parts = [chunk({"content": "x"})] * 8 + [chunk(finish="stop"), chunk(usage=completion()["usage"]), "[DONE]"]
+        response, body = streamed(parts, delay=0.05)
+        result = await self.call(lambda _: response, timeout=0.18)
+        self.assertEqual(result.choices[0].message.content, "xxxxxxxx")
+        attempt = self.logical.payload["attempts"][0]
+        self.assertGreater(attempt["response_seconds"], 0.4)
+        self.assertLess(attempt["max_content_gap_seconds"], 0.18)
+        self.assertEqual(attempt["content_chars"], 8)
+        self.assertEqual(attempt["timeout_kind"], "content_idle")
+        self.assertEqual((self.acquired, self.released, self.active), (1, 1, 0))
+        self.assertTrue(body.closed)
+        body = ResponseBody([b" "] * 50, delay=0.02)
+        with self.assertRaises(ModelCallTimeout):
+            await self.call(lambda _: httpx.Response(200, stream=body), mode=False, timeout=0.18)
+        self.assertEqual(self.logical.payload["attempts"][0]["timeout_kind"], "request_total")
+        self.assertTrue(body.closed)
+
+    async def test_reasoning_and_tool_fragments_reset_idle_timer(self):
+        for delta in ({"reasoning_content": "thinking"}, {"reasoning": "thinking"},
+                      {"tool_calls": [{"index": 0, "function": {"arguments": "x"}}]}):
+            with self.subTest(delta=delta):
+                prefix = [chunk({"tool_calls": [{"index": 0, "id": "tool", "type": "function",
+                                                "function": {"name": "search"}}]})] if "tool_calls" in delta else []
+                parts = prefix + [chunk(delta)] * 6 + [chunk(finish="stop"), "[DONE]"]
+                result = await self.call(lambda _, parts=parts: streamed(parts, delay=0.04)[0], timeout=0.16)
+                self.assertEqual(result.choices[0].finish_reason, "stop")
+                attempt = self.logical.payload["attempts"][0]
+                self.assertGreater(attempt["response_seconds"], 0.3)
+                self.assertGreater(attempt["reasoning_chars"] + attempt["tool_chars"], 0)
+
+    async def test_role_metadata_heartbeats_and_empty_chunks_do_not_reset_idle_timer(self):
+        for parts in ([event(chunk({"role": "assistant"}))] * 50,
+                      [event(chunk({"content": ""}))] * 50,
+                      [b": heartbeat\n\n"] * 50):
+            with self.subTest(first=parts[0]):
+                body = ResponseBody(parts, delay=0.02)
+                with self.assertRaises(ModelCallTimeout):
+                    await self.call(lambda _, body=body: httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=body), timeout=0.16)
+                attempt = self.logical.payload["attempts"][0]
+                self.assertIsNone(attempt["first_content_seconds"])
+                self.assertEqual(attempt["content_chars"], 0)
+                self.assertLess(attempt["response_seconds"], 0.5)
+                self.assertTrue(body.closed)
+                self.assertEqual(self.active, 0)
+
+    async def test_content_stall_closes_discards_partial_and_retries(self):
+        body = ResponseBody([event(chunk({"content": "discard me"}))], tail_delay=2)
+        def handler(request):
+            if self.acquired == 1:
+                return httpx.Response(200, headers={"content-type": "text/event-stream"}, stream=body)
+            return success(request)
+        result = await self.call(handler, timeout=0.16, retries=1)
+        self.assertEqual(result.choices[0].message.content, "answer")
+        first, second = self.logical.payload["attempts"]
+        self.assertEqual(first["error"]["type"], "ModelCallTimeout")
+        self.assertEqual(first["content_chars"], len("discard me"))
+        self.assertGreaterEqual(first["max_content_gap_seconds"], 0.15)
+        self.assertGreater(second["remaining_seconds"], 0.14)
+        self.assertTrue(body.closed)
+        self.assertEqual((self.acquired, self.released, self.active), (2, 2, 0))
+
+    async def test_task_deadline_still_stops_a_continuously_progressing_stream(self):
+        response, body = streamed([chunk({"content": "x"})] * 100, delay=0.03)
+        with task_execution(time.time() + 0.4):
+            with self.assertRaises(TaskDeadlineExceeded):
+                await self.call(lambda _: response, timeout=0.16, retries=5)
+        self.assertTrue(body.closed)
+        self.assertEqual((self.acquired, self.released, self.active), (1, 1, 0))
+
+    async def test_finished_choices_and_usage_do_not_wait_for_missing_done(self):
+        response, body = streamed([chunk({"content": "answer"}), chunk(finish="stop"),
+                                   chunk(usage=completion()["usage"])], tail_delay=2)
+        result = await self.call(lambda _: response, timeout=0.16)
+        self.assertEqual(result.choices[0].message.content, "answer")
+        self.assertEqual(result.usage.total_tokens, 12)
+        self.assertTrue(body.closed)
 
     async def test_disconnects_in_both_modes_close_connections_release_and_retry(self):
         for mode in (False, True):
@@ -322,12 +403,17 @@ class LLMHTTPFixture:
                     self.end_headers()
                     if behavior in {"timeout", "disconnect"}:
                         for _ in range(100 if behavior == "timeout" else 1):
-                            self.wfile.write(event(chunk({"content": "partial"})) if mode else b'{"partial":')
+                            self.wfile.write(event(chunk({"role": "assistant"})) if mode else b'{"partial":')
                             self.wfile.flush()
                             time.sleep(0.02)
                         self.connection.shutdown(socket.SHUT_RDWR)
                     else:
                         time.sleep(0.08)
+                        if behavior == "long-progress" and mode:
+                            for _ in range(16):
+                                self.wfile.write(event(chunk({"content": "x"})))
+                                self.wfile.flush()
+                                time.sleep(0.1)
                         parts = [event(chunk({"content": "answer"})), event(chunk(finish="stop")),
                                  event(chunk(usage=completion()["usage"])), event("[DONE]")] if mode else [json.dumps(completion()).encode()]
                         for part in parts:
@@ -354,9 +440,9 @@ class LLMHTTPFixture:
         self.thread.join(3)
 
 
-def llm_worker(redis_url, key, url, mode, results, barrier):
+def llm_worker(redis_url, key, url, mode, results, barrier, lease_seconds=30, behavior="good"):
     async def run():
-        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(redis_url, key, 5, 30, 0.005))
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(redis_url, key, 5, lease_seconds, 0.005))
         try:
             with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), \
                  patch.object(llm_client, "LLM_STREAM", mode):
@@ -365,7 +451,7 @@ def llm_worker(redis_url, key, url, mode, results, barrier):
                     async def one():
                         async def send(remaining):
                             return await llm_client.request_llm(client.chat.completions, model="test",
-                                messages=[{"role": "user", "content": "good"}], timeout=remaining)
+                                messages=[{"role": "user", "content": behavior}], timeout=remaining)
                         with logical_call("worker.llm", "test") as logical:
                             result = await execute_model(model_type="llm", model="test", caller="worker", request={}, send=send,
                                 budget=ModelCallBudget(timeout_seconds=3, wait_timeout_seconds=10, max_retries=0))
@@ -402,6 +488,115 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
         for suffix in ("", ":waiting", ":deadlines"):
             self.assertEqual(self.redis.zcard(self.key + suffix), 0)
 
+    async def test_real_http_content_progress_outlives_initial_timeout_and_renews(self):
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 5, 0.9, 0.005))
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), patch.object(llm_client, "LLM_STREAM", True):
+            async with AsyncOpenAI(api_key="fake", base_url=self.fixture.url, max_retries=0,
+                    http_client=httpx.AsyncClient(trust_env=False)) as client:
+                async def send(remaining):
+                    return await llm_client.request_llm(client.chat.completions, model="test",
+                        messages=[{"role": "user", "content": "long-progress"}], timeout=remaining)
+                with logical_call("test.llm", "test") as logical:
+                    result = await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                        budget=ModelCallBudget(timeout_seconds=0.5, max_retries=0))
+                    attempt = logical.payload["attempts"][0]
+        self.assertEqual(result.choices[0].message.content, "x" * 16 + "answer")
+        self.assertGreater(attempt["response_seconds"], 1.5)
+        self.assertLess(attempt["max_content_gap_seconds"], 0.5)
+        self.assertGreater(attempt["lease_renewals"], 0)
+        await semaphore._async_client().aclose()
+        self.assert_empty()
+
+    async def test_long_request_renews_and_waiter_cannot_take_live_owner(self):
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 1, 0.3, 0.005))
+        entered = asyncio.Event()
+        async def hold():
+            async with llm_semaphore.model_semaphore("llm", "owner", "test") as lease:
+                entered.set()
+                await asyncio.sleep(0.9)
+                return lease.renewals
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}):
+            operation = asyncio.create_task(hold())
+            await entered.wait()
+            await asyncio.sleep(0.45)
+            self.assertEqual(self.redis.zcard(self.key), 1)
+            with self.assertRaises(llm_semaphore.ModelSemaphoreTimeout):
+                await semaphore.acquire_async(caller_name="waiter", model="test",
+                    budget=ModelCallBudget(wait_timeout_seconds=0.15))
+            self.assertGreaterEqual(await operation, 2)
+        await semaphore._async_client().aclose()
+        self.assert_empty()
+
+    async def test_missing_owner_is_not_recreated_and_stops_the_request(self):
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 1, 0.3, 0.005))
+        response, body = streamed([chunk({"content": "x"})] * 100, delay=0.02)
+        def handler(_):
+            self.redis.delete(self.key)
+            return response
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), patch.object(llm_client, "LLM_STREAM", True):
+            async with AsyncOpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
+                    http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))) as client:
+                async def send(remaining):
+                    return await llm_client.request_llm(client.chat.completions, model="test",
+                        messages=[{"role": "user", "content": "test"}], timeout=remaining)
+                with self.assertRaises(ModelLeaseLost):
+                    await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                        budget=ModelCallBudget(timeout_seconds=1, max_retries=5))
+        self.assertTrue(body.closed)
+        await semaphore._async_client().aclose()
+        self.assert_empty()
+
+    async def test_redis_renewal_error_cancels_request_and_releases_owner(self):
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 1, 0.3, 0.005))
+        client = semaphore._async_client()
+        original_eval = client.eval
+        async def fail_renew(script, *args):
+            if script == semaphore._RENEW_SCRIPT:
+                raise redis.RedisError("renewal unavailable")
+            return await original_eval(script, *args)
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), patch.object(client, "eval", fail_renew):
+            with self.assertRaises(ModelLeaseLost):
+                async with llm_semaphore.model_semaphore("llm", "owner", "test"):
+                    await asyncio.Event().wait()
+        await client.aclose()
+        self.assert_empty()
+
+    async def test_renewal_error_survives_release_error_and_slot_expires(self):
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 1, 0.3, 0.005))
+        client = semaphore._async_client()
+        original_eval = client.eval
+        async def fail_renew(script, *args):
+            if script == semaphore._RENEW_SCRIPT:
+                raise redis.RedisError("renewal unavailable")
+            return await original_eval(script, *args)
+        async def fail_remove(*args, **kwargs):
+            raise redis.RedisError("release unavailable")
+        with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), \
+                patch.object(client, "eval", fail_renew), patch.object(semaphore, "_remove", fail_remove), \
+                self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+            with self.assertRaises(ModelLeaseLost):
+                async with llm_semaphore.model_semaphore("llm", "owner", "test"):
+                    await asyncio.Event().wait()
+        self.assertEqual(self.redis.zcard(self.key), 1)
+        await asyncio.sleep(0.3)
+        next_lease = await semaphore.acquire_async(caller_name="replacement", model="test", budget=ModelCallBudget())
+        self.assertEqual(self.redis.zcard(self.key), 1)
+        await semaphore.release_async(next_lease)
+        await client.aclose()
+        self.assert_empty()
+
+    async def test_expired_owner_cannot_be_renewed_or_recreated(self):
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 1, 0.15, 0.005))
+        lease = await semaphore.acquire_async(caller_name="expired", model="test", budget=ModelCallBudget())
+        score = self.redis.zscore(self.key, lease.member)
+        await asyncio.sleep(0.2)
+        with self.assertRaises(ModelLeaseLost):
+            await semaphore.keep_alive(lease)
+        self.assertEqual(self.redis.zscore(self.key, lease.member), score)
+        await semaphore.release_async(lease)
+        await semaphore._async_client().aclose()
+        self.assert_empty()
+
     async def test_real_redis_releases_slots_after_timeout_and_stream_disconnect(self):
         for mode, behavior, error in ((False, "timeout", ModelCallTimeout),
                                       (True, "timeout", ModelCallTimeout),
@@ -425,12 +620,13 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_three_processes_share_five_slots_in_both_modes(self):
         context = multiprocessing.get_context("spawn")
-        for mode in (False, True):
+        for mode, lease_seconds, behavior in ((False, 30, "good"), (True, 30, "good"),
+                                              (True, 0.9, "long-progress")):
             results = context.Queue()
             barrier = context.Barrier(3)
             before = self.fixture.count
             processes = [context.Process(target=llm_worker, args=(self.redis_url, self.key, self.fixture.url,
-                                                                  mode, results, barrier)) for _ in range(3)]
+                                                                  mode, results, barrier, lease_seconds, behavior)) for _ in range(3)]
             for process in processes:
                 process.start()
             try:
@@ -442,12 +638,15 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(isinstance(output, list) for output in outputs), outputs)
                 calls = [item for output in outputs for item in output]
                 self.assertEqual(len(calls), 15)
-                self.assertTrue(all(item["text"] == "answer" for item in calls))
+                expected = "x" * 16 + "answer" if behavior == "long-progress" else "answer"
+                self.assertTrue(all(item["text"] == expected for item in calls))
                 self.assertTrue(all(item["attempt"]["stream"] == mode and
                                     item["attempt"]["transport"] == "unified_llm" for item in calls))
                 self.assertEqual(self.fixture.count - before, 15)
                 self.assertLessEqual(self.fixture.peak, 5)
                 self.assertGreater(self.fixture.peak, 1)
+                if behavior == "long-progress":
+                    self.assertTrue(all(item["attempt"]["lease_renewals"] > 0 for item in calls))
                 self.assert_empty()
             finally:
                 for process in processes:
