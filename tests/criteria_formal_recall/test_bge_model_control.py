@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
 import json
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from unittest.mock import patch
 import httpx
 
 from config import infer_rerank_provider
+from endpoints.runtime.model_budget import ModelCallBudget
 from tools.docxindex import reranker
 from tools.docxindex.vector import client as vector_client
 from tools.retrieval.llamaindex import limited_embedding
@@ -20,18 +22,25 @@ class BGEModelControlTests(unittest.TestCase):
     def setUp(self):
         self.requests = []
         self.slots = []
+        self.releases = []
+        self.http_timeouts = []
+        self.handler = self.respond
 
         @asynccontextmanager
         async def slot(kind, caller, model, **kwargs):
             self.slots.append((kind, model))
-            yield SimpleNamespace(key=f"test:{kind}")
+            try:
+                yield SimpleNamespace(key=f"test:{kind}")
+            finally:
+                self.releases.append((kind, model))
 
         slot_patch = patch("endpoints.runtime.model_calls.model_semaphore", slot)
         slot_patch.start()
         self.addCleanup(slot_patch.stop)
 
     def http_client(self, remaining):
-        return httpx.AsyncClient(timeout=remaining, transport=httpx.MockTransport(self.respond))
+        self.http_timeouts.append(remaining)
+        return httpx.AsyncClient(timeout=remaining, transport=httpx.MockTransport(self.handler))
 
     async def respond(self, request):
         body = json.loads(request.content)
@@ -85,3 +94,44 @@ class BGEModelControlTests(unittest.TestCase):
             "model": "qwen3-reranker", "query": "query", "documents": ["a", "b"],
             "top_n": 1, "instruct": "relevant passages",
         }))
+
+    def test_bge_request_timeouts_retry_with_full_timeout_in_embedding_and_reranker_backends(self):
+        operations = [
+            ("docxindex-embedding", "embedding", "bge-m3", lambda: vector_client.EmbeddingClient(
+                vector_client.EmbeddingSettings(model="bge-m3", base_url="http://unused.invalid/v1",
+                                               api_key="unused")).embed_batch(["text"]), [[0.0, 0.5]]),
+            ("llamaindex-embedding", "embedding", "bge-m3", lambda: limited_embedding.SemaphoreOpenAILikeEmbedding(
+                model_name="bge-m3", api_base="http://unused.invalid/v1", api_key="unused").get_query_embedding("text"),
+             [0.0, 0.5]),
+            ("bge-reranker", "reranker", "bge-reranker-v2-m3", lambda: reranker.RerankerClient(
+                model="bge-reranker-v2-m3", base_url="http://unused.invalid/rerank", api_key="unused").rank(
+                    "query", ["a", "b"], 1), [(1, 0.9)]),
+        ]
+        for name, kind, model, operation, expected in operations:
+            with self.subTest(backend=name):
+                sends = []
+                cancelled = []
+                async def timeout_then_success(request, *, sends=sends, cancelled=cancelled):
+                    sends.append(request)
+                    if len(sends) == 1:
+                        try:
+                            await asyncio.Event().wait()
+                        finally:
+                            cancelled.append(True)
+                    return await self.respond(request)
+                self.handler = timeout_then_success
+                self.slots.clear()
+                self.releases.clear()
+                self.http_timeouts.clear()
+                with patch.object(vector_client, "async_http_client", self.http_client), \
+                        patch.object(limited_embedding, "async_http_client", self.http_client), \
+                        patch.object(reranker, "async_http_client", self.http_client), \
+                        patch("loggers.call_log.ModelCallBudget", side_effect=lambda: ModelCallBudget(
+                            timeout_seconds=0.15, max_retries=1)), \
+                        patch("endpoints.runtime.model_calls._retry_delay", return_value=0):
+                    self.assertEqual(operation(), expected)
+                self.assertEqual((len(sends), cancelled), (2, [True]))
+                self.assertEqual(self.slots, [(kind, model)] * 2)
+                self.assertEqual(self.releases, self.slots)
+                self.assertEqual(len(self.http_timeouts), 2)
+                self.assertTrue(all(timeout > 0.13 for timeout in self.http_timeouts), self.http_timeouts)

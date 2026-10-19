@@ -38,11 +38,11 @@ logging:
 
 ## 逻辑调用
 
-同一次模型结果的网络重试、JSON/schema 修复、扫描批次输出修复、层级批次输出修复及摘要压缩修复，共用一个 logical_call_id、截止时间和发送次数。不同独立批次、不同摘要节点、正常业务修订、反思反馈修订及工具结果后的继续生成分别建立逻辑调用。工具执行期间不继承 Agent 的逻辑调用，工具内部模型请求独立记录。当前 `workflow.model_call_max_retries=5`，每次操作最多发送 6 次，网络和 schema 修复共享这 6 次；60 秒累计执行预算先用完时不继续发送。
+同一次模型结果的网络重试、JSON/schema 修复、扫描批次输出修复、层级批次输出修复及摘要压缩修复，共用一个 logical_call_id、累计名额等待预算和发送次数。logical_call_id 用于关联和统计，不表示多次 HTTP 请求共用一个 60 秒倒计时。每次实际 HTTP 请求取得名额后独立计时，默认 60 秒；请求超时、网络重试和 schema 修复共同使用最多 6 次发送（`workflow.model_call_max_retries=5`）。合同执行截止时间始终有效。不同独立批次、不同摘要节点、正常业务修订、反思反馈修订及工具结果后的继续生成分别建立逻辑调用。工具执行期间不继承 Agent 的逻辑调用，工具内部模型请求独立记录。
 
 失败要点按 `workflow.criterion_retry_max_attempts` 重新执行，默认 3 包含首次，最多重跑该要点两次。新一轮要点执行产生新的逻辑调用及模型预算，仍受原合同截止时间和相同的全局并发上限控制。已经保存且版本兼容的成功要点直接复用。详细模式下，`state/criteria/<ID>.error.json` 累积失败尝试，最终 output 的 `attempt` 记录成功属于哪次要点执行；单个逻辑调用的 `retry_count` 不能代替整要点重试统计。模型网络/超时错误不能在同一次要点执行中通过批量摘要转为逐节点摘要来重置预算。
 
-确定性的证据、锚点、覆盖或路由反馈属于业务修订，须在前次回答通过 schema 后进入；内部每次检查最多请求 2 次新结论，初始结论和反思后结论可以分别触发。它和传输/schema 重试分开记录，不表示整个要点只有一份 60 秒预算；合同仍受整任务硬时限约束。
+确定性的证据、锚点、覆盖或路由反馈属于业务修订，须在前次回答通过 schema 后进入；内部每次检查最多请求 2 次新结论，初始结论和反思后结论可以分别触发。它和传输/schema 重试分开记录；60 秒作用于每次实际 HTTP 请求，合同仍受整任务硬时限约束。
 
 文件名为 `<source>__<stage>__<logical_call_id>.json`，例如 `docxindex_H12__scan-step1-batch2__a524...json`。保留下划线，其他不适合文件名的字符替换为连字符；每段最多 64 字符，完整 source/stage 仍在 JSON 中。每次请求前先写 pending；调用结束原子更新同一文件。
 
@@ -79,7 +79,17 @@ logging:
 
 普通日志和详细日志都保留 `attempts` 的基础信息：`sent/send_number`、HTTP 状态、模型类型、信号量 key、预算、剩余时间、失败阶段、重试原因和等待/请求/退避/总耗时。只有详细模式记录完整请求和响应正文。
 
-`timing.model_elapsed_seconds` 表示排除模型名额等待后的累计执行耗时；`timing.waiting_total_seconds`、`timing.wait_remaining_seconds` 表示累计等待耗时及剩余等待预算。`timing.total_seconds` 仍包含等待，允许超过 60 秒。等待超时记录为 `semaphore_wait`，整任务到期记录为 `task_deadline`，与请求和校验阶段的超时分开。
+逐次发送的请求耗时与逻辑调用累计耗时必须分开读取：一次逻辑调用可能先超时 60 秒，再由修复或重试请求成功，累计请求时间可以超过 60 秒；不能据此认为某一次 HTTP 超过配置时限。
+
+| `attempts[].timing` 字段 | 当前含义 |
+| --- | --- |
+| `request_seconds` | 当前这次发送的实际 HTTP 耗时 |
+| `model_elapsed_seconds` | 同一逻辑调用截至当前的累计 HTTP 请求耗时，不含名额等待、校验、退避和清理 |
+| `remaining_seconds` | 当前或最后一次请求剩余时间，受合同截止时间限制；超时后为 0，下一次发送重新获得请求时限 |
+| `waiting_total_seconds` / `wait_remaining_seconds` | 同一逻辑调用累计等待名额的耗时 / 剩余等待预算 |
+| `total_seconds` | 包含此前尝试及名额等待的逻辑调用墙钟耗时，不是单次 HTTP 耗时 |
+
+等待超时记录为 `semaphore_wait`，整任务到期记录为 `task_deadline`；它们均不触发请求重试。2026-10-19 本次修复前的历史 `model_elapsed_seconds` 包含除名额等待外的累计执行耗时，不能与新版累计 HTTP 耗时混用；历史文件不回写。
 
 失败 error 仅含 type、http_status、message（最多 200 字符）。本地请求超时而未收到响应时 http_status=null；服务返回 HTTP 错误时记录实际状态；收到 HTTP 成功响应但校验失败仍记为逻辑失败。成功 HTTP 状态也从实际响应读取，无法取得时不默认填写 200。
 
@@ -118,7 +128,7 @@ result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的�
 
 索引参数、路由方法描述和备用 llamaindex 参数有代码默认值，允许可选覆盖。示例配置显式列出 rerank provider 名单、subagent 工具名单和 worker 禁止预取项，便于核对实际部署。模型名称及地址保留各部署自己的值；BGE embedding 和 reranker 的地址与 payload 约束见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md#61-bge-embedding-和-reranker-怎么配置)。
 
-`model_semaphore.llm/embedding/reranker` 各自配置 `max_concurrent_requests`、`redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`。逐类型 `enabled`、`wait_timeout_seconds` 和旧共享 `limits` 格式已移除，保留旧字段会在启动时明确报迁移错误。等待名额消耗 `workflow.model_wait_timeout_seconds`（默认 180 秒），暂停 `workflow.model_call_timeout_seconds`（默认 60 秒）的执行计时；HTTP、校验、退避和同一结果的修复继续消耗执行预算。重试共用两份剩余预算，额外发送共同消耗 `workflow.model_call_max_retries`。lease 在取得名额时开始，请求结束主动释放；退出清理最多 2 秒，worker 强制终止或 Redis 不可用时依靠租约回收。完整配置和任务硬时限见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
+`model_semaphore.llm/embedding/reranker` 各自配置 `max_concurrent_requests`、`redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`。逐类型 `enabled`、`wait_timeout_seconds` 和旧共享 `limits` 格式已移除，保留旧字段会在启动时明确报迁移错误。等待名额累计消耗 `workflow.model_wait_timeout_seconds`（默认 180 秒）；取得名额后，每次实际 HTTP 请求独立使用 `workflow.model_call_timeout_seconds`（默认 60 秒），超时后释放名额，按剩余发送次数重试。退避和输出校验不扣后续请求的 60 秒，但仍受合同截止时间控制。网络、请求超时和 schema 修复共同消耗 `workflow.model_call_max_retries`，不各自叠加。lease 在取得名额时开始，请求结束主动释放；退出清理最多 2 秒，worker 强制终止或 Redis 不可用时依靠租约回收。完整配置和任务硬时限见[配置说明](CONCURRENCY_TIMEOUT_CONFIGURATION.md)。
 
 恢复契约版本为 7；旧版 plan/output 不作为新版执行的恢复结果，历史文件保留。新写入的 criterion output 删除 tokens；工作流内存结果和返回值中的 token_stats 保留兼容，不用于准确模型 usage 统计。准确用量读取 logical_calls。旧任务文件不改名、不补写字段；旧 Reflector 日志缺少要点归属，不能可靠补回 H 编号。
 
@@ -126,4 +136,4 @@ result 的 payload 为：candidate_count_before_rerank（跨步骤去重后的�
 
 ## 汇总建议与失败回退日志（2026-10-18）
 
-汇总前保存已完成审查结果，去重应用后更新最终审查日志。去重候选数、接受数、跳过数及逐组原因记录到汇总 trace 和 `summary.deduplication`；错误去重建议不删除原意见。汇总调用或输出校验耗尽时记录原始错误及 `summary.status=fallback`，只生成程序基础总览，报告和 API 明确披露。未知程序或文件错误不适用这一回退。所有修复仍使用原 60 秒累计预算和最多 6 次发送，不通过基础总览追加模型请求。
+汇总前保存已完成审查结果，去重应用后更新最终审查日志。去重候选数、接受数、跳过数及逐组原因记录到汇总 trace 和 `summary.deduplication`；错误去重建议不删除原意见。汇总调用或输出校验耗尽时记录原始错误及 `summary.status=fallback`，只生成程序基础总览，报告和 API 明确披露。未知程序或文件错误不适用这一回退。所有修复共用最多 6 次发送及累计等待预算，每次实际请求独立使用 60 秒，不通过基础总览追加模型请求。本次修复前的历史记录仍按当时累计执行预算解释。

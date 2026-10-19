@@ -129,7 +129,7 @@ class SummaryOutput:
 - `asyncio.gather` 负责并发调度：多条 criterion 可以同时进入等待队列，并在外部模型调用、检索或反思等待期间交错推进。
 - `asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)` 负责并发限制：同一时间最多允许指定数量的 criterion 进入 `execute_single_criterion()`；其余 coroutine 会等待 semaphore 释放。
 - 因此，当前并发边界是“多条 criterion / 多个 SubAgent 审查任务并发”，不是单个 SubAgent 内部把同一条标准拆成多个并发步骤。
-- 模型请求和输出修复共用 `workflow.model_call_timeout_seconds` 与 `model_call_max_retries`，当前默认每次操作 60 秒执行预算、最多发送 6 次。名额等待使用独立的 `workflow.model_wait_timeout_seconds`，默认累计 180 秒，不扣执行预算；两份预算和发送次数均不因重试重置。额度耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 交给要点恢复流程；`workflow.criterion_retry_max_attempts` 默认 3，包含首次，最多重新执行该失败要点两次。整要点尝试耗尽后该条记为 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
+- `workflow.model_call_timeout_seconds` 默认 60 秒，限制每次取得名额后的实际 HTTP 请求；网络重试、请求超时重试及输出修复都重新取得名额、独立计时。它们共用 `model_call_max_retries` 发送上限，默认每次逻辑操作最多发送 6 次。名额等待使用 `workflow.model_wait_timeout_seconds`，默认同一逻辑操作累计 180 秒，不因重试重置。退避及输出校验不扣下一次请求的 60 秒，合同总时限仍覆盖全部阶段。等待预算耗尽、合同到期或取消不触发请求重试。发送额度耗尽后的 `ModelCallError` 或 `AgentOutputValidationError` 交给要点恢复流程；`workflow.criterion_retry_max_attempts` 默认 3，包含首次，最多重新执行该失败要点两次。整要点尝试耗尽后该条记为 `status=ERROR`（记录 `error_message`），其他 criterion 继续执行并生成部分结果 DOCX。
 - 未知程序异常保持任务级失败；全部 criterion 都失败时也不生成伪成功结果。部分 criterion 失败时任务为 `succeeded`，同时以 `criteria[].execution_status=error`、`quality.error_criteria` 和 DOCX“未完成审查项”披露缺口。
 
 简化结构如下：
@@ -223,7 +223,7 @@ state/
 
 `model_semaphore.llm/embedding/reranker.max_concurrent_requests` 分别控制三个 worker 合计的三类模型请求数。每类保留 `redis_url`、`key`、`lease_seconds`、`poll_interval_seconds`；删除 `enabled` 和 `wait_timeout_seconds`，全局限流固定启用。旧共享格式必须迁移，不能静默忽略旧字段。
 
-`endpoints/runtime/model_calls.py` 统一处理等待名额、请求、重试退避、输出修复和逐次日志；同一逻辑调用复用 `model_budget.py` 中的等待预算、执行预算及发送次数。等待 Redis 名额时暂停执行计时，取得名额后恢复；退避、校验和修复继续消耗执行预算。每个阶段都服从整合同截止时间。所有 Agent、DocxIndex、LlamaIndex 请求都使用这条入口，SDK 重试关闭；同步调用通过 `run_sync` 等待可取消的异步 HTTP。
+`endpoints/runtime/model_calls.py` 统一处理等待名额、请求、重试退避、输出修复和逐次日志；同一逻辑调用复用 `model_budget.py` 中的累计等待预算及发送次数，每次实际 HTTP 请求另行建立独立时限。取得 Redis 名额后开始请求计时；请求退出或取消完成后释放名额，重试重新排队。退避和输出校验不占下一次请求时限，每个阶段都服从整合同截止时间。logical_calls 汇总首次发送和重试，不代表共享请求倒计时。所有 Agent、DocxIndex、LlamaIndex 请求都使用这条入口，SDK 重试关闭；同步调用通过 `run_sync` 等待可取消的异步 HTTP。
 
 `llm_semaphore.py` 使用 DB 2 的 Lua 原子分配 FIFO 名额；正常结束主动释放，进程崩溃后依靠租约回收。租约到期不会取消服务端推理，客户端断开是否停止内网模型服务推理由网关能力决定。DocxIndex 重排已接入配置的独立 reranker，不再占用 LLM 名额；LlamaIndex 同样使用该重排适配器。未被业务使用的 LlamaIndex 流式入口明确拒绝，不能绕过统一控制。
 

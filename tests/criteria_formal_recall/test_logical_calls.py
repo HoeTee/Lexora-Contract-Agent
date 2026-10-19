@@ -24,8 +24,7 @@ from agents.reflector import ReflectorAgent
 from endpoints.review import task_store
 from endpoints.review.review_state import ReviewStateStore
 from endpoints.runtime import model_budget
-from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout
-from endpoints.runtime.errors import ModelCallError
+from endpoints.runtime.model_budget import ModelCallBudget
 from loggers.call_log import call_stage, logical_call, map_with_context, new_call, reset_call_context, set_call_context
 from loggers.trace_logger import NOOP_TRACE
 from routing.config import RouteConfig
@@ -456,46 +455,60 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(record["status"], "failed")
             self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
 
-    async def test_third_schema_request_keeps_the_original_deadline(self):
-        # Account for the first two requests without depending on SDK cold-start
-        # latency. The third request still receives a real asyncio cancellation.
+    async def test_json_schema_repairs_receive_independent_60_second_request_budgets(self):
+        # Reproduce a 38-second invalid response, followed by two repairs. The
+        # fake clock avoids waiting minutes while the real SDK parses responses.
         clock = [100.0]
         budgets = []
         sends = []
-        cancelled = []
+        request_budgets = []
         def budget_factory():
             budget = ModelCallBudget(timeout_seconds=60, max_retries=3, started=clock[0])
             budgets.append(budget)
             return budget
         async def handler(request):
             sends.append(request)
-            if len(sends) <= 2:
-                clock[0] += 20 if len(sends) == 1 else 39.5
-                return httpx.Response(200, json=chat_response("invalid"))
-            try:
-                await asyncio.Event().wait()
-            except asyncio.CancelledError:
-                cancelled.append(len(sends))
-                raise
-            finally:
-                clock[0] = 160.001
+            request_budgets.append(budgets[0].remaining())
+            clock[0] += (38, 50, 59)[len(sends) - 1]
+            return httpx.Response(200, json=chat_response("invalid" if len(sends) < 3 else '{"answer":"ok"}'))
         budget_clock = SimpleNamespace(monotonic=lambda: clock[0], time=time.time)
         with patch.object(model_budget, "time", budget_clock):
             async with self.harness([], response_handler=handler) as (agent, logs):
                 with patch("loggers.call_log.ModelCallBudget", side_effect=budget_factory):
-                    with self.assertRaises(ModelCallError) as caught:
-                        await asyncio.wait_for(chat_until_valid_json(agent, "review", Answer, '{}'), timeout=5)
-                self.assertIsInstance(caught.exception.__cause__, ModelCallTimeout)
+                    result, _ = await asyncio.wait_for(chat_until_valid_json(agent, "review", Answer, '{}'), timeout=5)
                 record, = self.read_records(logs)
+                self.assertEqual(result, {"answer": "ok"})
                 self.assertEqual(len(budgets), 1)
-                self.assertEqual(budgets[0].deadline, 160)
                 self.assertEqual(budgets[0].sends, 3)
-                self.assertEqual(cancelled, [3])
+                self.assertEqual(request_budgets, [60, 60, 60])
                 self.assertEqual(len(sends), 3)
-                self.assertEqual(record["status"], "failed")
-                self.assertEqual(record["attempts"][-1]["failure_stage"], "request")
+                self.assertEqual(record["status"], "succeeded")
                 self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
-                self.assertAlmostEqual(record["attempts"][-1]["remaining_seconds"], 0.5)
+                self.assertTrue(all(attempt["remaining_seconds"] == 60 for attempt in record["attempts"]))
+
+    async def test_agent_request_timeout_then_json_repair_share_send_count_only(self):
+        sends = []
+        cancelled = []
+        async def handler(request):
+            sends.append(request)
+            if len(sends) == 1:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    cancelled.append(True)
+            return httpx.Response(200, json=chat_response("invalid" if len(sends) == 2 else '{"answer":"ok"}'))
+        async with self.harness([], response_handler=handler) as (agent, logs):
+            with patch("loggers.call_log.ModelCallBudget", side_effect=lambda: ModelCallBudget(
+                    timeout_seconds=1, max_retries=2)), \
+                    patch("endpoints.runtime.model_calls._retry_delay", return_value=0):
+                result, _ = await chat_until_valid_json(agent, "review", Answer, '{}')
+            self.assertEqual(result, {"answer": "ok"})
+            self.assertEqual((len(sends), cancelled), (3, [True]))
+            record, = self.read_records(logs)
+            self.assertEqual((record["status"], record["send_count"], record["retry_count"]), ("succeeded", 3, 2))
+            self.assertEqual([attempt["send_number"] for attempt in record["attempts"]], [1, 2, 3])
+            self.assertEqual(record["attempts"][0]["failure_stage"], "request")
+            self.assertEqual(record["attempts"][1]["failure_stage"], "output_validation")
 
     async def test_agent_schema_repairs_keep_one_call_and_only_final_usage_in_both_modes(self):
         for detailed in (False, True):

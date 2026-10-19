@@ -284,7 +284,7 @@ class Agent:
         record = getattr(self, "_validation_call", None)
         if record is not None:
             try:
-                record.budget.remaining()
+                record.budget.task_remaining()
             except ModelCallTimeout as exc:
                 if record.last_record is not None:
                     exc.call_id = record.last_record.reference_id

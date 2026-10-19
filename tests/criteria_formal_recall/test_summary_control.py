@@ -1,4 +1,4 @@
-"""Summary fallbacks must not reset the shared model operation budget."""
+"""Summary fallbacks retain shared send limits and independent request timers."""
 
 from __future__ import annotations
 
@@ -82,8 +82,8 @@ class SummaryControlTests(TestCase):
         self.assertEqual(len(self.records()), 1)
         self.assertEqual([task.node.summary for task in self.tasks], ["", ""])
 
-    def test_batch_deadline_does_not_start_individual_summaries(self):
-        self.timeout = 2
+    def test_exhausted_request_timeouts_do_not_start_individual_summaries(self):
+        self.timeout = 0.15
         cancelled = []
 
         async def slow(request):
@@ -98,8 +98,8 @@ class SummaryControlTests(TestCase):
             with self.assertRaises(LLMClientError) as caught:
                 self.batch()
         self.assertEqual(caught.exception.error_type, "ModelCallTimeout")
-        self.assertEqual(len(self.sends), 1, str(caught.exception))
-        self.assertEqual(cancelled, [True])
+        self.assertEqual(len(self.sends), 2, str(caught.exception))
+        self.assertEqual(cancelled, [True, True])
         self.assertEqual(len(self.records()), 1)
 
     def test_batch_redis_failure_does_not_start_individual_summaries(self):
@@ -206,30 +206,30 @@ class SummaryControlTests(TestCase):
         record, = self.records()
         self.assertEqual(record["status"], "failed")
 
-    def test_synchronous_length_validation_cannot_mask_expired_deadline(self):
+    def test_synchronous_length_validation_cannot_mask_expired_task_deadline(self):
         def overlong(request):
             self.sends.append(json.loads(request.content))
             return completion(json.dumps({"summary": self.long_summary}, ensure_ascii=False))
 
         def length_check_past_deadline(text):
-            # Simulate synchronous validation crossing its deadline without
+            # Simulate synchronous validation crossing the contract deadline without
             # sleeping or changing the event loop's global monotonic clock.
             logical = current_logical_call()
             if logical is not None:
                 self.assertEqual(logical.sent_count, 1)
-                logical.budget.deadline = time.monotonic() - 1
+                logical.budget._task_deadline = time.monotonic() - 1
             return estimate_tokens(text)
 
         with model_transport("tools.docxindex.llm.client", overlong):
             with patch("tools.docxindex.indexing.llm_summary.estimate_tokens", length_check_past_deadline):
                 with self.assertRaises(LLMClientError) as caught:
                     _generate_summary(self.client, self.tasks[0].node, "合同内容")
-        self.assertEqual(caught.exception.error_type, "ModelCallTimeout")
-        self.assertEqual(caught.exception.failure_stage, "output_validation")
+        self.assertEqual(caught.exception.error_type, "TaskDeadlineExceeded")
+        self.assertEqual(caught.exception.failure_stage, "task_deadline")
         self.assertEqual(len(self.sends), 1)
         record, = self.records()
         self.assertEqual((record["status"], record["send_count"]), ("failed", 1))
-        self.assertEqual(record["attempts"][0]["error"]["type"], "ModelCallTimeout")
+        self.assertEqual(record["attempts"][0]["error"]["type"], "TaskDeadlineExceeded")
 
     def test_invalid_or_blank_output_without_candidate_still_fails(self):
         for content in ("invalid JSON", '{"summary":"   "}'):

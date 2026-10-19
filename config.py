@@ -497,7 +497,7 @@ def control_configuration_summary() -> dict[str, Any]:
         "workflow": {"criterion_concurrency_per_contract": MAX_ORCHESTRATOR_CONCURRENCY,
                      "criterion_retry_max_attempts": CRITERION_RETRY_MAX_ATTEMPTS,
                      "model_wait_timeout_seconds": MODEL_WAIT_TIMEOUT_SECONDS,
-                     "model_operation_timeout_seconds": MODEL_CALL_TIMEOUT_SECONDS,
+                     "model_request_timeout_seconds": MODEL_CALL_TIMEOUT_SECONDS,
                      "model_extra_send_limit": MODEL_CALL_MAX_RETRIES},
         "model_semaphore": {
             kind: {**{key: value for key, value in raw.items() if key != "redis_url"},

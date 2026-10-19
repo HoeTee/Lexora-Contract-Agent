@@ -1,6 +1,6 @@
 # 并发、超时与重试配置说明
 
-更新日期：2026-10-18。当前模型额外发送上限为 5、要点总尝试次数为 3，模型累计执行预算仍为 60 秒；没有新增配置。尚未部署到公司内网。第 13 节保留各历史版本验证记录，不代表当前配置的运行结果。
+更新日期：2026-10-19。当前每次实际模型 HTTP 请求独立使用 60 秒时限，模型额外发送上限为 5、要点总尝试次数为 3；没有新增配置。尚未部署到公司内网。第 13.1—13.4 节保留历史版本验证记录，其中的累计执行预算是当时的实现；本次逐请求时限的验证见第 13.5 节。
 
 本文说明合同任务、模型调用和 Redis 名额的配置，列出旧配置的迁移方式。配置解释以当前代码为准。地址、凭据和模型名称继续使用各部署自己的设置，不把本地开发机的模型配置套用到内网。
 
@@ -42,7 +42,7 @@ Web 提交 / HTTP API 提交（CLI 也作为 HTTP API 客户）
 
 仓库的 `config.example.yaml`、`docker-compose.example.yaml` 是提交到版本库的模板。真实的 `config.yaml`、`docker-compose.yaml` 在 `.gitignore` 中。本次已更新开发目录的真实控制配置，但不会因此更新内网宿主机文件或运行镜像。
 
-启动日志的 `[config] execution-control` 输出有效配置和下文列出的内部值。`workflow.model_wait_timeout_seconds` 表示累计等待名额预算，`model_operation_timeout_seconds` 表示排除名额等待后的累计执行预算。`criterion_retry_max_attempts` 表示要点总尝试次数，`model_extra_send_limit` 表示每次模型操作的额外发送上限；这两项以部署实际值为准。Redis 地址中的用户名、密码被去除。`deployment_contract` 表示部署预期为三个 worker、每个并发 1；实际实例数仍由 Compose/启动命令决定。
+启动日志的 `[config] execution-control` 输出有效配置和下文列出的内部值。`workflow.model_wait_timeout_seconds` 表示同一逻辑操作累计等待名额的预算；日志字段 `model_request_timeout_seconds` 对应 YAML 的 `workflow.model_call_timeout_seconds`，表示每次取得名额后实际 HTTP 请求独立可用的时间。旧日志字段 `model_operation_timeout_seconds` 已更名，YAML 配置名不变，没有新增配置。`criterion_retry_max_attempts` 表示要点总尝试次数，`model_extra_send_limit` 表示每次模型操作的额外发送上限；这两项以部署实际值为准。Redis 地址中的用户名、密码被去除。`deployment_contract` 表示部署预期为三个 worker、每个并发 1；实际实例数仍由 Compose/启动命令决定。
 
 ## 3. 并发配置
 
@@ -103,32 +103,33 @@ DocxIndex 的索引摘要、embedding 建库和检索扫描仍使用现有内部
 | 配置 | 本次值或决定 | 含义 |
 | --- | --- | --- |
 | `workflow.model_wait_timeout_seconds` | 新增，默认 180 | 同一次逻辑操作累计等待 Redis 名额的预算，LLM、embedding、reranker 共用此配置；必须是大于 0 的有限数 |
-| `workflow.model_call_timeout_seconds` | 保留 60，排除名额等待 | 一次模型操作的累计执行预算，作用于 LLM、embedding、reranker，包含请求、校验、输出修复和重试退避 |
-| `workflow.model_call_max_retries` | 当前值及示例值 5 | 首次发送之外最多再发送五次，即每次操作最多发送 6 次；网络重试、JSON/schema 修复共用次数，仍共用 60 秒累计执行预算 |
+| `workflow.model_call_timeout_seconds` | 保留 60，逐次请求独立计时 | 每次取得名额后，实际 HTTP 请求独立使用的时限，作用于 LLM、embedding、reranker；不含此前名额等待、重试退避及输出校验 |
+| `workflow.model_call_max_retries` | 当前值及示例值 5 | 首次发送之外最多再发送五次，即每次逻辑操作最多发送 6 次；网络重试、请求超时重试和 JSON/schema 修复共用这 6 次，每次发送重新获得 60 秒请求时限 |
 
-一次操作从进入模型调度开始，分别累计两种时间：
+一次逻辑操作汇总同一结果的首次生成和修复重试，累计等待预算与发送次数；每次实际 HTTP 请求独立计时：
 
 ```text
 开始逻辑操作
-  → 等待 Redis 名额：消耗累计等待预算，暂停模型执行预算
-  → 取得名额：lease 开始，恢复模型执行预算
-  → HTTP 请求、解析响应：消耗模型执行预算
+  → 等待 Redis 名额：消耗累计等待预算，尚未开始本次请求的 60 秒
+  → 取得名额：lease 开始，本次 HTTP 请求独立计时 60 秒
+  → HTTP 请求返回或超时：结束本次请求计时
   → 请求退出后主动释放自己的名额
-  → 输出校验：继续消耗模型执行预算，此时已释放名额
-  → 需要重试：退避消耗执行预算，再排队消耗剩余等待预算
+  → 输出校验：此时已释放名额，不扣下一次 HTTP 的 60 秒
+  → 需要重试且发送次数尚有剩余：退避，再排队消耗剩余等待预算
+  → 再次取得名额：新请求重新独立计时 60 秒
 ```
 
-等待预算 180 秒、模型预算 60 秒时，等待 45 秒后取得名额仍有接近 60 秒的执行预算，模型再用 40 秒返回可以成功；整任务已消耗约 85 秒。等待时间不计入执行预算，网络重试和 JSON/schema 修复均沿用原操作的剩余等待预算、执行预算和发送次数，不重新清零。
+等待预算 180 秒、请求时限 60 秒时，等待 45 秒后取得名额仍有 60 秒请求时间，模型再用 40 秒返回可以成功；整任务已消耗约 85 秒。网络重试和 JSON/schema 修复沿用同一逻辑操作的剩余等待预算和发送次数，但不沿用上次 HTTP 的剩余时间。
 
-若第一次等待已用 120 秒，重试最多再等 60 秒；若第一次请求、校验和退避已用 40 秒，重试最多再执行约 20 秒。任一阶段遇到合同执行截止时间，立即停止，不延长整任务。
+若第一次等待已用 120 秒，后续重试累计最多再等 60 秒。若第一次请求 38 秒返回但校验不通过，修复请求取得名额后重新获得 60 秒，而不是只剩 22 秒；若第一次请求用满 60 秒超时，只要次数、等待预算和合同剩余时间允许，仍可重新申请名额再请求。退避和校验不扣下一次 HTTP 时限，但计入合同总时长。任一阶段遇到合同执行截止时间，立即停止，不延长整任务。
 
-一个 scan 批次的一次判断是一次模型操作；不同独立批次分别计时。Agent 正常进入下一步、工具结果续写或业务反思时产生新的操作。同一结果的 JSON/结构修复继续使用原操作预算。
+一个 scan 批次的一次判断是一次逻辑操作；不同独立批次分别记录。Agent 正常进入下一步、工具结果续写或业务反思时产生新的逻辑操作。同一结果的 JSON/结构修复继续使用原逻辑操作的累计等待预算和发送额度，每次实际请求独立获得 60 秒。SubAgent 与 Reflector 的不同生成步骤不会共用请求倒计时。
 
-每个失败要点默认最多三次执行，第二、三次执行中的新逻辑操作建立新的等待预算、60 秒执行预算和最多 6 次发送额度，但仍使用相同的 Redis 并发上限，且截止时间不超过原合同的任务截止时间。其他已经成功的要点不重跑。取消及合同硬时限不会因此获得新的一份执行时间。
+每个失败要点默认最多三次执行，第二、三次执行中的新逻辑操作建立新的累计等待预算和最多 6 次发送额度；其中每次实际请求仍独立使用 60 秒，并遵守相同的 Redis 并发上限和原合同截止时间。其他已经成功的要点不重跑。取消及合同硬时限不会因此获得新的一份执行时间。
 
-这次恢复的是默认发送上限和整要点尝试次数，未恢复旧版各层独立叠加重试。若一次网络重试已使用 2 次发送，随后 JSON/schema 修复最多再发送 4 次；若剩余时间不足，即使还剩次数也不能发送。无网络错误且时间足够时，JSON/schema 允许首次生成加五次修复，共 6 次发送。首次请求已耗尽 60 秒时，该操作没有剩余时间重试；由要点恢复机制决定是否开始下一次整要点尝试，不把单次操作预算延长成 360 秒。
+网络、超时和 schema 修复不各自增加一组重试次数。若网络重试已使用 2 次发送，随后 JSON/schema 修复最多再发送 4 次。默认上限允许 6 次请求，每次最多 60 秒，因此同一逻辑操作的累计 HTTP 请求时间最多可达约 360 秒，另有累计名额等待、退避及校验耗时；合同总时限可以提前终止。等待预算耗尽、合同到期及外部取消不会通过请求重试重新获得预算。
 
-各入口的边界如下。同一行中的所有请求仍使用同一类 Redis 全局名额；“独立操作”只表示有自己的截止时间和发送次数，不增加并发上限。
+各入口的边界如下。同一行中的所有请求仍使用同一类 Redis 全局名额；“独立操作”只表示有自己的累计等待预算和发送次数，不增加并发上限，每次 HTTP 请求另行计时。
 
 | 调用入口 | 一次操作覆盖什么 | 何时建立下一次操作 |
 | --- | --- | --- |
@@ -141,19 +142,19 @@ DocxIndex 的索引摘要、embedding 建库和检索扫描仍使用现有内部
 
 还有一类业务修订：模型回答已经通过 JSON/schema 校验，但确定性的证据、锚点、覆盖范围或路由检查发现结论不符合要求时，Orchestrator 会把具体反馈交给 SubAgent 生成新的完整结论。每次检查最多触发 2 次新结论修订，由内部 `max_revisions=2` 控制。这两次是正常业务操作，各自建立模型预算；不是网络或 schema 修复次数。初次结论和每次业务反思后的结论都可以进入这项检查，因此整个要点不只允许两次业务修订。网络、schema 或确定性检查最终失败并抛出异常时，外层再按 `criterion_retry_max_attempts` 决定是否重新执行这个要点；不是重新执行整份合同。
 
-**60 秒限制一次模型操作，不是整个要点的总时长。**一个要点可以经历检索、初次结论、上述业务修订和反思等多个操作；全部要点和操作仍受合同任务的 1800 秒硬时限约束。
+**60 秒限制每次实际 HTTP 请求，不是一次逻辑操作或整个要点的总时长。**一个逻辑操作可以包含首次发送和修复重试，一个要点还可以经历检索、初次结论、上述业务修订和反思等多个逻辑操作；全部要点和操作仍受合同任务的 1800 秒硬时限约束。
 
 批量摘要已经成功且通过结构校验时，未获得有效摘要的其他节点可以分别生成；这属于不同节点的工作。批量请求因网络、模型时限、Redis、无效 JSON 或修复次数耗尽而失败时，错误向上报告，不能通过改为逐节点生成来重新获得预算。
 
 同一节点的摘要过长时，压缩修复在原操作内进行。若输出修复次数耗尽，但已经收到过结构合法的过长摘要，可以直接截断该已收到的文本；不再发送请求。网络、时限或 Redis 错误不使用截断结果掩盖失败。
 
-可重试连接错误、408/409/429、可重试服务错误和输出校验错误，在剩余时间及次数允许时重试。明确的参数错误等直接结束。`Retry-After` 等待也在预算内。
+可重试连接错误、单次 HTTP 请求超时、408/409/429、可重试服务错误和输出校验错误，在发送次数、累计等待预算及合同剩余时间允许时重试。明确的参数错误等直接结束。`Retry-After` 和其他退避计入合同总时长，不扣后续 HTTP 请求的 60 秒。
 
 可选的层级增强若耗尽输出校验修复次数，保留原有确定性分块/标题回退，不再发送请求；网络、时间和 Redis 错误继续向上报告。
 
 SDK 自带重试关闭。DocxIndex 和保留的 LlamaIndex 网络调用全部接入公共模块。同步调用通过常驻异步网络线程等待实际可取消的协程，不使用无法停止同步 HTTP 的 `to_thread` 包装来冒充超时控制。批处理仍有内部有界调度，但没有第二套用户配置的模型请求限额。
 
-等待预算耗尽后不再申请或发送；模型执行预算耗尽后不再发送或修复；整任务到期优先终止当前阶段。本地 HTTP 协程先退出或完成取消，再释放自己的 Redis 名额。退出清理单独最多等待 2 秒；取消发生在清理期间时，也等待这次有界清理结束后再向上传递取消，避免任务事件循环关闭时遗留清理协程。清理失败依靠租约回收，不获得新的模型执行时间。
+等待预算耗尽后不再申请或发送；单次请求超时后，按剩余发送次数决定是否重试；整任务到期优先终止当前阶段，不重试。本地 HTTP 协程先退出或完成取消，再释放自己的 Redis 名额，下一次发送重新排队。退出清理单独最多等待 2 秒；取消发生在清理期间时，也等待这次有界清理结束后再向上传递取消，避免任务事件循环关闭时遗留清理协程。清理失败依靠租约回收，不延长本次请求时限。
 
 正在传播的超时或取消不会被随后的 Redis 清理错误覆盖，清理故障另行记录。若模型已经正常返回，但释放 Redis 失败，则报告释放故障，不再次发送模型请求。
 
@@ -175,7 +176,7 @@ LlamaIndex 当前业务不使用流式请求。其流式入口明确报不支持
 
 软时限从项目配置和实现方案中移除，不提供 `task_soft_time_limit_seconds`，也不保留 `null` 占位。Celery 库内部显式保持软时限未启用。
 
-Celery 原生 `task_time_limit` 是可选功能，库本身不要求设置整任务硬时限。本项目通过 `queue.task_time_limit_seconds` 为业务设置默认 1800 秒；删除 YAML 字段仍会采用默认值。`workflow.model_wait_timeout_seconds`、模型执行预算和模型名额 lease 均由项目实现，不是 Celery 要求的配置。
+Celery 原生 `task_time_limit` 是可选功能，库本身不要求设置整任务硬时限。本项目通过 `queue.task_time_limit_seconds` 为业务设置默认 1800 秒；删除 YAML 字段仍会采用默认值。`workflow.model_wait_timeout_seconds`、单次模型请求时限和模型名额 lease 均由项目实现，不是 Celery 要求的配置。
 
 **7200 秒只控制等待 worker 的阶段，不终止已运行的合同。**周期检查存在调度延迟，不能宣称精确在第 7200 秒删除消息。过期任务先标记为失败，旧消息之后被领取也不会执行。
 
@@ -185,14 +186,14 @@ Celery 原生 `task_time_limit` 是可选功能，库本身不要求设置整任
 
 ```text
 排队最多等待 = min(逻辑操作剩余等待预算, 合同执行剩余时长)
-模型最多执行 = min(逻辑操作剩余执行预算, 合同执行剩余时长)
+本次 HTTP 最多执行 = min(model_call_timeout_seconds, 合同执行剩余时长)
 ```
 
 合同已运行 29 分 50 秒时新建的调用只剩约 10 秒，不能再独立延长合同。
 
 ### 三个 worker 同时运行的过程
 
-A、B、C 三份合同分别被三个 worker 接手，D 在 DB 0 等待。如果 A、B、C 合计六个调用申请 LLM 名额，最多五个发送，第六个消耗自己的等待预算，保留模型执行预算。索引内部若产生更多申请，同样排队，不会使模型实发并发超过五个。
+A、B、C 三份合同分别被三个 worker 接手，D 在 DB 0 等待。如果 A、B、C 合计六个调用申请 LLM 名额，最多五个发送，第六个消耗自己的等待预算，尚未开始该次 HTTP 的 60 秒计时。索引内部若产生更多申请，同样排队，不会使模型实发并发超过五个。
 
 例如五个请求各执行 40 秒，第六个等待约 40 秒后再执行 40 秒，可以成功，不会只获得 20 秒执行时间。若等待累计超过 180 秒则报告等待名额超时；若整个合同先到期，则报告整任务到期。三个 worker 的各自任务截止时间和逻辑操作预算互不重置。
 
@@ -310,7 +311,7 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 
 旧共享格式 `model_semaphore.limits`、共享的 Redis/lease 等字段需要迁到逐类型结构；旧 `llm.global_semaphore_*` 和 `llm.max_global_concurrent_requests` 不再接收。单独的模型 timeout、rerank 重试退避字段也不再接收。配置加载明确报迁移错误，防止旧字段被静默忽略。
 
-已移除内部独立次数：DocxIndex 限流错误额外重试、`complete_model()` 独立修复次数、scan 整批重试。HTTP 时限统一从剩余预算派生，不再沿用 DocxIndex 默认 120 秒。`workflow.criterion_retry_max_attempts` 已恢复为有效配置，不再属于迁移时删除的字段；当前缺省值和示例值均为 3。
+已移除内部独立次数：DocxIndex 限流错误额外重试、`complete_model()` 独立修复次数、scan 整批重试。每次 HTTP 时限统一取 `model_call_timeout_seconds` 与合同剩余时长中较小的一项，不再沿用 DocxIndex 默认 120 秒。`workflow.criterion_retry_max_attempts` 已恢复为有效配置，不再属于迁移时删除的字段；当前缺省值和示例值均为 3。
 
 | 保留配置 | 作用边界 |
 | --- | --- |
@@ -341,7 +342,7 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 | 信号量 key 的 TTL | `int(lease_seconds) + 60` 秒 | 整个 key 的清理规则；与成员租约不同 |
 | Redis 连接及操作时限 | 2 秒 | 基础连接故障边界；申请名额还受等待预算和整任务截止时间约束 |
 | Redis 退出清理时限 | 2 秒 | 请求已结束后的释放动作，失败交给租约 |
-| 租约最小清理余量 | 5 秒 | 租约至少比模型执行预算长 5 秒，不加等待预算或重试次数 |
+| 租约最小清理余量 | 5 秒 | 租约至少比单次模型请求时限长 5 秒，不加等待预算或重试次数 |
 | worker 心跳间隔 | 10 秒 | 状态更新频率，不是任务执行时限 |
 | 任务文件锁等待/检查间隔 | 30 秒 / 0.05 秒 | 共享任务文件写入；锁由 OS 持有，无旧版 300 秒陈旧锁等待 |
 | 截止状态核对余量 | 5 秒 | 父回调缺失时的状态兜底，加上 watchdog 周期发现 |
@@ -395,7 +396,17 @@ model_semaphore:
 
 每次逻辑操作记录多次实际发送的 `attempts`，包括模型类型、HTTP 状态、阶段、等待/请求/退避/总耗时、预算、原因及 token usage。普通日志模式也保留基础统计，完整请求正文仍由详细日志控制。
 
-等待名额超时、模型执行超时、合同执行到期和 Redis 连接失败分别记录，不能把 Redis 无法连接解释为模型推理太慢。等待计入日志总耗时和整任务耗时，不计入模型执行预算；因此逻辑操作总耗时可以超过 60 秒。`timing.model_elapsed_seconds` 表示排除容量等待后的累计执行耗时，`timing.waiting_total_seconds` 和 `timing.wait_remaining_seconds` 分别表示累计等待耗时及剩余等待预算；`timing.total_seconds` 继续表示实际总耗时。等待耗尽记录在 `semaphore_wait` 阶段，合同到期记录在 `task_deadline` 阶段。
+等待名额超时、单次 HTTP 请求超时、合同执行到期和 Redis 连接失败分别记录，不能把 Redis 无法连接解释为模型推理太慢。逐次发送的 HTTP 耗时与逻辑操作累计耗时分开统计；多次发送累计超过 60 秒属于允许范围。等待计入日志总耗时和整任务耗时，不计入任一次 HTTP 请求时限。等待耗尽记录在 `semaphore_wait` 阶段，合同到期记录在 `task_deadline` 阶段，这两类情况不触发请求重试。
+
+| `attempts[].timing` 字段 | 当前含义 |
+| --- | --- |
+| `request_seconds` | 当前这次实际发送的 HTTP 耗时 |
+| `model_elapsed_seconds` | 同一逻辑操作截至当前，所有实际 HTTP 请求耗时的累计值；不含等待、校验、退避和名额清理 |
+| `remaining_seconds` | 当前或最后一次 HTTP 请求的剩余时间，受合同截止时间限制；超时后为 0 不表示整组禁止重试，下一次发送重新计时 |
+| `waiting_total_seconds` / `wait_remaining_seconds` | 同一逻辑操作累计名额等待耗时 / 剩余等待预算 |
+| `total_seconds` | 整个逻辑操作截至当前的墙钟耗时，包含此前尝试及名额等待 |
+
+例如第一次请求超时 60 秒、第二次请求 38 秒成功时，第二次的 `request_seconds` 约为 38，`model_elapsed_seconds` 约为 98；不能把累计 98 秒解释为单次 HTTP 超过 60 秒。旧日志不补写，2026-10-19 本次修复前的 `model_elapsed_seconds` 仍按当时排除名额等待后的累计执行耗时解释。
 
 - `input_tokens/output_tokens/input_output_tokens` 保留已有最终结果字段语义，不把它们当成全部重试成本。
 - `known_input_tokens/known_output_tokens` 汇总已知的逐次 usage；未知部分不自动计为零。
@@ -409,7 +420,7 @@ model_semaphore:
 1. 等待或排空旧 worker 的任务后再升级，不混用不同模型控制策略的版本。
 2. 在内网宿主机迁移挂载的 `config.yaml`；依据第 7 节删除旧字段，保留内网地址、凭据、并发、lease、重试和算法配置。新增 `workflow.model_wait_timeout_seconds: 180`；省略新字段也采用 180 秒默认值，不恢复逐类型 `wait_timeout_seconds`。
 3. 使用包含本次代码的新镜像，同时更新 API、三个 worker 和配套挂载。
-4. 检查各服务的 `[config] execution-control`，确认 Redis 地址/数据库、各上限、等待预算、执行预算、重试及硬时限一致。模板的等待/执行预算为 180/60 秒，重试显示值应与部署文件一致。确认三个 prefork worker 每个并发 1。
+4. 检查各服务的 `[config] execution-control`，确认 Redis 地址/数据库、各上限、累计等待预算、单次请求时限、重试及合同硬时限一致。模板的累计等待预算为 180 秒、单次 HTTP 时限为 60 秒，重试显示值应与部署文件一致。确认三个 prefork worker 每个并发 1。
 5. 通过 Web/API 做提交、状态查询、历史和下载验证，再用同批合同复测成功率、完整性、等待、重试和总耗时。
 
 旧版活跃任务没有 `execution_deadline`，不能凭 API 重启判断它们已失败。升级前需排空或人工核对旧任务。不能通过清空 DB 0/DB 2 代替状态核对和协调升级。
@@ -428,7 +439,7 @@ CLI 等待到期不会取消服务端合同，也不会改变 Celery 时限；�
 
 ## 12. 验证及边界
 
-此前控制逻辑使用本地测试 HTTP 和隔离 Redis 验证，并用本地配置中的阿里云模型端点完成真实合同任务，没有把它当作公司内网模型实测。本节及第 13.1—13.3 节是此前验证范围，本次分开计时的验证记录见第 13.4 节。
+此前控制逻辑使用本地测试 HTTP 和隔离 Redis 验证，并用本地配置中的阿里云模型端点完成真实合同任务，没有把它当作公司内网模型实测。本节及第 13.1—13.4 节记录历史验证范围，使用当时的累计执行预算；不能将这些结果直接视为当前逐次 HTTP 独立时限的验证结果。
 
 | 验证 | 已验证内容 |
 | --- | --- |
@@ -441,9 +452,11 @@ CLI 等待到期不会取消服务端合同，也不会改变 Celery 时限；�
 
 Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码，测试将合同执行替换为可控工作，不使用真实模型推理。它证明进程控制和状态处理有效，不证明内网模型吞吐或排序质量。
 
-60 秒模型预算、30 分钟硬上限、要点并发 2 仍是首轮参数。是否需要将模型预算调整回 30 秒、并发上限是否符合模型服务能力，目前不确定，需要内网同批合同复测。
+当前每次 HTTP 仍为 60 秒，合同硬上限和要点并发未因本次修复改变。上述历史结果不证明内网服务在此时限内一定返回，需要在内网按同批合同复测。
 
 ## 13. 验证记录
+
+本节第 13.1—13.4 节均为历史记录。下文“60 秒操作预算”“不重置执行预算”描述对应版本当时的行为，当前每次实际 HTTP 请求独立计时的规则见第 4 节。
 
 ### 13.1 前轮实现验证
 
@@ -496,6 +509,17 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 
 修改本地源码不会更新内网已运行镜像。内网需要重建包含本次修改的镜像，协调更新 Web/API 与三个 worker，并在共享挂载的 `config.yaml` 中设置等待预算；不填写新字段时采用默认 180 秒。启动后核对等待与执行预算，再复测真实合同。
 
+### 13.5 每次实际 HTTP 请求独立计时（2026-10-19）
+
+本轮未执行真实合同，未调用公司内网或外部模型服务。全量回归共 32 个模块、372 项：371 项通过、1 项 Linux Celery 硬时限专项因 Windows 环境跳过，0 失败、0 错误，耗时 62.609 秒。上述总数已包含 18 项真实隔离 Redis + 本地 HTTP 集成用例，不能再次相加。
+
+- 受控时钟用例模拟首轮 38 秒返回但 schema 校验失败，修复请求再用 50 秒成功；两次传给 SDK 的请求时限均为 60 秒，证明修复请求没有沿用首轮剩余的 22 秒。此用例不是等待真实模型运行 88 秒。
+- 真实本地 HTTP 集成使用短夹具时限验证请求超时后的底层取消、释放名额和按配置重新请求；验证合同截止、取消及累计等待耗尽不会通过请求重试重置预算。
+- 三个独立进程的并发控制验证保留 LLM/embedding/reranker 的全局 5/3/10 上限。等待预算和发送次数继续由同一逻辑操作累计，传输与 schema 修复共用发送次数。
+- 生产配置中的单次模型请求时限仍为 60 秒，没有新增配置，也未修改三个 worker 的部署数量。
+
+这些测试验证请求计时与恢复控制，不证明 H01/H12 在内网模型上一定能在 60 秒内返回；内网实际耗时仍需部署后复测。
+
 ## 14. 代码入口
 
 | 文件与入口 | 输入 → 输出或作用 |
@@ -505,12 +529,12 @@ Linux 集成使用与内网一致的 Celery/Kombu/redis-py 版本及当前源码
 | [task_queue/review_queue.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_queue.py:9) | client_dir、task_id → 持久化消息编号并入 DB 0 |
 | [task_queue/review_tasks.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_tasks.py:21) | 任务参数 → worker 执行及真实业务状态 |
 | [task_queue/review_request.py](C:/Users/lenovo/Desktop/contract_agent/task_queue/review_request.py:39) | Celery 超时/进程失败事件 → 父进程业务失败处理 |
-| [endpoints/runtime/model_budget.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_budget.py:73) | 等待、执行预算与任务截止时间 → 剩余时间及发送额度 |
-| [endpoints/runtime/model_calls.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_calls.py:49) | 模型类型、发送和校验函数 → 在共享预算内获得结果或明确失败 |
+| [endpoints/runtime/model_budget.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_budget.py:73) | 累计等待预算、单次请求时限与任务截止时间 → 剩余时间及发送额度 |
+| [endpoints/runtime/model_calls.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/model_calls.py:57) | 模型类型、发送和校验函数 → 每次 HTTP 独立计时，并在共同发送上限内重试 |
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:71) | 类型、key、容量及等待预算 → Lua 原子名额申请/释放 |
 | [endpoints/runtime/llm_semaphore.py](C:/Users/lenovo/Desktop/contract_agent/endpoints/runtime/llm_semaphore.py:43) | 外部取消 → 等待同一次有界清理结束后传播取消 |
 | [agents/base_agent.py](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:302) | Agent 生成请求 → 公共 LLM 并发和预算控制 |
-| [agents/json_utils.py](C:/Users/lenovo/Desktop/contract_agent/agents/json_utils.py:74) | JSON/schema 及模型响应 → 在同一操作的最多 6 次发送及 60 秒累计预算内生成和修复 |
+| [agents/json_utils.py](C:/Users/lenovo/Desktop/contract_agent/agents/json_utils.py:74) | JSON/schema 及模型响应 → 在同一操作最多 6 次发送内生成和修复，每次请求独立使用 60 秒 |
 | [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:809) | schema 合法的结论及业务反馈 → 最多 2 次新的完整结论修订 |
 | [agents/orchestrator.py](C:/Users/lenovo/Desktop/contract_agent/agents/orchestrator.py:1259) | 要点及总尝试上限 → 复用成功结果，或最多执行该要点 3 次 |
 | [tools/docxindex/llm/client.py](C:/Users/lenovo/Desktop/contract_agent/tools/docxindex/llm/client.py:95) | DocxIndex 提示及校验函数 → 公共 LLM 并发和预算控制 |

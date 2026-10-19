@@ -201,7 +201,44 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
                                 await self.llm().achat([ChatMessage(role="user", content="query")])
                             else:
                                 await self.embedding().aget_query_embedding("query")
-                self.assertEqual(cancelled, [True])
+                self.assertEqual(cancelled, [True, True])
+
+    async def test_timeout_retry_receives_full_request_budget_in_sync_and_async_adapters(self):
+        for module, kind, synchronous in [
+            (limited_llm, "llm", False),
+            (limited_embedding, "embedding", False),
+            (limited_llm, "llm", True),
+            (limited_embedding, "embedding", True),
+        ]:
+            with self.subTest(model_type=kind, synchronous=synchronous):
+                sends = []
+                cancelled = []
+                async def timeout_then_success(request, *, sends=sends, cancelled=cancelled):
+                    sends.append(request)
+                    if len(sends) == 1:
+                        try:
+                            await asyncio.Event().wait()
+                        finally:
+                            cancelled.append(True)
+                    return await self.success(request)
+                before = len(self.http_timeouts)
+                with patch.object(module, "AsyncOpenAI", self.client_factory(timeout_then_success)), \
+                        patch("endpoints.runtime.model_calls._retry_delay", return_value=0):
+                    with logical_call(f"llamaindex.{kind}", f"test-{kind}") as logical:
+                        logical.budget = ModelCallBudget(timeout_seconds=0.15, max_retries=1)
+                        if synchronous and kind == "llm":
+                            result = self.llm().chat([ChatMessage(role="user", content="query")]).message.content
+                        elif synchronous:
+                            result = self.embedding().get_query_embedding("query")
+                        elif kind == "llm":
+                            result = (await self.llm().achat([ChatMessage(role="user", content="query")])).message.content
+                        else:
+                            result = await self.embedding().aget_query_embedding("query")
+                        self.assertEqual(result, "retrieval answer" if kind == "llm" else [0.0, 0.5])
+                        self.assertEqual(logical.budget.sends, 2)
+                self.assertEqual((len(sends), cancelled), (2, [True]))
+                self.assertEqual(len(self.http_timeouts[before:]), 2)
+                self.assertTrue(all(timeout > 0.13 for timeout in self.http_timeouts[before:]))
 
     async def test_nested_logical_calls_cannot_reset_send_allowance(self):
         with patch.object(limited_llm, "AsyncOpenAI", self.client_factory(self.success)):

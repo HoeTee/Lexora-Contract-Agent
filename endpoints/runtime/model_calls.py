@@ -1,4 +1,4 @@
-"""Separate acquisition and execution budgets with shared retry accounting."""
+"""Time each HTTP send independently while sharing retry and acquisition limits."""
 from __future__ import annotations
 
 import asyncio
@@ -11,14 +11,22 @@ import httpx
 from openai import APIConnectionError
 
 from endpoints.runtime.llm_semaphore import model_semaphore
-from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, ModelRetryLimitError
+from endpoints.runtime.model_budget import (
+    ModelCallBudget,
+    ModelCallTimeout,
+    ModelRetryLimitError,
+    ModelSemaphoreTimeout,
+    TaskDeadlineExceeded,
+)
 from loggers.call_log import current_logical_call, new_call
 
 
 def _retryable(exc: Exception) -> bool:
+    if isinstance(exc, (TaskDeadlineExceeded, ModelSemaphoreTimeout)):
+        return False
     status = (getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
               or getattr(getattr(exc, "response", None), "status_code", None))
-    return (isinstance(exc, (APIConnectionError, httpx.TransportError))
+    return (isinstance(exc, (ModelCallTimeout, APIConnectionError, httpx.TransportError))
             or status in (408, 409, 429) or isinstance(status, int) and status >= 500)
 
 
@@ -50,13 +58,13 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                         serialize=None, budget=None, record_options=None):
     """send(remaining) returns (parsed response, HTTP status); validate may repair its prompt.
 
-    Validation failures and HTTP failures consume the same sends on the logical
-    call. Acquisition pauses execution time; neither budget resets on retry.
+    Validation failures and HTTP failures consume the same send allowance and
+    cumulative slot-wait budget. Each acquired slot starts a new request timeout.
     """
     logical = current_logical_call()
     budget = budget or (logical.budget if logical is not None else ModelCallBudget())
     while True:
-        budget.remaining()
+        budget.task_remaining()
         if budget.sends >= budget.max_retries + 1:
             exc = ModelRetryLimitError("Model operation exhausted its shared send/retry allowance.")
             if logical and logical.last_record:
@@ -71,38 +79,47 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
         stage = "semaphore_wait"
         try:
             async with model_semaphore(model_type, caller, model, budget=budget) as lease:
-                async with asyncio.timeout(budget.remaining()):
-                    budget.reserve_send()
-                    stage = "request"
-                    request_started = time.monotonic()
-                    record.payload.update(model_type=model_type, semaphore_key=lease.key,
-                                          budget_seconds=budget.timeout_seconds,
-                                          remaining_seconds=budget.remaining(), send_number=budget.sends)
-                    record.sent()
-                    try:
+                budget.reserve_send()
+                stage = "request"
+                request_started = time.monotonic()
+                try:
+                    async with asyncio.timeout(budget.remaining()):
+                        record.payload.update(model_type=model_type, semaphore_key=lease.key,
+                                              budget_seconds=budget.timeout_seconds,
+                                              remaining_seconds=budget.remaining(), send_number=budget.sends)
+                        record.sent()
                         response, status = await send(budget.remaining())
-                    finally:
-                        request_finished = time.monotonic()
-                    # Preserve the received status/usage even if releasing the
-                    # Redis slot fails or the deadline expires during cleanup.
-                    payload = serialize(response) if serialize else response
-                    record.succeeded(payload, http_status=status)
-                    stage = "semaphore_release"
-            budget.remaining()
+                finally:
+                    request_finished = time.monotonic()
+                    budget.finish_request()
+                # Preserve the received status/usage even if releasing the
+                # Redis slot fails or the deadline expires during cleanup.
+                payload = serialize(response) if serialize else response
+                record.succeeded(payload, http_status=status)
+                # Synchronous SDK parsing can overrun without yielding to the
+                # asyncio timer. Check the frozen request duration as well.
+                budget.remaining()
+                stage = "semaphore_release"
+            budget.task_remaining()
             stage = "output_validation"
             result = validate(response) if validate else response
-            budget.remaining()
+            budget.task_remaining()
             return result
         except asyncio.CancelledError as exc:
             record.failed(exc, stage=stage)
             raise
         except Exception as exc:
-            # Synchronous validation cannot receive the timer cancellation until
-            # it yields. Its own error must not hide an already expired budget.
-            if not isinstance(exc, ModelCallTimeout) and (
-                isinstance(exc, TimeoutError) or (stage == "output_validation" and budget.remaining_seconds <= 0)
-            ):
+            if stage == "request" and isinstance(exc, TimeoutError) and not isinstance(exc, ModelCallTimeout):
                 exc = budget.timeout_error(stage)
+            elif stage == "semaphore_wait" and isinstance(exc, TimeoutError) and not isinstance(exc, ModelCallTimeout):
+                exc = ModelSemaphoreTimeout(str(exc))
+            # Local validation and retry delays are outside request timers, but
+            # they must never hide expiration of the enclosing contract.
+            if not isinstance(exc, TaskDeadlineExceeded):
+                try:
+                    budget.task_remaining()
+                except TaskDeadlineExceeded as deadline:
+                    exc = deadline
             stage = getattr(exc, "failure_stage", stage)
             record.failed(exc, stage=stage)
             exc.call_id = record.reference_id
@@ -112,14 +129,13 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                 raise exc
             delay = 0 if stage == "output_validation" else _retry_delay(exc, budget.sends)
             record.payload["retry_reason"] = type(exc).__name__
-            record.payload["retry_delay_seconds"] = min(delay, budget.remaining())
+            record.payload["retry_delay_seconds"] = min(delay, budget.task_remaining())
             backoff_started = time.monotonic()
             try:
-                async with asyncio.timeout(budget.remaining()):
+                async with asyncio.timeout(budget.task_remaining()):
                     await asyncio.sleep(delay)
             except TimeoutError as timeout:
-                error = budget.timeout_error("retry_backoff")
-                error.failure_stage = getattr(error, "failure_stage", "retry_backoff")
+                error = TaskDeadlineExceeded("Contract execution deadline reached during retry backoff.")
                 error.call_id = record.reference_id
                 error.call_path = str(record.reference_path) if record.reference_path else None
                 record.failed(error, stage=error.failure_stage)
