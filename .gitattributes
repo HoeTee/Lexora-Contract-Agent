@@ -1,0 +1,4 @@
+# Preserve upstream tokenizer bytes so checkout cannot invalidate manifest hashes.
+resources/tokenizers/** binary
+resources/tokenizers/manifest.json text eol=lf diff
+resources/tokenizers/README.md text eol=lf diff

@@ -19,8 +19,10 @@ embedding:
   # name: qwen3-embedding
   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
   name: text-embedding-v4
-  max_input_tokens: 8000
+  max_input_tokens: 1024
+  chunk_overlap_tokens: 32
 rerank:
+  max_input_tokens: 1024
   # base_url: "http://<reranker-host>/<rerank-path>"
   # name: bge-reranker-v2-m3
   # provider_model_names:

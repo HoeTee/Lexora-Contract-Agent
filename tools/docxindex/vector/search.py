@@ -25,14 +25,16 @@ def vector_search(
     with call_stage(retrieval_call_stage("vector-query")):
         query_embedding = client.embed([query])[0]
     nodes = {node.get("node_id"): node for node in document_index.get("nodes") or []}
-    scored = []
+    by_node = {}
     for item in vector_index.items:
         if allowed_node_ids is not None and item.node_id not in allowed_node_ids:
             continue
         score = cosine_similarity(query_embedding, item.embedding)
+        previous = by_node.get(item.node_id)
+        if previous is not None and previous["score"] >= score:
+            continue
         node = nodes.get(item.node_id) or {}
-        scored.append(
-            {
+        by_node[item.node_id] = {
                 "score": score,
                 "node_id": item.node_id,
                 "title": node.get("title") or item.metadata.title,
@@ -43,8 +45,9 @@ def vector_search(
                 "end_anchor": node.get("end_anchor") or item.metadata.end_anchor,
                 "node_type": node.get("node_type") or item.metadata.node_type,
                 "token_estimate": node.get("token_estimate") or item.metadata.token_estimate,
+                "matched_vector_id": item.vector_id,
             }
-        )
+    scored = list(by_node.values())
     scored.sort(key=lambda item: item["score"], reverse=True)
     limit = top_k or VECTOR_INTERNAL_CANDIDATE_LIMIT
     result = []

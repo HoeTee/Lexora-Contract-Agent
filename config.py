@@ -322,6 +322,11 @@ RERANK_PROVIDER_MODEL_NAMES = _as_provider_model_names(
 )
 RERANK_PROVIDER = infer_rerank_provider(RERANK_NAME)
 RERANK_INSTRUCT = _as_str(cfg("rerank", "instruct"), "rerank.instruct")
+RERANK_MAX_INPUT_TOKENS = _as_int(cfg_optional("rerank", "max_input_tokens", 20000), "rerank.max_input_tokens")
+if RERANK_MAX_INPUT_TOKENS <= 0:
+    raise RuntimeError("rerank.max_input_tokens must be greater than 0.")
+if cfg_optional("rerank", "chunk_overlap_tokens", None) is not None:
+    raise RuntimeError("Remove rerank.chunk_overlap_tokens; reranker candidates are prepared without overlap.")
 RERANK_API_KEY = env_optional("RERANK_API_KEY")
 if (
     RERANK_PROVIDER in {"higress_qwen", "dashscope_qwen"}

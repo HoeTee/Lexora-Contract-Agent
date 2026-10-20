@@ -77,7 +77,7 @@ class BGEModelControlTests(unittest.TestCase):
                                             api_key="", instruct="unused").rank("query", ["a", "b"], 1)
         self.assertEqual(result, [(1, 0.9)])
         self.assertEqual(self.slots, [("reranker", model)])
-        self.assertEqual(self.requests, [("/rerank", {"query": "query", "documents": ["a", "b"], "top_n": 1})])
+        self.assertEqual(self.requests, [("/rerank", {"model": model, "query": "query", "documents": ["a", "b"], "top_n": 1})])
 
     def test_test_network_qwen_names_use_their_own_model_pools(self):
         self.assertEqual(infer_rerank_provider("qwen3-reranker"), "higress_qwen")

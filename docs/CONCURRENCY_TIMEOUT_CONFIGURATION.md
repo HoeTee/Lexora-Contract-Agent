@@ -173,7 +173,7 @@ llm:
   stream: false
 ```
 
-这是本轮唯一新增的配置。省略时使用 `false`；显式值必须能解析为布尔值，`null` 和空值被拒绝。生产目录的 `config.yaml`、`deploy/config.yaml` 及版本库模板 `config.example.yaml` 都已补充默认值。修改后重启 API 和全部三个 worker；没有热更新，也没有各 Agent 独立的流式开关。
+这是 LLM 通信模式开关。省略时使用 `false`；显式值必须能解析为布尔值，`null` 和空值被拒绝。生产目录的 `config.yaml`、`deploy/config.yaml` 及版本库模板 `config.example.yaml` 都已补充默认值。修改后重启 API 和全部三个 worker；没有热更新，也没有各 Agent 独立的流式开关。
 
 | 值 | 与模型服务的通信 | 交给业务层的结果 |
 | --- | --- | --- |
@@ -322,11 +322,121 @@ rerank:
 
 | provider | 请求 JSON 结构 | 说明 |
 | --- | --- | --- |
-| `bge` | `query`、`documents`、`top_n` | 不发送 `model` 或 `instruct`；完整 URL 必须指向已选择模型的 BGE 服务 |
+| `bge` | `model`、`query`、`documents`、`top_n` | 使用 `X-API-Key` 请求头，不发送 `instruct`；本轮不改变这些字段 |
 | `higress_qwen` | `model`、`query`、`documents`、`top_n`，以及配置的非空 `instruct` | 模型标识随请求发送 |
 | `dashscope_qwen` | `model`、`input: {query, documents}`、`parameters: {return_documents: false, top_n}`，以及配置的非空 `instruct` | 使用该接口的嵌套结构 |
 
 配置模型名称不会转换服务端协议。若公司网关的 BGE 重排要求其他字段，应先确认它的实际接口契约，再增加适配，不能直接认定兼容。三个 provider 都经过同一 `reranker` 并发和模型预算控制。
+
+### 6.2 Embedding 和 reranker 的输入长度与原节点排序
+
+```yaml
+embedding:
+  max_input_tokens: 1024
+  chunk_overlap_tokens: 32
+rerank:
+  max_input_tokens: 1024
+```
+
+| 配置 | 作用 |
+| --- | --- |
+| `embedding.max_input_tokens` | 每条实际 embedding 输入的 token 上限，包含该 tokenizer 加入的特殊 token。必须是正整数。代码兼容默认值为 8000，当前配置示例为 1024。 |
+| `embedding.chunk_overlap_tokens` | embedding 输入分片相邻窗口的重叠 token 数，默认 32，可设为 0。必须小于输入上限，并允许切片继续向前推进。重叠内容计入每片的上限。 |
+| `rerank.max_input_tokens` | 每组 query 与一条候选文本的输入上限，包含计数适配器纳入的指令及特殊 token。代码兼容默认值为 20000，当前配置示例为 1024。 |
+
+没有 `rerank.chunk_overlap_tokens`。出现该字段会明确报配置错误。reranker 输入准备不使用重叠。
+
+这些字段不更改原文档索引的节点切分。`retrieval.docxindex.indexing.paragraph/table` 继续决定文档结构中的节点；`retrieval.docxindex.input_tokens` 继续用于 LLM 结构检索及向量候选信息预算，不再控制 reranker 的每组输入长度；`output_tokens`、`scan_batch_tokens` 继续控制正文分页与扫描。
+
+**向量构建与召回。** 原节点的标题、摘要、正文组成 embedding 输入，超过上限时按段落、句子边界优先切成输入片段，单句仍超长则继续切分。原文所有字符都必须被片段覆盖，不能只截取前半部分。每片生成一个向量，`vector_id` 唯一，`node_id` 仍为原节点 ID。`VectorItem.text` 记录实际编码的片段；`source_start/source_end` 是它在原 embedding 输入字符串中的字符范围，不是新的 DOCX 锚点。全文和原锚点保留在文档索引中。
+
+查询向量与各片段向量计算余弦相似度，原节点分数取其所有片段的最高相似度。先合并到原节点，再按分数排序、执行 `score_threshold`、`probe_limit` 和候选信息预算。因此一个长节点的多个片段只占一个节点名额。限定区域仍先按原 node_id 过滤；排序命中的片段不替换后续返回的完整候选正文。
+
+**重排准备、评分与合并。** DocxIndex 先按原候选生成与此前相同的候选文本字符串，随后检查 query 加每条候选的长度。超长字符串在候选准备层切为连续、不重叠的输入片段，原节点保持不变。片段不是新的业务节点，完整原文、原 `node_id`、已有 `text_override` 及定位范围均保留。`documents` 中的元素仍是字符串；分片是对字符串内容的处理，不增加或改名 HTTP 字段。
+
+RerankerClient 只接收已满足上限的文本，按现有 provider 请求格式评分。每批最多 10 条输入，必须取得全部输入的分数，再在 DocxIndex 中将同一原 node_id 的分数取最高值；所有批次完成后统一排序。没有逐批淘汰再反复重排同一批原节点的过程。最终每个原节点只出现一次，`max_selected_nodes` 由调用方在合并后执行。同分保留原候选顺序，重复文本不会导致不同原节点被合并。
+
+每个片段批次是独立逻辑模型操作，使用既有全局名额、等待预算、单次请求超时及重试配置。正常发送下一个批次不算重试。任何批次在重试后仍失败，整次索引构建或重排明确失败，不以缺失片段的部分结果冒充成功。HTTP 400 的异常信息包含服务端错误正文（最多 4096 字符），仍不对 400 原样盲重试。
+
+查询本身及固定输入开销已超过上限时，会在请求前报告 `ModelInputTooLong`，不静默截断查询。批次内每条序列分别检查上限，不把一个 HTTP 批次中所有独立序列的长度相加后误当成单条上下文。
+
+### 6.3 五种模型的离线 tokenizer
+
+| 模型名及支持别名 | 固定资源来源 |
+| --- | --- |
+| `bge-m3` | `BAAI/bge-m3` |
+| `bge-reranker-v2-m3` | `BAAI/bge-reranker-v2-m3` |
+| `qwen3-embedding`、`Qwen3-Embedding-8B` | `Qwen/Qwen3-Embedding-8B` |
+| `qwen3-reranker`、`Qwen3-Reranker-8B` | `Qwen/Qwen3-Reranker-8B` |
+| `qwen3.6-35b-a3b` | `Qwen/Qwen3.6-35B-A3B` |
+
+在有网络的开发/打包机器上，提前运行：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/prepare_tokenizers.py
+.\.venv\Scripts\python.exe scripts/prepare_tokenizers.py --verify
+```
+
+文件写入项目 `resources/tokenizers/`，`manifest.json` 记录各仓库固定 revision、每个文件的字节数和 SHA256。已有 manifest 时继续使用其中 revision，不会随上游 main 静默更新。脚本只下载 tokenizer、词表、配置与许可证，不下载模型权重。
+
+Dockerfile 将文件复制到 `/app/resources/tokenizers/`，并在 `RUN --network=none` 中加载验证全部五个分词器。镜像启动使用本地 AutoTokenizer，`local_files_only=True`，禁用远程代码；镜像同时设置 `HF_HUB_OFFLINE=1`、`TRANSFORMERS_OFFLINE=1`。已支持模型缺文件或校验失败会报错，不回退到 cl100k_base，更不会在内网尝试下载。API、三个 worker 及工具子进程使用同一镜像资源，无需远端宿主机安装 Python 或添加各自挂载。
+
+Qwen3.6 的 tokenizer 也已离线准备并验证加载；本轮没有将其他 LLM 结构估算、提示词或请求模板改写为新的切分流程。
+
+**配置上限与模型容量。** `max_input_tokens` 是客户端允许的上限，不会扩大模型容量。有效上限还受已知模型容量限制：BGE 两种资源为 8192，Qwen3 embedding/reranker 为 32768。因此把 BGE 配成 40000，不表示服务能够接收 40000；公司服务若进一步收紧为 1024，仍需将配置设为 1024。原版 tokenizer 文件的 model_max_length 不能用来猜测网关实际开放容量。私有网关额外拼接规则也需要与现有计数口径核对，HTTP 请求模板保持原样。
+
+**原有闭源接口的兼容边界。** 当前本地外网配置的 `text-embedding-v4`、`qwen3-rerank` 不冒充上述五种原版模型。它们保留原有 cl100k_base 估算方式，日志 tokenizer 标记为 `legacy-estimate:cl100k_base`，不宣称是服务端精确计数。兼容预算分别保守限制在 8000、32768。已支持的 BGE/Qwen3 则使用离线原版 tokenizer，日志包含其 revision。估算输入 token 数与模型实际返回的 usage 分开记录。
+
+向量索引格式版本为 2，记录配置上限、有效上限、重叠量及 tokenizer 标识。旧截断索引没有后半部分向量，不能通过改版本号补齐；需从原文重新构建。当前合同任务每次临时建索引，新任务自动使用新规则。
+
+### 6.4 本轮验证入口
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.criteria_formal_recall.test_chunked_model_inputs
+.\.venv\Scripts\python.exe tests/criteria_formal_recall/live_chunk_contracts.py --image lexora:chunks-verified-20261020 --limits 40000 1024
+```
+
+真实合同脚本为每档创建独立 Compose 项目，使用一个 API、三个 concurrency=1 的 Celery worker 以及独立 Redis，连续提交三份 `deploy/test_contract.docx`，记录任务 ID、API/存储状态、报告、输入长度、向量数量、并发采样与最终名额；结束后清理自己创建的容器，保留宿主机临时目录中的验证数据，不停止已有部署。
+
+真实合同调用当前本地配置的可访问模型服务；五种 tokenizer 的断网验证和本地严格长度模拟，不等于已经调用公司内网 BGE/Qwen 服务。验证结果必须列明实际端点/模型、配置上限和有效上限。配置 40000 而有效上限为 8000 的结果，不能表述成模型接收了 40000 token。
+
+### 6.5 2026-10-20 实测记录与离线包
+
+两档均通过 API 同时提交三份 `deploy/test_contract.docx`，由三个独立的 Celery prefork worker 执行。实测模型是本地配置的外网 `qwen3.6-35b-a3b`、`text-embedding-v4`、`qwen3-rerank`，不是公司内网 BGE 服务。LLM 保持非流式及原有 60 秒时限。
+
+| embedding / rerank 配置上限 | 任务 ID | 执行秒数 | 最终结果 | 向量数 / 原节点数 |
+| --- | --- | --- | --- | --- |
+| 40000 / 40000 | `20261020-213636-d8ba` | 289 | succeeded，18/18 | 142 / 142 |
+| 40000 / 40000 | `20261020-213637-aace` | 316 | succeeded，18/18 | 142 / 142 |
+| 40000 / 40000 | `20261020-213637-e086` | 345 | succeeded，18/18 | 142 / 142 |
+| 1024 / 1024 | `20261020-214410-3c09` | 313 | succeeded，18/18 | 153 / 142 |
+| 1024 / 1024 | `20261020-214410-7881` | 321 | succeeded，18/18 | 153 / 142 |
+| 1024 / 1024 | `20261020-214410-83b2` | 342 | succeeded，18/18 | 153 / 142 |
+
+六份任务均核对了 API、task.json、review_outputs.json、完成事件及 DOCX 报告。所有原节点的 embedding 输入均被切片完整覆盖，片段文本与源字符范围及 SHA256 一致。报告 ZIP 完整，具有批注，未出现“未完成审查项”提示。原节点没有被向量片段替换。
+
+40K 档的兼容接口有效上限为 embedding 8000、reranker 32768；该合同实际最高输入估算分别为 3686、1477。1K 档有效上限均为 1024，实际最高分别为 1020、1024，确实执行了切片。两档都没有 embedding/reranker 请求失败或 HTTP 400。40K 档有两次 LLM 请求达到原有 60 秒时限，随后按既有配置重试并成功；其他模型输出校验失败也经过既有修复流程，不表示六份任务零重试。
+
+两档每约两秒采样的最高占用均为 LLM 5、embedding 3、reranker 1，没有观察到超过配置上限。1K 档结束后，三类模型的占用、等待队列及等待截止集合九项计数全部为 0。40K 档监控脚本最初汇总时使用旧任务目录布局，后从已保存任务恢复结果，没有重复提交合同；该档最终 Redis 快照未保留下来，不能宣称已经直接验证其终态九项计数为 0。脚本已修正路径，并改为先保存名额快照、再检查业务产物。
+
+原版 BGE/Qwen3 的 1K 长度及最高片段合并规则由本地严格 HTTP 模拟和离线 tokenizer 用例验证。它们不替代内网实际服务复测，也不证明该合同包含接近 40000 token 的单条输入。
+
+回归复跑共 405 项：378 项通过，27 项因未设置集成运行条件而跳过。其中包含新增的 9 项离线 tokenizer、完整覆盖、最高片段聚合及严格 1K HTTP 模拟测试。另用独立 Redis 执行模型控制套件 38 项，全部通过；Linux 源码验证中的 9 项 Redis 传输测试和 1 项 Celery 硬终止测试通过，验证了三进程共用 5 个名额、续期、超时/断流释放，以及替补进程接手后续任务。交付保护镜像内另运行 15 项流式/非流式传输测试，全部通过。
+
+附加验证也保留失败记录：Windows 集成套件和 Linux 源码挂载套件曾在亚秒级模拟时限中失败，后者的 0.16 秒推理/工具片段用例有 3 个子用例报超时；它在交付镜像的 15 项传输测试和 Windows 全量复跑中均通过。该附加环境差异的根因不确定，本轮未修改 LLM 时限实现或业务 60 秒配置。保护启动器不支持 Python multiprocessing 的 `-c` 启动参数，因此三进程白盒用例通过挂载同版源码的 Linux 验证容器运行；六份真实 Celery 合同均直接使用保护镜像。
+
+完整日志和六份报告保存在开发机 `data/verification/model-inputs-20261020/`；该目录属于本地运行数据，不提交到 Git。新的离线镜像包为 `deploy/images-chunked-inputs-20261020.tar`，包含 `lexora:chunks-verified-20261020` 和 `redis:7-alpine`，五种 tokenizer 已在应用镜像内部。归档成员完整读取验证通过，旁边的 `.sha256` 文件用于传输后核对。
+
+镜像包大小为 493002752 字节，SHA256 为 `205e4b5200e4dd17111e3b416de30742dbb4b217183e46ce60da266f19e45223`。
+
+在内网宿主机的部署目录中执行：
+
+```bash
+sha256sum -c images-chunked-inputs-20261020.tar.sha256
+docker load -i images-chunked-inputs-20261020.tar
+```
+
+将该部署自己的 Compose API 和三个 worker 的 `image` 都设为 `lexora:chunks-verified-20261020`，并在挂载的 `config.yaml` 中设置本环境模型地址、名称、输入上限和 embedding 重叠量，再按该部署原有的项目名启动。无需在内网安装 Transformers 或下载 tokenizer，不覆盖其他部署的项目名、端口或挂载数据。
 
 ## 7. 移除配置清单及不变配置
 
@@ -351,9 +461,10 @@ retrieval.docxindex.indexing.hierarchy.retry_count
 | `llm/embedding/rerank` 的地址、模型名和凭据来源 | 保留部署自己的模型服务选择 |
 | `rerank.instruct/provider_model_names` | 独立重排请求和协议适配 |
 | `llm.enable_thinking/temperature/top_p/seed` | 保留模型请求参数 |
-| `llm.stream` | 本轮唯一新增；默认 `false`，统一全部 LLM 的通信模式，见第 4.1 节 |
+| `llm.stream` | 默认 `false`，统一全部 LLM 的通信模式，见第 4.1 节 |
 | `llm.max_context_tokens/max_prompt_tokens/max_result_tokens` | 保留当前上下文、提示、结果处理逻辑，本轮不重新定义 |
 | `llm.max_tool_calls`、`embedding.max_input_tokens` | 保留工具调用次数及输入约束 |
+| `embedding.chunk_overlap_tokens`、`rerank.max_input_tokens` | embedding 切片重叠量及独立重排输入上限，见第 6.2 节 |
 | 检索 token、分块、候选数、阈值、路由、索引增强 | 除明确移除项外保留原值及算法职责 |
 | `retrieval.docxindex.vector.enabled/rerank.enabled` | 决定是否执行相应功能，不允许已执行的请求绕过限流 |
 | `api.*` | 保留认证、元信息、输入输出、上传和下载行为 |

@@ -70,13 +70,13 @@ try {
         --network none `
         --entrypoint python `
         $Tag `
-        -c "import tiktoken; assert tiktoken.get_encoding('cl100k_base').name == 'cl100k_base'"
+        /app/scripts/prepare_tokenizers.py --verify --destination /app/resources/tokenizers
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Offline tiktoken self-test failed for image: $Tag"
+        throw "Offline model tokenizer self-test failed for image: $Tag"
     }
 
-    Write-Output "Built protected image with offline tiktoken data: $Tag"
+    Write-Output "Built protected image with all five offline model tokenizers: $Tag"
 }
 finally {
     if ($temporaryKey -and (Test-Path -LiteralPath $temporaryKey)) {

@@ -24,6 +24,9 @@ class VectorItem(BaseModel):
     text: str
     embedding: list[float]
     metadata: VectorMetadata
+    chunk_index: int = 0
+    source_start: int = 0
+    source_end: int | None = None
 
 
 class VectorIndex(BaseModel):
@@ -32,3 +35,8 @@ class VectorIndex(BaseModel):
     source_index: str = "document_index.json"
     embedding_model: str
     items: list[VectorItem] = Field(default_factory=list)
+    format_version: int = 1
+    configured_input_tokens: int | None = None
+    effective_input_tokens: int | None = None
+    chunk_overlap_tokens: int = 0
+    tokenizer: str | None = None

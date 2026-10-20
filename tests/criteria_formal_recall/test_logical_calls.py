@@ -388,7 +388,7 @@ class GlobalRankingTests(unittest.TestCase):
         self.assertTrue(event.call_args.kwargs["rerank_enabled"])
         self.assertTrue(event.call_args.kwargs["rerank_triggered"])
 
-    def test_budget_batches_include_late_candidates_and_rank_finalists_again(self):
+    def test_batches_include_late_candidates_without_ranking_finalists_again(self):
         candidates = [{"node_id": f"node{i:02d}", "title": "candidate"} for i in range(20)]
         index = {"nodes": candidates}
         views = _candidate_batches(index, "query", candidates[:3], 20_000)[0]
@@ -401,9 +401,9 @@ class GlobalRankingTests(unittest.TestCase):
         client = SimpleNamespace(model="fake-reranker", rank=rank)
         ranked = rerank_matches(index, "query", candidates, client, budget, None, max_selected_nodes=2)
         self.assertIn("node19", {r["node_id"] for r in ranked[:2]})
-        self.assertTrue(all(_rerank_tokens("query", json.dumps(rows, ensure_ascii=False)) <= budget for rows in batches))
+        self.assertTrue(all(len(rows) <= 10 for rows in batches))
         self.assertTrue(all(any(candidate["node_id"] in {row["node_id"] for row in batch} for batch in batches) for candidate in candidates))
-        self.assertGreater(len(batches), 2)
+        self.assertEqual(len(batches), 2)
 
 
 class AgentRetryTests(unittest.IsolatedAsyncioTestCase):

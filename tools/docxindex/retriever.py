@@ -364,7 +364,7 @@ class DocxIndexRetriever:
             if rerank_triggered:
                 ranked_matches = rerank_matches(
                     index, query, ranked_matches, self.reranker_client,
-                    config.input_tokens, cache_dir=None,
+                    cache_dir=None,
                     max_selected_nodes=selected_node_limit,
                 )
             if not full_coverage:

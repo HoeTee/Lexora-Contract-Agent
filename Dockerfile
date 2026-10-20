@@ -88,7 +88,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache
+    TIKTOKEN_CACHE_DIR=/opt/tiktoken-cache \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1
 
 WORKDIR /app
 
@@ -121,6 +123,10 @@ COPY tools/docxindex/assets/cl100k_base.tiktoken.gz /tmp/cl100k_base.tiktoken.gz
 RUN --network=none python -c "import gzip, hashlib, pathlib; source = pathlib.Path('/tmp/cl100k_base.tiktoken.gz'); data = gzip.decompress(source.read_bytes()); assert hashlib.sha256(data).hexdigest() == '223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7'; target = pathlib.Path('/opt/tiktoken-cache/9b5ad71b2ce5302211f9c61530b329a4922fc6a4'); target.parent.mkdir(parents=True, exist_ok=True); target.write_bytes(data)" \
     && rm /tmp/cl100k_base.tiktoken.gz \
     && python -c "import tiktoken; assert tiktoken.get_encoding('cl100k_base').name == 'cl100k_base'"
+
+COPY resources/tokenizers/ /app/resources/tokenizers/
+COPY scripts/prepare_tokenizers.py /app/scripts/prepare_tokenizers.py
+RUN --network=none python /app/scripts/prepare_tokenizers.py --verify --destination /app/resources/tokenizers
 
 # Protected backend code and host entrypoint.
 COPY --from=protect-builder /out/host /app/host
