@@ -16,7 +16,7 @@ from loggers.call_log import logical_call
 
 def build_payload(provider, model, instruct, query, documents, top_n):
     if provider == "bge":
-        return {"query": query, "documents": documents, "top_n": top_n}
+        return {"model": model, "query": query, "documents": documents, "top_n": top_n}
     if provider == "dashscope_qwen":
         result = {"model": model, "input": {"query": query, "documents": documents},
                   "parameters": {"return_documents": False, "top_n": top_n}}
@@ -81,10 +81,13 @@ class RerankerClient:
         if not documents:
             return []
         keep = min(top_n or len(documents), len(documents))
-        payload = build_payload(self.provider or infer_rerank_provider(self.model), self.model,
+        provider = self.provider or infer_rerank_provider(self.model)
+        payload = build_payload(provider, self.model,
                                 self.instruct, query, documents, keep)
         async def send(remaining):
-            headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+            headers = {}
+            if self.api_key:
+                headers = {"X-API-Key": self.api_key} if provider == "bge" else {"Authorization": f"Bearer {self.api_key}"}
             async with async_http_client(remaining) as client:
                 response = await client.post(self.base_url, json=payload, headers=headers)
                 response.raise_for_status()
