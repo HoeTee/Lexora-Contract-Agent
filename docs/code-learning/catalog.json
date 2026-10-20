@@ -1,0 +1,1702 @@
+{
+  "groups": [
+    {
+      "id": "entry",
+      "title": "入口与用户旅程",
+      "summary": "页面、API、CLI 如何汇入同一任务系统"
+    },
+    {
+      "id": "execution",
+      "title": "队列与任务生命周期",
+      "summary": "整份合同如何领取、执行、持久化和收敛失败"
+    },
+    {
+      "id": "agent",
+      "title": "Agent 与工作流",
+      "summary": "从标准、证据到结构化意见和反思账本"
+    },
+    {
+      "id": "retrieval",
+      "title": "工具与检索",
+      "summary": "跨进程 MCP、结构和向量检索、原文锚点"
+    },
+    {
+      "id": "models",
+      "title": "模型请求与控制",
+      "summary": "HTTP 协议、重试、时钟、Redis 全局容量与日志"
+    },
+    {
+      "id": "operations",
+      "title": "配置、脚本与部署",
+      "summary": "挂载、身份初始化、离线依赖和受保护镜像"
+    }
+  ],
+  "components": [
+    {
+      "id": "entry",
+      "title": "FastAPI 入口与路由注册",
+      "group": "entry",
+      "description": "app.py 组合 API、Web、管理路由与会话中间件；启动时另起 watchdog 协程。",
+      "inputs": "HTTP 请求、会话 cookie、挂载配置",
+      "outputs": "框架匹配路由处理函数；/health 返回健康状态",
+      "notes": [
+        "include_router 注册处理函数，不是启动审查。",
+        "startup 的 create_task 运行的是队列巡检，不是合同 workflow。"
+      ],
+      "refs": [
+        {
+          "file": "app.py",
+          "lines": [
+            17,
+            37
+          ],
+          "label": "应用和路由"
+        },
+        {
+          "file": "app.py",
+          "symbol": "start_queue_watchdog",
+          "label": "启动巡检"
+        }
+      ],
+      "related": [
+        "api",
+        "web",
+        "watchdog"
+      ]
+    },
+    {
+      "id": "web",
+      "title": "Web 上传与状态轮询",
+      "group": "entry",
+      "description": "浏览器提交表单到 Web 路由，后端创建任务并投递队列；前端通过状态接口轮询。",
+      "inputs": "DOCX 文件、租户会话、可选审查标准",
+      "outputs": "共享 task.json、303 跳转、后续状态 JSON",
+      "notes": [
+        "浏览器轮询不推进后台审查，只读取状态。",
+        "app.js 在运行中每 5 秒检查状态，不是模型流式 token 展示。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/web/user_routes.py",
+          "lines": [
+            663,
+            690
+          ],
+          "label": "创建与入队"
+        },
+        {
+          "file": "frontend/static/app.js",
+          "lines": [
+            107,
+            136
+          ],
+          "label": "浏览器状态轮询"
+        }
+      ],
+      "related": [
+        "entry",
+        "queue",
+        "data"
+      ]
+    },
+    {
+      "id": "api",
+      "title": "API 提交与分发",
+      "group": "entry",
+      "description": "提交接口验证输入，保存任务，再调用队列入口。返回任务标识后，worker 继续执行。",
+      "inputs": "上传或 URL 输入、平台身份、任务元信息",
+      "outputs": "task_id、任务目录、Celery 投递结果",
+      "notes": [
+        "请求校验、输入保存、任务创建和队列分发是不同步骤。",
+        "查询接口读取任务；生成报告不发生在查询请求里。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/api/review_jobs.py",
+          "symbol": "submit_review_job",
+          "label": "HTTP 路由"
+        },
+        {
+          "file": "endpoints/api/review_jobs.py",
+          "symbol": "_create_submission_task",
+          "label": "写入任务"
+        },
+        {
+          "file": "endpoints/api/review_jobs.py",
+          "symbol": "_dispatch_review_job",
+          "label": "投递队列"
+        }
+      ],
+      "related": [
+        "entry",
+        "queue",
+        "data"
+      ]
+    },
+    {
+      "id": "cli",
+      "title": "CLI 是 HTTP 客户端",
+      "group": "entry",
+      "description": "main.py 上传合同、轮询 API 状态并下载报告。它没有单独启动一套本地 Agent。",
+      "inputs": "--contract、--base-url、平台 API key、输出路径",
+      "outputs": "HTTP 提交、等待终态、下载 DOCX",
+      "notes": [
+        "CLI 的等待上限和服务端 task_time_limit_seconds 是不同预算。",
+        "平台 API key 和模型 API key 不是同一种身份凭据。"
+      ],
+      "refs": [
+        {
+          "file": "main.py",
+          "symbol": "run_cli",
+          "label": "提交与轮询"
+        },
+        {
+          "file": "main.py",
+          "symbol": "build_parser",
+          "label": "命令参数"
+        }
+      ],
+      "related": [
+        "api",
+        "data"
+      ]
+    },
+    {
+      "id": "queue",
+      "title": "Celery 入队与任务标识",
+      "group": "execution",
+      "description": "enqueue_review_job 先持久化 queue_id，再将 client_dir 和 task_id 投递到 broker。",
+      "inputs": "client_dir、task_id",
+      "outputs": "queue_id；task.json 状态更新为 queued",
+      "notes": [
+        "当前实现确实在发布消息前调用 mark_queued。",
+        "queued 表示已进入等待执行的队列路径，不代表正在调用模型。"
+      ],
+      "refs": [
+        {
+          "file": "task_queue/review_queue.py",
+          "symbol": "enqueue_review_job",
+          "label": "先写状态后发布"
+        },
+        {
+          "file": "endpoints/review/task_store.py",
+          "symbol": "mark_queued",
+          "label": "queued 写入点"
+        }
+      ],
+      "related": [
+        "api",
+        "worker",
+        "data"
+      ]
+    },
+    {
+      "id": "worker",
+      "title": "Celery worker 与合同执行槽",
+      "group": "execution",
+      "description": "prefork 子进程领取整份合同任务，创建事件循环，设置合同截止时间，然后进入 job_worker。",
+      "inputs": "队列消息里的 client_dir、task_id",
+      "outputs": "业务任务终态；关闭本任务事件循环内的 Redis 客户端",
+      "notes": [
+        "合同执行槽由 worker 数量乘每个 worker 的 --concurrency 决定。",
+        "配置关闭预取、acks_late=false；不要将这套配置解释为崩溃后自动重放整个任务。"
+      ],
+      "refs": [
+        {
+          "file": "task_queue/celery_app.py",
+          "lines": [
+            8,
+            29
+          ],
+          "label": "Celery 配置"
+        },
+        {
+          "file": "task_queue/review_tasks.py",
+          "symbol": "run_review_job_task",
+          "label": "worker 任务入口"
+        }
+      ],
+      "related": [
+        "queue",
+        "job",
+        "compose",
+        "budget"
+      ]
+    },
+    {
+      "id": "job",
+      "title": "业务 worker 与进度写回",
+      "group": "execution",
+      "description": "run_async_review_job 领取业务任务、启动心跳、组装 Workflow，将要点进度写回持久化状态。",
+      "inputs": "task.json、任务私有模型配置、输入与输出路径",
+      "outputs": "running / succeeded / failed 等状态、报告和进度",
+      "notes": [
+        "mark_running 成功后才调用 workflow.run。",
+        "请求级模型配置分别传给 Agent settings 和 MCP 子进程环境。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/review/job_worker.py",
+          "lines": [
+            80,
+            139
+          ],
+          "label": "领取与配置传递"
+        },
+        {
+          "file": "endpoints/review/job_worker.py",
+          "lines": [
+            141,
+            182
+          ],
+          "label": "进度与 workflow 调用"
+        }
+      ],
+      "related": [
+        "worker",
+        "workflow",
+        "state",
+        "data"
+      ]
+    },
+    {
+      "id": "state",
+      "title": "要点状态与恢复资料",
+      "group": "execution",
+      "description": "ReviewStateStore 保存计划、要点输入、已完成输出和错误；恢复路径可复用完成的要点。",
+      "inputs": "计划字典、criterion_id、审查结果或异常",
+      "outputs": "state/ 下的计划和逐要点文件",
+      "notes": [
+        "恢复资料不等于 Celery 自动重试消息。",
+        "只有显式进入恢复调用路径，已保存的要点输出才被读取。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/review/review_state.py",
+          "symbol": "ReviewStateStore.save_criterion_output",
+          "label": "保存要点结果"
+        },
+        {
+          "file": "agents/orchestrator.py",
+          "symbol": "OrchestratorAgent._execute_criterion_with_recovery",
+          "label": "恢复与要点重试"
+        }
+      ],
+      "related": [
+        "job",
+        "criterion",
+        "data"
+      ]
+    },
+    {
+      "id": "watchdog",
+      "title": "心跳、截止时间与异常收敛",
+      "group": "execution",
+      "description": "API 进程周期扫描等待和执行中的任务；Celery 父进程还处理子进程超时与失败。",
+      "inputs": "pending / queued 等等待时间、worker 状态、任务截止时间",
+      "outputs": "将满足过期条件的任务收敛为失败",
+      "notes": [
+        "watchdog 是状态巡检，不提供额外模型执行槽。",
+        "父进程、业务 worker 和模型控制器分别承担不同层级的超时处理。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/runtime/queue_watchdog.py",
+          "symbol": "run_queue_watchdog",
+          "label": "周期巡检"
+        },
+        {
+          "file": "task_queue/review_request.py",
+          "symbol": "ReviewRequest",
+          "label": "Celery 父进程处理"
+        }
+      ],
+      "related": [
+        "worker",
+        "budget",
+        "data"
+      ]
+    },
+    {
+      "id": "workflow",
+      "title": "Workflow：六个阶段的总线",
+      "group": "agent",
+      "description": "ContractReviewWorkflow 负责连接 MCP、解析、建索引、规划、执行反思、汇总和生成批注报告。",
+      "inputs": "合同路径、可选标准路径、进度回调、输出路径",
+      "outputs": "报告路径、逐要点结果、质量统计和耗时",
+      "notes": [
+        "Workflow 是协调层；细节由 Agent、MCP 工具和确定性代码承担。",
+        "检索得到的对象会被格式化为上下文文本，再进入模型提示词。"
+      ],
+      "refs": [
+        {
+          "file": "workflow/workflow.py",
+          "lines": [
+            267,
+            305
+          ],
+          "label": "阶段顺序"
+        },
+        {
+          "file": "workflow/workflow.py",
+          "symbol": "ContractReviewWorkflow._phase_execute",
+          "label": "创建 Orchestrator"
+        },
+        {
+          "file": "workflow/workflow.py",
+          "symbol": "ContractReviewWorkflow._phase_generate_annotated_docx",
+          "label": "报告工具调用"
+        }
+      ],
+      "related": [
+        "planning",
+        "criterion",
+        "mcpc",
+        "report",
+        "summary"
+      ]
+    },
+    {
+      "id": "planning",
+      "title": "Planner：上传标准的执行策略",
+      "group": "agent",
+      "description": "固定标准直接加载预设路由；有上传标准时，先确定性拆分，再由 Planner 批量提取执行策略。",
+      "inputs": "上传标准的 skeleton 列表，每项包含 id / section / criterion",
+      "outputs": "按 ID 索引的策略；合并后的 criterion 列表",
+      "notes": [
+        "没有上传标准时，不会因为存在 Planner 类就必然发一次规划请求。",
+        "上传标准 ID 为 Uxx，固定标准为 Hxx。"
+      ],
+      "refs": [
+        {
+          "file": "workflow/workflow.py",
+          "lines": [
+            634,
+            645
+          ],
+          "label": "固定与上传标准分支"
+        },
+        {
+          "file": "agents/planner.py",
+          "symbol": "PlannerAgent.extract_strategies",
+          "label": "一批策略请求"
+        },
+        {
+          "file": "agents/planner.py",
+          "symbol": "assemble_tasks",
+          "label": "合并执行计划"
+        }
+      ],
+      "related": [
+        "mandatory",
+        "contractjson",
+        "criterion"
+      ]
+    },
+    {
+      "id": "mandatory",
+      "title": "固定标准与路由契约",
+      "group": "agent",
+      "description": "routing/profile.py 从资源 YAML 加载固定 18 项标准，并校验 H01..H18 顺序及执行策略。",
+      "inputs": "resources/criteria/criteria-routes.yaml",
+      "outputs": "可供 Orchestrator 执行的标准列表",
+      "notes": [
+        "固定路由是业务资源，不是运行日志。",
+        "schema 校验保证字段与枚举形状，实际检索执行仍由工具完成。"
+      ],
+      "refs": [
+        {
+          "file": "routing/profile.py",
+          "symbol": "load_mandatory_tasks",
+          "label": "固定任务加载"
+        },
+        {
+          "file": "routing/schemas.py",
+          "lines": [
+            1,
+            95
+          ],
+          "label": "执行计划与路由类型"
+        }
+      ],
+      "related": [
+        "planning",
+        "retrieval",
+        "schema"
+      ]
+    },
+    {
+      "id": "criterion",
+      "title": "Orchestrator：一个要点怎样审查",
+      "group": "agent",
+      "description": "先检索证据，再构造 SubAgent，校验意见与锚点，进入 Reflector 循环，最终组织要点结果。",
+      "inputs": "criterion 字典：标准、route、placement、audit_mode",
+      "outputs": "issues、审查状态、质量状态、finding 历史",
+      "notes": [
+        "业务上的“子 Agent”在这里是 Agent 实例，不是另一个 Celery worker。",
+        "反思是有界循环；没有让多个反思轮次同时执行。"
+      ],
+      "refs": [
+        {
+          "file": "agents/orchestrator.py",
+          "lines": [
+            1062,
+            1122
+          ],
+          "label": "检索与 SubAgent"
+        },
+        {
+          "file": "agents/orchestrator.py",
+          "lines": [
+            1170,
+            1224
+          ],
+          "label": "反思循环"
+        },
+        {
+          "file": "agents/orchestrator.py",
+          "symbol": "OrchestratorAgent.execute_criteria",
+          "label": "跨要点并发"
+        }
+      ],
+      "related": [
+        "reflection",
+        "ledger",
+        "agent",
+        "retrieval"
+      ]
+    },
+    {
+      "id": "reflection",
+      "title": "Reflector：验证意见而非直接写报告",
+      "group": "agent",
+      "description": "Reflector 接收意见及 finding 证据，使用结构化 schema 返回判断与反馈。",
+      "inputs": "意见 JSON 文本、证据说明、required_finding_ids 上下文",
+      "outputs": "经过 ReflectorOutput 校验的字典",
+      "notes": [
+        "返回的 PASS 仍会被 Orchestrator 的锚点与执行规则复核。",
+        "REJECT 反馈用于修订；预算耗尽时不应解释为审查已完整通过。"
+      ],
+      "refs": [
+        {
+          "file": "agents/reflector.py",
+          "symbol": "ReflectorAgent.review",
+          "label": "输入和 schema 校验"
+        },
+        {
+          "file": "agents/orchestrator.py",
+          "lines": [
+            1210,
+            1224
+          ],
+          "label": "PASS 后的确定性复核"
+        }
+      ],
+      "related": [
+        "criterion",
+        "ledger",
+        "contractjson"
+      ]
+    },
+    {
+      "id": "ledger",
+      "title": "Finding ledger：反思后的发现账本",
+      "group": "agent",
+      "description": "账本保留当前发现、历史决策和缺失发现，使修订不能悄悄丢掉之前的问题。",
+      "inputs": "初始意见、修订意见、Reflector 对 finding 的决策",
+      "outputs": "保留、移除、确认和未解决的问题集合",
+      "notes": [
+        "审查意见列表与 finding 历史不是同一份对象。",
+        "最终质量状态取决于模型判断和程序验证，不只取决于一次 PASS 文本。"
+      ],
+      "refs": [
+        {
+          "file": "agents/orchestrator.py",
+          "symbol": "_FindingLedger.review",
+          "label": "记录反思决策"
+        },
+        {
+          "file": "agents/orchestrator.py",
+          "symbol": "_FindingLedger.apply_removals",
+          "label": "执行确认移除"
+        }
+      ],
+      "related": [
+        "criterion",
+        "reflection",
+        "report"
+      ]
+    },
+    {
+      "id": "agent",
+      "title": "Agent 基类：messages 与工具循环",
+      "group": "agent",
+      "description": "Agent 管理消息历史、上下文预算、模型回复和工具调用。工具返回后再次请求模型，直到取得最终内容。",
+      "inputs": "system prompt、用户消息、工具 schema、Settings",
+      "outputs": "最终模型文本、工具消息历史、token 用量",
+      "notes": [
+        "一次业务审查可包含多次 HTTP 请求。",
+        "_process_tool_calls 负责执行工具；不要把工具调用 JSON 当成已执行的工具。"
+      ],
+      "refs": [
+        {
+          "file": "agents/base_agent.py",
+          "symbol": "Agent._request_completion",
+          "label": "统一请求入口"
+        },
+        {
+          "file": "agents/base_agent.py",
+          "symbol": "Agent._process_tool_calls",
+          "label": "工具调用执行"
+        },
+        {
+          "file": "agents/base_agent.py",
+          "lines": [
+            344,
+            390
+          ],
+          "label": "构造模型请求"
+        }
+      ],
+      "related": [
+        "controller",
+        "contractjson",
+        "mcpc"
+      ]
+    },
+    {
+      "id": "contractjson",
+      "title": "输出契约：JSON 解析、校验和修复",
+      "group": "agent",
+      "description": "首次提示包含期望 JSON，返回文本经解析与 Pydantic 校验；失败时反馈错误并定向修复。",
+      "inputs": "Agent、initial_prompt、schema、expected_format",
+      "outputs": "validated.model_dump() 和原始文本；耗尽则明确失败",
+      "notes": [
+        "schema 修复与网络重试共用逻辑调用的请求发送预算。",
+        "合法结构不等于业务正确，锚点与审查覆盖率还有后续检查。"
+      ],
+      "refs": [
+        {
+          "file": "agents/json_utils.py",
+          "symbol": "_chat_until_valid_json",
+          "label": "校验与修复循环"
+        },
+        {
+          "file": "agents/base_agent.py",
+          "symbol": "Agent.validation_requests",
+          "label": "共享逻辑预算"
+        }
+      ],
+      "related": [
+        "schema",
+        "agent",
+        "reflection",
+        "controller"
+      ]
+    },
+    {
+      "id": "schema",
+      "title": "数据结构：程序实际消费什么",
+      "group": "agent",
+      "description": "agents/schemas.py 与 routing/schemas.py 定义意见、反思和执行计划的程序契约。",
+      "inputs": "模型生成的 JSON 对象",
+      "outputs": "通过字段、枚举和交叉约束校验的数据",
+      "notes": [
+        "定义 schema、调用 model_validate、消费字段是三个不同位置。",
+        "审查结果通过 results_json 序列化跨 MCP，再由报告工具解析。"
+      ],
+      "refs": [
+        {
+          "file": "agents/schemas.py",
+          "symbol": "SubAgentOutput",
+          "label": "SubAgent 输出类型"
+        },
+        {
+          "file": "agents/schemas.py",
+          "symbol": "ReflectorOutput",
+          "label": "Reflector 输出类型"
+        }
+      ],
+      "related": [
+        "contractjson",
+        "reflection",
+        "report"
+      ]
+    },
+    {
+      "id": "mcpc",
+      "title": "MCP 客户端：跨进程调用桥",
+      "group": "retrieval",
+      "description": "MinimalMCPClient 将工具列表转换为模型可用的函数 schema，再通过 session 调用工具。",
+      "inputs": "工具名和参数字典、server_target",
+      "outputs": "序列化工具返回文本和关联 trace",
+      "notes": [
+        "module: 目标走 stdio 子进程；http(s) 目标走 streamable HTTP。",
+        "MCP 的 server 不等同于模型 HTTP server。"
+      ],
+      "refs": [
+        {
+          "file": "mcp_service/client/client.py",
+          "lines": [
+            61,
+            110
+          ],
+          "label": "建立传输"
+        },
+        {
+          "file": "mcp_service/client/client.py",
+          "symbol": "MinimalMCPClient.call_tool",
+          "label": "实际工具调用"
+        }
+      ],
+      "related": [
+        "mcps",
+        "agent",
+        "workflow"
+      ]
+    },
+    {
+      "id": "mcps",
+      "title": "MCP 服务与检索后端选择",
+      "group": "retrieval",
+      "description": "contract_build_index / contract_search 是宿主稳定调用的工具名，内部根据 retrieval.backend 选择实现。",
+      "inputs": "DOCX 路径或 query、route_override、日志上下文",
+      "outputs": "索引元信息 JSON 或带证据与锚点的文本",
+      "notes": [
+        "切换后端应由配置决定，而不是要求 Agent 换工具名。",
+        "进程内 retriever 实例保存临时索引，后续搜索使用同一服务实例。"
+      ],
+      "refs": [
+        {
+          "file": "mcp_service/server/server.py",
+          "symbol": "contract_build_index",
+          "label": "建索引分发"
+        },
+        {
+          "file": "mcp_service/server/server.py",
+          "symbol": "contract_search",
+          "label": "检索分发"
+        },
+        {
+          "file": "mcp_service/server/server.py",
+          "symbol": "_get_docxindex_retriever",
+          "label": "服务内共享索引实例"
+        }
+      ],
+      "related": [
+        "docxindex",
+        "llama",
+        "mcpc"
+      ]
+    },
+    {
+      "id": "docxindex",
+      "title": "DocxIndex：结构、锚点与临时索引",
+      "group": "retrieval",
+      "description": "解析 DOCX XML 的正文、附件和表格，构建结构节点及锚点，按配置补充 LLM 层次与摘要，再建立向量索引。",
+      "inputs": "合同 DOCX、IndexingConfig、模型客户端",
+      "outputs": "_index、_vector_index、anchor_map、region_boundaries",
+      "notes": [
+        "结构解析与模型增强是不同阶段。",
+        "索引保存在 retriever 内存；详细模式可额外导出调试快照。"
+      ],
+      "refs": [
+        {
+          "file": "tools/docxindex/indexing/build_pipeline.py",
+          "symbol": "run_build_pipeline",
+          "label": "结构流水线"
+        },
+        {
+          "file": "tools/docxindex/retriever.py",
+          "symbol": "DocxIndexRetriever._build_index_sync",
+          "label": "增强、向量和内存赋值"
+        }
+      ],
+      "related": [
+        "retrieval",
+        "vector",
+        "mcps"
+      ]
+    },
+    {
+      "id": "retrieval",
+      "title": "DocxIndex：结构与语义混合检索",
+      "group": "retrieval",
+      "description": "执行 route 中的 region / title / rule / scan / hybrid 等步骤，合并结构和向量候选，再有条件地重排。",
+      "inputs": "query、route_override、临时结构与向量索引",
+      "outputs": "带原文、来源、XML 锚点和分页信息的检索上下文",
+      "notes": [
+        "rerank.enabled=true 不代表每次搜索都会请求 reranker。",
+        "全覆盖、全标题或扫描路径可跳过重排；候选只有一个也不会触发。"
+      ],
+      "refs": [
+        {
+          "file": "tools/docxindex/retriever.py",
+          "lines": [
+            350,
+            373
+          ],
+          "label": "重排触发条件"
+        },
+        {
+          "file": "tools/docxindex/retriever.py",
+          "symbol": "DocxIndexRetriever._semantic_matches",
+          "label": "合并结构与向量"
+        },
+        {
+          "file": "tools/docxindex/retrieval/rerank.py",
+          "symbol": "_rank_batch",
+          "label": "候选序列化后评分"
+        }
+      ],
+      "related": [
+        "docxindex",
+        "vector",
+        "rerank",
+        "criterion"
+      ]
+    },
+    {
+      "id": "vector",
+      "title": "向量索引：批次、线程与跨进程限流",
+      "group": "retrieval",
+      "description": "节点内容经过 token 截断后组成批次，通过线程池调度 embedding；每次模型发送仍受 Redis semaphore 限制。",
+      "inputs": "节点文本、EmbeddingClient、批次并行度",
+      "outputs": "每个节点对应的 embedding 与元数据",
+      "notes": [
+        "批次大小是 10；它不是同时发出的 HTTP 请求数。",
+        "当前 DocxIndex 构建调用把 embedding 全局容量值同时用作本次线程池大小；多个任务的线程池仍共享全局槽。"
+      ],
+      "refs": [
+        {
+          "file": "tools/docxindex/vector/index.py",
+          "symbol": "build_vector_index",
+          "label": "批次与线程池"
+        },
+        {
+          "file": "tools/docxindex/retriever.py",
+          "lines": [
+            212,
+            222
+          ],
+          "label": "并发参数来源"
+        }
+      ],
+      "related": [
+        "embedding",
+        "semaphore",
+        "docxindex"
+      ]
+    },
+    {
+      "id": "llama",
+      "title": "LlamaIndex：另一条检索后端",
+      "group": "retrieval",
+      "description": "LlamaIndexRAG 使用切块、VectorStoreIndex 和检索后处理器，模型适配器仍进入同一控制器。",
+      "inputs": "合同文本、embedding 与 reranker 配置",
+      "outputs": "临时检索索引和检索上下文",
+      "notes": [
+        "类名 QwenRerankPostprocessor 是适配器历史名称，实际 provider 可传入 BGE。",
+        "它与 DocxIndex 是按配置选择的后端，不是每次都串行执行两个索引。"
+      ],
+      "refs": [
+        {
+          "file": "tools/retrieval/llamaindex/rag_engine.py",
+          "lines": [
+            55,
+            81
+          ],
+          "label": "共享模型适配器"
+        },
+        {
+          "file": "tools/retrieval/llamaindex/qwen_reranker.py",
+          "symbol": "QwenRerankPostprocessor._postprocess_nodes",
+          "label": "复用 RerankerClient"
+        }
+      ],
+      "related": [
+        "mcps",
+        "embedding",
+        "rerank"
+      ]
+    },
+    {
+      "id": "embedding",
+      "title": "Embedding：OpenAI 协议适配",
+      "group": "models",
+      "description": "DocxIndex 使用 AsyncOpenAI embeddings API，把文本批次转换为向量；LlamaIndex 适配器也调用公共控制器。",
+      "inputs": "模型名称、base_url、文本列表、EMBED_API_KEY",
+      "outputs": "response.data 中的 embedding 向量",
+      "notes": [
+        "OpenAI SDK 使用 Bearer 认证。",
+        "base_url 路径原样参与 URL 拼接，不能假设 SDK 自动增加 /v1。"
+      ],
+      "refs": [
+        {
+          "file": "tools/docxindex/vector/client.py",
+          "symbol": "EmbeddingClient._embed_batch",
+          "label": "DocxIndex 入口"
+        },
+        {
+          "file": "tools/retrieval/llamaindex/limited_embedding.py",
+          "symbol": "SemaphoreOpenAILikeEmbedding._embed",
+          "label": "LlamaIndex 入口"
+        }
+      ],
+      "related": [
+        "vector",
+        "controller",
+        "semaphore"
+      ]
+    },
+    {
+      "id": "rerank",
+      "title": "Reranker：BGE 与 Qwen 协议",
+      "group": "models",
+      "description": "RerankerClient 构建 provider 对应请求，发送 HTTP，验证结果数量、索引和有限分数，并按分数排序。",
+      "inputs": "query、documents、top_n、model、RERANK_API_KEY",
+      "outputs": "(document_index, relevance_score) 排序列表",
+      "notes": [
+        "当前 BGE 分支携带 model，使用 X-API-Key，不发送 instruct。",
+        "Qwen 分支继续使用 Bearer；DashScope 的 input / parameters 是嵌套结构。",
+        "HTTP 400 在 raise_for_status 处抛出；当前错误记录没有提取该响应正文。"
+      ],
+      "refs": [
+        {
+          "file": "tools/docxindex/reranker.py",
+          "symbol": "build_payload",
+          "label": "不同协议的正文"
+        },
+        {
+          "file": "tools/docxindex/reranker.py",
+          "symbol": "RerankerClient.rank",
+          "label": "认证与统一控制"
+        },
+        {
+          "file": "tools/docxindex/reranker.py",
+          "symbol": "parse_results",
+          "label": "响应契约"
+        }
+      ],
+      "related": [
+        "controller",
+        "retrieval",
+        "llama"
+      ]
+    },
+    {
+      "id": "controller",
+      "title": "execute_model：所有模型请求的控制面",
+      "group": "models",
+      "description": "等待模型槽、保留发送次数、启动独立请求计时器、发送与记录响应、释放槽，再验证输出。",
+      "inputs": "model_type、model、request、send、validate、逻辑预算",
+      "outputs": "已验证响应；携带调用位置和阶段的异常",
+      "notes": [
+        "等待槽位不占用已经发出的 HTTP 请求时长预算。",
+        "HTTP 408/409/429、5xx、网络错误等按规则重试；400 不在传输重试集合中。",
+        "输出校验错误与网络重试共用发送额度和累计等待额度。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/runtime/model_calls.py",
+          "lines": [
+            78,
+            132
+          ],
+          "label": "一次尝试的执行顺序"
+        },
+        {
+          "file": "endpoints/runtime/model_calls.py",
+          "symbol": "_retryable",
+          "label": "可重试错误"
+        },
+        {
+          "file": "endpoints/runtime/model_calls.py",
+          "lines": [
+            143,
+            169
+          ],
+          "label": "重试和退避"
+        }
+      ],
+      "related": [
+        "budget",
+        "semaphore",
+        "stream",
+        "logging"
+      ]
+    },
+    {
+      "id": "budget",
+      "title": "ModelCallBudget：三个时钟与发送额度",
+      "group": "models",
+      "description": "分别限制整份合同截止时间、逻辑调用累计等待槽位时间、每次 HTTP 请求时间；流式模式按内容进展刷新请求时钟。",
+      "inputs": "workflow 超时、模型等待超时、模型调用超时、max_retries",
+      "outputs": "remaining / waiting_remaining；超时异常与 sends 计数",
+      "notes": [
+        "max_retries=5 表示最多首次发送加 5 次额外发送。",
+        "每次网络重试有新的请求时钟，但累计等待额度与合同截止时间继续约束它。",
+        "有内容进展可延长流式请求，不能延长合同总截止时间。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/runtime/model_budget.py",
+          "symbol": "ModelCallBudget.waiting_remaining",
+          "label": "累计等待"
+        },
+        {
+          "file": "endpoints/runtime/model_budget.py",
+          "symbol": "ModelCallBudget.reserve_send",
+          "label": "一次发送的时钟"
+        },
+        {
+          "file": "endpoints/runtime/model_budget.py",
+          "symbol": "ModelCallBudget.received_content",
+          "label": "流式进展刷新"
+        },
+        {
+          "file": "endpoints/runtime/model_budget.py",
+          "symbol": "ModelCallBudget.can_retry",
+          "label": "重试额度"
+        }
+      ],
+      "related": [
+        "controller",
+        "worker",
+        "stream"
+      ]
+    },
+    {
+      "id": "semaphore",
+      "title": "Redis semaphore：跨 worker 的模型容量",
+      "group": "models",
+      "description": "按 llm / embedding / reranker 分池，用 Redis Lua 原子检查 FIFO 等待队列与租约，领取后持续续租并在退出时释放。",
+      "inputs": "model_type、统一 key、容量配置、budget",
+      "outputs": "属于本请求的 ModelSemaphoreLease",
+      "notes": [
+        "只有相同 Redis 地址、DB 和 key 的进程才共享同一池。",
+        "租约过期负责回收失联 owner；续租失败会中止对应请求。",
+        "不同进程若使用同 key 却配置不同容量，代码会拒绝策略不一致。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/runtime/llm_semaphore.py",
+          "lines": [
+            78,
+            123
+          ],
+          "label": "Lua 原子排队与容量策略"
+        },
+        {
+          "file": "endpoints/runtime/llm_semaphore.py",
+          "symbol": "RedisModelSemaphore.acquire_async",
+          "label": "等待与领取"
+        },
+        {
+          "file": "endpoints/runtime/llm_semaphore.py",
+          "symbol": "model_semaphore",
+          "label": "续租、取消和释放"
+        }
+      ],
+      "related": [
+        "controller",
+        "budget",
+        "vector",
+        "config"
+      ]
+    },
+    {
+      "id": "stream",
+      "title": "流式传输：汇合完整结果再返回调用方",
+      "group": "models",
+      "description": "request_llm 根据 llm.stream 选择线上传输格式。流式分片先合并 content、reasoning 和工具参数，最终还原完整 SDK 响应。",
+      "inputs": "OpenAI resource、messages、stream 开关、active_model_call",
+      "outputs": "完整 ChatCompletion 或 Completion；HTTP 状态与流统计",
+      "notes": [
+        "流式传输不等同于页面实时显示 token。",
+        "content、reasoning、工具内容都算有效进展；只有 role 元数据或空心跳不会刷新内容空闲时钟。",
+        "reasoning_chars 是收到的字段统计，不能据此证明服务端启用了思考开关。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/runtime/llm_client.py",
+          "symbol": "_content_lengths",
+          "label": "字段统计"
+        },
+        {
+          "file": "endpoints/runtime/llm_client.py",
+          "lines": [
+            89,
+            122
+          ],
+          "label": "统一开关"
+        },
+        {
+          "file": "endpoints/runtime/llm_client.py",
+          "lines": [
+            142,
+            181
+          ],
+          "label": "分片合并与完成检查"
+        }
+      ],
+      "related": [
+        "controller",
+        "budget",
+        "agent"
+      ]
+    },
+    {
+      "id": "logging",
+      "title": "日志：逻辑调用与单次尝试",
+      "group": "models",
+      "description": "logical_calls 聚合一次逻辑模型调用及其 attempts；detailed=true 才写 calls 单次请求和响应文件。",
+      "inputs": "任务调用上下文、request、response、error、timing",
+      "outputs": "events.log、logical_calls/*.json；可选 calls/*.json",
+      "notes": [
+        "logical call、HTTP attempt、criterion 是三个不同计数层次。",
+        "当前 HTTPStatusError 只记录异常文本和状态，没有统一保留 reranker 错误响应正文。"
+      ],
+      "refs": [
+        {
+          "file": "loggers/call_log.py",
+          "lines": [
+            145,
+            170
+          ],
+          "label": "详细日志开关"
+        },
+        {
+          "file": "loggers/call_log.py",
+          "symbol": "CallRecord.failed",
+          "label": "异常记录字段"
+        },
+        {
+          "file": "loggers/call_log.py",
+          "symbol": "LogicalCall._write",
+          "label": "聚合 attempts"
+        }
+      ],
+      "related": [
+        "controller",
+        "trace",
+        "data"
+      ]
+    },
+    {
+      "id": "trace",
+      "title": "Trace 与业务进度：两种观测视角",
+      "group": "models",
+      "description": "TraceLogger 保存 workflow / criterion / model / MCP 执行树；任务状态供前端轮询和结果接口读取。",
+      "inputs": "span 父子关系、耗时、输入输出摘要、调用引用",
+      "outputs": "trace.json 和 task.json 中的阶段与要点状态",
+      "notes": [
+        "并发子节点的耗时之和不等于整个阶段的墙钟时间。",
+        "trace 不代替完整请求正文；calls 也不代替业务 task 状态。"
+      ],
+      "refs": [
+        {
+          "file": "loggers/trace_logger.py",
+          "lines": [
+            31,
+            86
+          ],
+          "label": "TraceLogger"
+        },
+        {
+          "file": "frontend/static/app.js",
+          "lines": [
+            107,
+            136
+          ],
+          "label": "状态消费方"
+        }
+      ],
+      "related": [
+        "logging",
+        "job",
+        "web"
+      ]
+    },
+    {
+      "id": "data",
+      "title": "数据分区：任务、配置和身份",
+      "group": "execution",
+      "description": "API 任务放 data/api/<task_id>；Web 任务放 data/web/<tenant_id>/<task_id>。身份资料在 profiles，输入输出和日志在 data。",
+      "inputs": "client_dir、tenant_id、task_id、挂载总数据目录",
+      "outputs": "input / output / logs / state / task.json 等任务路径",
+      "notes": [
+        "持久化依赖宿主机共享挂载，不应依赖容器临时文件系统。",
+        "task.json 是状态，不是跨进程模型并发锁。"
+      ],
+      "refs": [
+        {
+          "file": "endpoints/review/task_store.py",
+          "symbol": "_task_scope_root",
+          "label": "API 与 Web 分区"
+        },
+        {
+          "file": "endpoints/review/task_store.py",
+          "symbol": "create_task",
+          "label": "任务快照字段"
+        },
+        {
+          "file": "loggers/resolve_review_task_paths.py",
+          "lines": [
+            40,
+            64
+          ],
+          "label": "Web 路径解析"
+        }
+      ],
+      "related": [
+        "state",
+        "logging",
+        "compose",
+        "users"
+      ]
+    },
+    {
+      "id": "report",
+      "title": "报告生成：从锚点到 Word 批注",
+      "group": "retrieval",
+      "description": "Workflow 将结构化审查结果序列化传给报告工具；DOCX 生成器按 XML 锚点与文本范围定位原文并写批注。",
+      "inputs": "原合同、issues、xml_anchor_id、quoted_text、summary_sections",
+      "outputs": "保留原合同正文的带批注 DOCX 和批注统计",
+      "notes": [
+        "检索证据先成为文本，再由模型输出锚点；报告层会重新验证定位。",
+        "重复意见按原文范围去重；最终文件生成属于确定性工具处理。"
+      ],
+      "refs": [
+        {
+          "file": "mcp_service/server/server.py",
+          "symbol": "generate_docx_report",
+          "label": "跨 MCP 的 JSON 解码"
+        },
+        {
+          "file": "tools/document/reporting/docx_report.py",
+          "symbol": "DocxReportGenerator._add_comment_markers_to_text_range",
+          "label": "批注范围标记"
+        },
+        {
+          "file": "tools/document/reporting/docx_report.py",
+          "symbol": "deduplicate_review_results_by_range",
+          "label": "原文范围去重"
+        }
+      ],
+      "related": [
+        "workflow",
+        "schema",
+        "ledger"
+      ]
+    },
+    {
+      "id": "config",
+      "title": "配置如何成为运行值",
+      "group": "operations",
+      "description": "config.py 在进程导入时读取 .env / config.yaml，校验模型限流及超时字段，再供 worker、Agent 和工具使用。",
+      "inputs": "挂载配置、环境变量、显式请求级模型配置",
+      "outputs": "模块常量与 MODEL_SEMAPHORE_CONFIGS",
+      "notes": [
+        "本页只嵌入源码和示例字段，不读取真实 .env / config.yaml。",
+        "进程已加载的常量不会因文件保存自动刷新；部署变更需让相关进程重新加载。"
+      ],
+      "refs": [
+        {
+          "file": "config.py",
+          "lines": [
+            21,
+            41
+          ],
+          "label": "加载时机"
+        },
+        {
+          "file": "config.py",
+          "lines": [
+            235,
+            307
+          ],
+          "label": "配置校验和模型池"
+        },
+        {
+          "file": "config.example.yaml",
+          "lines": [
+            46,
+            85
+          ],
+          "label": "模板并发与超时值"
+        }
+      ],
+      "related": [
+        "controller",
+        "semaphore",
+        "compose"
+      ]
+    },
+    {
+      "id": "prompts",
+      "title": "提示词目录：角色、任务与期望 JSON",
+      "group": "agent",
+      "description": "agents/prompts.py 读取 prompts.yaml 并替换模板变量；Agent 选择角色提示与任务提示，JSON helper 加入期望结构。",
+      "inputs": "提示词 key、criterion_text、context 等模板变量",
+      "outputs": "system / user 消息字符串",
+      "notes": [
+        "模板名称不等于独立 Agent 进程。",
+        "提示词负责说明，schema 和确定性审查负责程序验收。"
+      ],
+      "refs": [
+        {
+          "file": "agents/prompts.py",
+          "lines": [
+            1,
+            62
+          ],
+          "label": "模板加载与渲染"
+        },
+        {
+          "file": "agents/prompts.yaml",
+          "lines": [
+            1,
+            58
+          ],
+          "label": "真实提示词节选"
+        }
+      ],
+      "related": [
+        "agent",
+        "contractjson",
+        "planning"
+      ]
+    },
+    {
+      "id": "compose",
+      "title": "Compose：API、worker 与共享挂载",
+      "group": "operations",
+      "description": "示例 Compose 为 API 与三个 worker 配置同一应用镜像、Redis 网络和共享 data / profiles。",
+      "inputs": "APP_IMAGE、APP_PORT、运行配置、宿主机挂载目录",
+      "outputs": "一个 API、三个 worker 与 Redis 容器",
+      "notes": [
+        "--concurrency=1 是每个 worker 的进程槽，增加 worker 数不会改变模型全局容量。",
+        "broker 使用 Redis DB0；模型池示例使用 DB2，职责不同。"
+      ],
+      "refs": [
+        {
+          "file": "docker-compose.example.yaml",
+          "lines": [
+            1,
+            62
+          ],
+          "label": "API 与第一个 worker"
+        },
+        {
+          "file": "docker-compose.example.yaml",
+          "lines": [
+            65,
+            111
+          ],
+          "label": "其他 worker"
+        }
+      ],
+      "related": [
+        "worker",
+        "semaphore",
+        "data",
+        "docker"
+      ]
+    },
+    {
+      "id": "docker",
+      "title": "Dockerfile：受保护镜像的三个阶段",
+      "group": "operations",
+      "description": "先编译加密代码并构建 loader，再用 VMP 保护共享库，最后只复制运行产物和可读资源。",
+      "inputs": "源码、Python wheels、Debian 包、VMP 工具、构建密钥",
+      "outputs": "host、libloader.vmp.so、code.bin 和运行依赖",
+      "notes": [
+        "最终镜像不保留项目 .py / .pyc，更新 reranker.py 要重新构建和部署镜像。",
+        "Docker 基础镜像仍需拉取或预先导入。"
+      ],
+      "refs": [
+        {
+          "file": "Dockerfile",
+          "lines": [
+            35,
+            53
+          ],
+          "label": "编译与加密"
+        },
+        {
+          "file": "Dockerfile",
+          "lines": [
+            58,
+            81
+          ],
+          "label": "保护 loader"
+        },
+        {
+          "file": "Dockerfile",
+          "lines": [
+            126,
+            140
+          ],
+          "label": "最终镜像入口"
+        }
+      ],
+      "related": [
+        "build",
+        "pack",
+        "loader",
+        "compose"
+      ]
+    },
+    {
+      "id": "build",
+      "title": "build.ps1：构建与离线自检",
+      "group": "operations",
+      "description": "构建入口准备工具与密钥，执行 Docker build，再用临时容器验证离线 tiktoken 数据可用。",
+      "inputs": "-Tag、可选 -KeyFile、VMP 工具路径",
+      "outputs": "受保护镜像；临时密钥在 finally 中清理",
+      "notes": [
+        "本页依据原仓库脚本快照；新仓库另有注册文件输入与 Linux 构建入口调整。",
+        "脚本在构建机执行，不要求远端部署宿主机安装源码工具链。"
+      ],
+      "refs": [
+        {
+          "file": "protect/build.ps1",
+          "lines": [
+            1,
+            85
+          ],
+          "label": "实际构建脚本"
+        }
+      ],
+      "related": [
+        "docker",
+        "pack",
+        "compose"
+      ]
+    },
+    {
+      "id": "pack",
+      "title": "pack.py：把源码变为加密载荷",
+      "group": "operations",
+      "description": "构建阶段收集模块、编译字节码，生成归档并加密，配套生成 loader 构建所需的密钥资料。",
+      "inputs": "模块清单、项目源码、构建密钥、输出目录",
+      "outputs": "code.bin 和 loader 编译输入",
+      "notes": [
+        "这里处理构建时源码，不是生产运行的合同数据。",
+        "保护提高静态读取成本，不保证有运行控制权的攻击者无法提取内存明文。"
+      ],
+      "refs": [
+        {
+          "file": "protect/pack.py",
+          "symbol": "build_archive",
+          "label": "收集并编译归档"
+        },
+        {
+          "file": "protect/pack.py",
+          "symbol": "encrypt_archive",
+          "label": "AES-GCM 加密"
+        },
+        {
+          "file": "protect/pack.py",
+          "symbol": "main",
+          "label": "脚本输入与产物"
+        }
+      ],
+      "related": [
+        "docker",
+        "loader",
+        "build"
+      ]
+    },
+    {
+      "id": "loader",
+      "title": "host 与 loader：镜像内怎样启动 Python",
+      "group": "operations",
+      "description": "host 通过 dlopen 进入保护后的共享库；loader 解密载荷，注册 importer，并运行指定 Python 模块。",
+      "inputs": "/app/host -m <module> 与加密 code.bin",
+      "outputs": "运行 uvicorn、Celery 或管理模块",
+      "notes": [
+        "同一个镜像既可启动业务服务，也可通过临时管理容器运行脚本。",
+        "报告和身份数据仍应写共享挂载，不能依赖容器内临时目录。"
+      ],
+      "refs": [
+        {
+          "file": "protect/loader/src/host.c",
+          "lines": [
+            1,
+            47
+          ],
+          "label": "host 入口"
+        },
+        {
+          "file": "protect/loader/src/loader_entry.cpp",
+          "lines": [
+            1,
+            37
+          ],
+          "label": "loader 启动逻辑"
+        }
+      ],
+      "related": [
+        "docker",
+        "tenants",
+        "users",
+        "clients"
+      ]
+    },
+    {
+      "id": "tenants",
+      "title": "管理脚本：创建租户",
+      "group": "operations",
+      "description": "manage_tenants.py 调用运行时 tenancy，维护租户身份资料。",
+      "inputs": "create / list / enable / disable 等子命令与 tenant-id",
+      "outputs": "profiles 下的租户记录",
+      "notes": [
+        "镜像部署时通过临时容器执行 /app/host -m scripts.manage_tenants。",
+        "输入来自管理命令；最终写入与业务服务共享的 profiles 挂载。"
+      ],
+      "refs": [
+        {
+          "file": "scripts/manage_tenants.py",
+          "symbol": "create_tenant_command",
+          "label": "创建命令"
+        },
+        {
+          "file": "scripts/manage_tenants.py",
+          "symbol": "build_parser",
+          "label": "命令行参数"
+        }
+      ],
+      "related": [
+        "users",
+        "clients",
+        "data",
+        "compose"
+      ]
+    },
+    {
+      "id": "users",
+      "title": "管理脚本：用户与角色",
+      "group": "operations",
+      "description": "manage_users.py 创建用户、设置角色、重置密码和启停账户，资料按租户存放。",
+      "inputs": "create --tenant-id ... --username ... --password ... --role ...",
+      "outputs": "租户下用户资料和密码散列",
+      "notes": [
+        "tenant-id 位于 create 子命令后，按 parser 的实际定义传入。",
+        "管理操作和合同模型调用是独立流程。"
+      ],
+      "refs": [
+        {
+          "file": "scripts/manage_users.py",
+          "symbol": "create_user_account",
+          "label": "创建用户"
+        },
+        {
+          "file": "scripts/manage_users.py",
+          "symbol": "build_parser",
+          "label": "子命令定义"
+        }
+      ],
+      "related": [
+        "tenants",
+        "data",
+        "loader"
+      ]
+    },
+    {
+      "id": "clients",
+      "title": "管理脚本：平台 API client",
+      "group": "operations",
+      "description": "manage_api_clients.py 注册平台调用方并保存 API key 指纹，供 API 入口识别调用身份。",
+      "inputs": "client-id、平台 API key、启停命令",
+      "outputs": "profiles/api_clients.json 内的 client 身份",
+      "notes": [
+        "平台 API key 不是 LLM_API_KEY，也不是 RERANK_API_KEY。",
+        "示例命令使用占位符；页面不会嵌入任何真实密钥。"
+      ],
+      "refs": [
+        {
+          "file": "scripts/manage_api_clients.py",
+          "symbol": "api_key_fingerprint",
+          "label": "凭据指纹"
+        },
+        {
+          "file": "scripts/manage_api_clients.py",
+          "symbol": "register_api_client",
+          "label": "注册调用方"
+        }
+      ],
+      "related": [
+        "api",
+        "data",
+        "loader"
+      ]
+    },
+    {
+      "id": "tests",
+      "title": "现有测试：从哪里验证这些结论",
+      "group": "operations",
+      "description": "仓库已有模型控制、流式传输、队列和检索契约测试，可按专题阅读和运行。",
+      "inputs": "测试夹具、模拟 HTTP、部分用例需要隔离 Redis",
+      "outputs": "断言重试、槽位释放、FIFO、流式合并和错误行为",
+      "notes": [
+        "学习页不是实时监控，也不会自动运行测试。",
+        "有测试文件不等于本次全套测试已经执行；页面制作只检查快照与界面。"
+      ],
+      "refs": [
+        {
+          "file": "tests/criteria_formal_recall/test_llm_transport.py",
+          "lines": [
+            156,
+            206
+          ],
+          "label": "流式与非流式契约测试"
+        },
+        {
+          "file": "tests/criteria_formal_recall/test_model_control.py",
+          "lines": [
+            793,
+            831
+          ],
+          "label": "FIFO 与共享重试额度"
+        }
+      ],
+      "related": [
+        "stream",
+        "controller",
+        "semaphore"
+      ]
+    },
+    {
+      "id": "summary",
+      "title": "Summarizer：汇总意见与去重建议",
+      "group": "agent",
+      "description": "Summarizer 将已完成的审查结果整理为用户可读的总结，按预算组织输入，并校验去重建议。Workflow 对特定模型失败有保守总结回退。",
+      "inputs": "逐要点结果、已经确认的意见与摘要提示词",
+      "outputs": "summary payload；下游用于总览批注和报告",
+      "notes": [
+        "汇总在逐要点审查之后执行，不会重新替代每个要点审查。",
+        "模型汇总失败后的降级边界由 Workflow 判断；合同总截止时间耗尽仍会向外抛出。"
+      ],
+      "refs": [
+        {
+          "file": "agents/summarizer.py",
+          "symbol": "SummarizerAgent.compile_summary_comment",
+          "label": "构造并校验总结"
+        },
+        {
+          "file": "workflow/workflow.py",
+          "lines": [
+            321,
+            364
+          ],
+          "label": "汇总与特定失败回退"
+        }
+      ],
+      "related": [
+        "workflow",
+        "contractjson",
+        "report"
+      ]
+    },
+    {
+      "id": "toolllm",
+      "title": "检索工具里的 LLM：同步外壳与异步发送",
+      "group": "models",
+      "description": "DocxIndex 的索引增强和路由模型调用通过 LLMClient 进入统一模型控制器；同步工具通过 run_sync 桥接受控的异步请求。",
+      "inputs": "prompt、LLMSettings、可选结构化 schema 与校验回调",
+      "outputs": "完整模型文本或验证后的对象",
+      "notes": [
+        "工具里的模型请求和 Agent 模型请求共享 Redis llm 池。",
+        "run_sync 桥接调用方式，不提供新的全局模型容量。"
+      ],
+      "refs": [
+        {
+          "file": "tools/docxindex/llm/client.py",
+          "lines": [
+            80,
+            169
+          ],
+          "label": "工具模型适配器"
+        }
+      ],
+      "related": [
+        "docxindex",
+        "controller",
+        "budget"
+      ]
+    }
+  ],
+  "journey": [
+    {
+      "component": "web",
+      "title": "上传与轮询",
+      "detail": "浏览器提交表单；CLI 则进入 API 提交路径。"
+    },
+    {
+      "component": "api",
+      "title": "接受合法任务",
+      "detail": "API 保存输入和 task.json，记录 task_id。"
+    },
+    {
+      "component": "queue",
+      "title": "先 queued 再发布",
+      "detail": "enqueue_review_job 持久化 queue_id，再 apply_async。"
+    },
+    {
+      "component": "worker",
+      "title": "领取合同任务",
+      "detail": "Celery 通过注册任务名找到 run_review_job_task。"
+    },
+    {
+      "component": "job",
+      "title": "进入 running",
+      "detail": "业务 worker 建立心跳、进度回调和 workflow。"
+    },
+    {
+      "component": "workflow",
+      "title": "解析与建索引",
+      "detail": "Workflow 调用 MCP 工具建立临时合同索引。"
+    },
+    {
+      "component": "planning",
+      "title": "得到执行标准",
+      "detail": "固定 18 项直接加载；上传标准才走 Planner 策略提取。"
+    },
+    {
+      "component": "criterion",
+      "title": "并发执行要点",
+      "detail": "gather 调度要点，局部 semaphore 限制每合同同时执行数量。"
+    },
+    {
+      "component": "retrieval",
+      "title": "返回证据上下文",
+      "detail": "MCP 检索结果序列化为文本，进入 SubAgent 提示词。"
+    },
+    {
+      "component": "controller",
+      "title": "统一模型发送",
+      "detail": "Redis 容量、超时、网络重试和 schema 修复共同约束请求。"
+    },
+    {
+      "component": "reflection",
+      "title": "复核并修订",
+      "detail": "反思与确定性校验决定保留哪些 finding。"
+    },
+    {
+      "component": "report",
+      "title": "生成批注并交付",
+      "detail": "报告工具按锚点定位原文；worker 保存终态，页面轮询读取。"
+    }
+  ],
+  "defaults": {
+    "workers": 3,
+    "processes": 1,
+    "criteria": 2,
+    "llm": 5,
+    "embedding": 3,
+    "reranker": 10,
+    "jobs": 6
+  }
+}
