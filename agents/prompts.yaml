@@ -230,6 +230,7 @@ REFLECTOR_EXPECTED_JSON: |2
   }
 REFLECTOR_REVIEW_TASK_PROMPT: |-
   字段职责：subagent_output 是唯一完整审查结果（含 edit 和 evidence）；current_findings 只是修改位置索引，不代表完整证据。
+  comparison_context 是程序按实际原文归属计算的比较范围，与 SubAgent 和输出校验使用同一清单。targets 是必须逐项判断的原文，evidence 是允许配对的对照原文；只有 evidence 清单内的锚点可以作为对照。evidence=[] 明确表示当前没有提供合法对照原文，不能因 targets 中某段文字形似标题或包含名称就把它当成已经找到的对照，也不能据此要求 matched/mismatch。是否 not_found 或 not_applicable 必须依照原 criterion/check_points 判断；不要新增检查要求，不要将“没有提供对照”直接改写为某种业务结论。
   finding_decisions 只能由 Reflector 返回，不要要求 SubAgent 添加该字段。finding_id 必须逐字复制输入的 F001 等编号，不是 issue_id。
   必须逐条判断所有 current_findings 和 missing_previous_findings：事实成立用 confirm，需要改写用 revise，事实不成立用 remove，并写明理由。
   audit_mode.coverage / audit_mode.comparison 是程序给定的审计开关，只有对应值为 true 时才执行逐项完整审计，不能由 subagent_output 中是否出现数组来开启。当前标准范围内有证据的实质漏检仍用 coverage_gaps 精确列出，不因关闭逐项审计而忽略；不得将已撤销的同一事实在没有新增证据或明确错误依据时重新列为漏检。
@@ -367,6 +368,9 @@ ORCHESTRATOR_COMPARISON_AUDIT: |-
   逐候选比较要求：
   待检查原文范围：${edit_region}
   对照证据范围：${evidence_region}
+  comparison_context（由程序按真实原文归属计算，与 Reflector 及输出校验共用）：
+  ${comparison_context_json}
+  targets 是必须逐项判断的原文；evidence 是允许配对的对照原文。只有 evidence 清单内的锚点可以作为对照；不能因某个 targets 条目形似标题或包含名称，就把仅在 targets 的条目当成对照。evidence=[] 表示本次没有提供合法对照原文，不能输出 matched/mismatch；按原 criterion/check_points 判断 not_found 或 not_applicable，不要新增业务结论。后续反馈不能改变程序给定的原文归属；修订时使用最新 comparison_context。
   必须覆盖每个待检查候选，不能漏项或添加不存在的位置。同一段原文包含多个比较对象时分别记录不同配对关系；同一原文位置与同一证据位置的配对不能重复。
   - matched：已找到相应证据且按当前检查点一致，必须填写证据类型和真实位置，不生成该候选的问题。
   - mismatch：已找到相应证据但按当前检查点不一致，必须填写证据位置，并生成锚定待检查原文的 edit 问题、以对照原文为 evidence。

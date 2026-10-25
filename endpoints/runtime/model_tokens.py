@@ -190,7 +190,8 @@ class ModelTokenizer:
             return self.count_text(rendered)
         # Unknown-provider chat wrapping cannot be reconstructed exactly. Count
         # the complete serialized request with explicit conservative overhead.
-        return self.count_text(_json({"messages": messages, "tools": tools or [], **options})) + len(messages) * 16 + 64
+        return self.count_text(_json({"messages": messages, "tools": tools or [],
+                                      **{key: value for key, value in options.items() if value is not None}})) + len(messages) * 16 + 64
 
 
 @lru_cache(maxsize=64)

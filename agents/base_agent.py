@@ -101,6 +101,9 @@ class Agent:
         self.MAX_TOOL_CALLS = max_tool_calls
         self.MAX_INPUT_TOKENS = max_input_tokens
         self.last_input_preparation: dict = {}
+        self._last_response_message: dict | None = None
+        self._last_response_finish_reason: str | None = None
+        self._rejected_length_responses: list[dict] = []
 
         # Token tracking
         self.token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
@@ -122,11 +125,25 @@ class Agent:
     # ==================== Context ====================
 
     def _prepare_request_messages(self) -> list[dict]:
+        # Keep the original response in history/logs, but do not resend a
+        # length-truncated response after JSON/schema validation rejected it.
+        rejected_ids = {id(message) for message in getattr(self, "_rejected_length_responses", [])}
+        excluded = [index for index, message in enumerate(self.messages) if id(message) in rejected_ids]
+        self._rejected_length_responses = [self.messages[index] for index in excluded]
+        source_indexes = [index for index in range(len(self.messages)) if index not in excluded]
         messages, metadata = prepare_chat_messages(
-            self.messages, model=self.settings.model, tools=self.tools,
+            [self.messages[index] for index in source_indexes], model=self.settings.model, tools=self.tools,
             max_input_tokens=self.MAX_INPUT_TOKENS, strict=False,
             enable_thinking=self.settings.enable_thinking,
         )
+        metadata["retained_message_indexes"] = [source_indexes[index] for index in metadata["retained_message_indexes"]]
+        metadata["removed_message_groups"] = [
+            [source_indexes[index] for index in group] for group in metadata["removed_message_groups"]
+        ]
+        metadata["excluded_messages"] = [
+            {"index": index, "reason": "schema_rejected_length_response", "finish_reason": "length"}
+            for index in excluded
+        ]
         self.last_input_preparation = metadata
         log_agent_step(self.name, {"input_preparation": metadata})
         return messages
@@ -280,6 +297,14 @@ class Agent:
             self._validation_call = None
 
     def reject_schema_response(self, exc):
+        message = getattr(self, "_last_response_message", None)
+        if (
+            getattr(self, "_last_response_finish_reason", None) == "length"
+            and message is not None and not message.get("tool_calls")
+            and any(item is message for item in self.messages)
+            and not any(item is message for item in self._rejected_length_responses)
+        ):
+            self._rejected_length_responses.append(message)
         record = getattr(self, "_validation_call", None)
         if record is not None:
             record.reject_response(exc)
@@ -315,13 +340,17 @@ class Agent:
             return completion
 
     async def chat(self, message="") -> str:
+        self._last_response_message = None
+        self._last_response_finish_reason = None
         if message:
             self.messages.append({"role": "user", "content": message})
             log_conversation(self.name, self.messages)
 
         result = await self.execute()
         if result is not None:
-            self.messages.append({"role": "assistant", "content": result})
+            response = {"role": "assistant", "content": result}
+            self.messages.append(response)
+            self._last_response_message = response
             log_conversation(self.name, self.messages)
         else:
             raise ValueError("No final assistant content returned.")
@@ -446,5 +475,6 @@ class Agent:
                     log_conversation(self.name, self.messages)
                     continue
             else:
+                self._last_response_finish_reason = finish_reason
                 return response_message.content
 

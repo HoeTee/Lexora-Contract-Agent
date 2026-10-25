@@ -54,12 +54,19 @@ def extract_json(text: str) -> dict:
 
     try:
         parsed = _loads_json(stripped)
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as original_error:
         start = stripped.find("{")
         end = stripped.rfind("}") + 1
         if start == -1 or end <= start:
             raise
-        parsed = _loads_json(stripped[start:end])
+        try:
+            parsed = _loads_json(stripped[start:end])
+        except json.JSONDecodeError:
+            # A truncated JSON object can contain earlier nested closing braces.
+            # Report the full-object error, not an error introduced by cropping.
+            if start == 0:
+                raise original_error from None
+            raise
 
     if not isinstance(parsed, dict):
         raise ValueError("agent output JSON must be an object")

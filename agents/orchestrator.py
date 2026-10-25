@@ -304,6 +304,9 @@ class OrchestratorAgent:
             review_context = sub_agent._review_context
             if base_context:
                 task_prompt = task_prompt.replace(base_context, review_context, 1)
+            execution = getattr(sub_agent, "_review_execution", None)
+            if execution is not None and execution.audit_mode.comparison:
+                task_prompt += OrchestratorAgent._comparison_prompt(execution, review_context)
             sub_agent.messages = [
                 message for message in sub_agent.messages if message.get("role") == "system"
             ] + [{"role": "user", "content": task_prompt}]
@@ -497,7 +500,9 @@ class OrchestratorAgent:
             if prepared not in seen and prepared not in retained_context:
                 seen.add(prepared)
                 contexts.append(prepared)
-        return get_prompt("ORCHESTRATOR_SUPPLEMENTAL_EVIDENCE_SEPARATOR").join(contexts)
+        # End the preceding anchor before the human-readable supplement banner.
+        separator = "\n\n---\n\n" + get_prompt("ORCHESTRATOR_SUPPLEMENTAL_EVIDENCE_SEPARATOR")
+        return separator.join(contexts)
 
     @staticmethod
     def _normalized_span(text: str, quote: str) -> str | None:
@@ -708,6 +713,38 @@ class OrchestratorAgent:
         return errors
 
     @staticmethod
+    def _comparison_context(execution: ReviewExecutionPlan, context: str) -> dict:
+        """Describe the exact target/evidence sets used by every comparison stage."""
+        anchors = OrchestratorAgent._retrieval_anchor_evidence(context)
+        targets = {}
+        counterparts = {}
+        for item in anchors:
+            record = {key: item[key] for key in ("xml_anchor_type", "xml_anchor_id", "source_region")}
+            key = (item["xml_anchor_type"], item["xml_anchor_id"])
+            region = item.get("source_region", "")
+            if region == execution.evidence_region:
+                counterparts[key] = record
+            if (region == execution.edit_region if execution.edit_region else region != execution.evidence_region):
+                targets[key] = record
+        return {
+            "edit_region": execution.edit_region,
+            "evidence_region": execution.evidence_region,
+            "targets": [targets[key] for key in sorted(targets)],
+            "evidence": [counterparts[key] for key in sorted(counterparts)],
+        }
+
+    @staticmethod
+    def _comparison_prompt(execution: ReviewExecutionPlan, context: str) -> str:
+        return render_prompt(
+            "ORCHESTRATOR_COMPARISON_AUDIT",
+            edit_region=execution.edit_region or "对照证据范围之外的检索原文",
+            evidence_region=execution.evidence_region,
+            comparison_context_json=json.dumps(
+                OrchestratorAgent._comparison_context(execution, context), ensure_ascii=False, indent=2,
+            ),
+        )
+
+    @staticmethod
     def _comparison_audit_errors(
         parsed_opinion: dict,
         execution: ReviewExecutionPlan,
@@ -718,17 +755,14 @@ class OrchestratorAgent:
             return []
         evidence_region = execution.evidence_region
         edit_region = execution.edit_region
-        evidence = OrchestratorAgent._retrieval_anchor_evidence(context)
+        comparison_context = OrchestratorAgent._comparison_context(execution, context)
         expected_edits = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
-            for item in evidence
-            if (item.get("source_region") == edit_region if edit_region
-                else item.get("source_region") != evidence_region)
+            for item in comparison_context["targets"]
         }
         allowed_evidence = {
             (item["xml_anchor_type"], item["xml_anchor_id"])
-            for item in evidence
-            if item.get("source_region") == evidence_region
+            for item in comparison_context["evidence"]
         }
         decisions = parsed_opinion.get("comparison_decisions") or []
         actual_edits = {
@@ -874,6 +908,7 @@ class OrchestratorAgent:
         max_revisions: int = 2,
     ) -> tuple[dict, str, str, dict[str, int]]:
         """Run all deterministic output checks and request complete revisions on failure."""
+        sub_agent._review_execution = execution
         coverage_audit = execution.audit_mode.coverage
         totals = anchor_validation if anchor_validation is not None else {}
         for revision in range(max_revisions + 1):
@@ -993,6 +1028,7 @@ class OrchestratorAgent:
         current_findings: list | None = None,
         finding_history: list | None = None,
         audit_mode: dict | None = None,
+        execution: ReviewExecutionPlan | None = None,
     ) -> str:
         """Give Reflector the current criterion plus the exact sub-agent output."""
         return json.dumps(
@@ -1005,6 +1041,10 @@ class OrchestratorAgent:
                 "current_findings": current_findings or [],
                 "finding_history": finding_history or [],
                 "audit_mode": audit_mode or {"coverage": False, "comparison": False},
+                "comparison_context": (
+                    self._comparison_context(execution, context)
+                    if execution is not None and execution.audit_mode.comparison else None
+                ),
             },
             ensure_ascii=False,
             indent=2,
@@ -1097,12 +1137,6 @@ class OrchestratorAgent:
         )
         if coverage_audit:
             task_prompt += get_prompt("ORCHESTRATOR_COVERAGE_AUDIT")
-        if comparison_audit:
-            task_prompt += render_prompt(
-                "ORCHESTRATOR_COMPARISON_AUDIT",
-                edit_region=execution.edit_region or "对照证据范围之外的检索原文",
-                evidence_region=execution.evidence_region,
-            )
         if review_instruction:
             task_prompt += render_prompt(
                 "ORCHESTRATOR_TRIGGER_INSTRUCTION", review_instruction=review_instruction,
@@ -1115,6 +1149,9 @@ class OrchestratorAgent:
         sub_agent._review_task_prompt = task_prompt
         sub_agent._review_base_context = context
         sub_agent._review_context = context
+        sub_agent._review_execution = execution
+        if comparison_audit:
+            task_prompt += self._comparison_prompt(execution, context)
         parsed_opinion, sub_agent_opinion = await chat_until_valid_json(
             sub_agent,
             task_prompt,
@@ -1186,6 +1223,7 @@ class OrchestratorAgent:
                 current_findings=ledger.current(parsed_opinion),
                 finding_history=ledger.decision_history(),
                 audit_mode={"coverage": coverage_audit, "comparison": comparison_audit},
+                execution=execution,
             )
             review = await self._review_with_fallback(
                 reflector,

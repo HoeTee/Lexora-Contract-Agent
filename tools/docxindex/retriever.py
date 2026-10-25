@@ -659,6 +659,30 @@ def _merge_semantic_matches(
     return result, duplicate_count, added_count
 
 
+def _anchor_source_region(index: dict[str, Any], record: dict[str, Any]) -> str:
+    """Use document ownership/boundaries, never synthetic retrieval node IDs."""
+    regions = {"frontmatter", "body", "tail", "attachments"}
+    owner_region = str(record.get("node_id") or "").split("/", 1)[0]
+    if owner_region in regions:
+        return owner_region
+    position = record.get("body_child_index")
+    if position is None:
+        return ""
+    containing = [
+        node for node in index.get("nodes") or []
+        if node.get("start_index") is not None and node.get("end_index") is not None
+        and node["start_index"] <= position <= node["end_index"]
+    ]
+    # Top-level document partitions are authoritative when present. Otherwise
+    # use only boundaries from real indexed nodes with an identified region.
+    partitions = {str(node.get("node_id")) for node in containing if node.get("node_id") in regions}
+    if partitions:
+        return next(iter(partitions)) if len(partitions) == 1 else ""
+    identified = {str(node.get("node_id") or "").split("/", 1)[0] for node in containing}
+    identified.intersection_update(regions)
+    return next(iter(identified)) if len(identified) == 1 else ""
+
+
 def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -> str:
     anchors = sorted(
         (index.get("anchor_map") or {}).items(),
@@ -701,7 +725,7 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
             selection_reason = str(node.get("selection_reason") or "").strip()
             if selection_reason:
                 header += f"\n检索候选判定理由：{selection_reason}"
-            source_region = str(node.get("node_id") or "").split("/", 1)[0]
+            source_region = _anchor_source_region(index, record)
             owner_id = str(record.get("node_id") or node.get("node_id") or "")
             attachments = [
                 context for context in attachment_contexts
@@ -740,9 +764,10 @@ def _format_anchor_context(index: dict[str, Any], nodes: list[dict[str, Any]]) -
             continue
         seen.add(anchor_id)
         anchor_type = "table" if record.get("type") == "tbl" else "paragraph"
+        source_region = _anchor_source_region(index, record)
         parts.append(
-            "## 合同检索证据\nsource_region: attachments"
-            f"\nxml_anchor_type: {anchor_type}\nxml_anchor_id: {anchor_id}\n内容：\n{text}"
+            "## 合同检索证据" + (f"\nsource_region: {source_region}" if source_region else "")
+            + f"\nxml_anchor_type: {anchor_type}\nxml_anchor_id: {anchor_id}\n内容：\n{text}"
         )
     return "\n\n---\n\n".join(parts) if parts else "未找到相关合同内容。"
 

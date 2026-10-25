@@ -56,6 +56,8 @@ tokenizers:
 
 Agent 超限时在发送副本中优先删除较旧的完整消息组，保留 system、原始任务、最新请求、当前工具交互及未完成工具事务。工具请求和对应 tool 结果整体保留或整体移除。原历史和原文日志不改；没有机械截断字符串或让模型自行缩短 HTTP 输入。
 
+如果服务以 finish_reason=length 截断回复，且这条回复未通过 JSON/schema 校验，后续修复输入会排除这条完整的无效 assistant 消息，保留原任务、证据及校验反馈。完整原始回复、失败原因和 token 消耗仍保存在历史与调用日志中；input_preparation 记录排除的消息索引及原因。普通完整回复的校验修复继续携带上次输出，不删除工具事务，也不新增输出 token 上限。
+
 Embedding 和 reranker 对原 node 生成临时切片，按最高切片相似度/重排分数给原 node 排序；返回完整原文和原 node_id。embedding 有可配置重叠，reranker 不新增重叠配置。切片计数包含对应模型包装与 reranker query。无法容纳 query 或必要消息时，在本地拒绝发送，记录 input_validation、sent=false；不消费 RPM，不以未改变输入原样重试。
 
 配置预算预期有风险时仅 WARN，继续启动；最终实际请求超过上限才拒绝。监控 retrieval 的 input_tokens、output_tokens、scan_batch_tokens、摘要批次、层级识别预算与 LLM 上限的关系；监控 embedding overlap 与输入上限。节点数、工具次数、复核轮数影响数量和历史增长，不能直接乘成一个确定 token 上限。扫描多页合并后按真实总输入计数，不把单页预算当总返回上限。
@@ -93,8 +95,8 @@ Redis TIME 和 Lua 原子处理 FIFO、活动名额及滚动窗口。等待 RPM 
 | workflow.max_orchestrator_concurrency | 2 / 2 | 一份合同内部同时推进的要点数；最终 HTTP 仍受全局模型限制 |
 | workflow.subagent_allowed_tools | contract_search | SubAgent 能调用的工具清单，空列表表示无工具 |
 | queue.broker_url | DB 2 / DB 2 | Celery 任务消息地址，不负责模型并发 |
-| queue.pending_timeout_seconds | 60 / 60 | 提交发布阶段尚未确认入队的任务监督 |
-| queue.queued_timeout_seconds | 7200 / 7200 | 已排队、尚未被 worker 接手的等待监督，不是模型执行超时 |
+| queue.pending_timeout_seconds | 60 / 60 | 仍处于 pending、尚未进入发布流程的任务监督 |
+| queue.queued_timeout_seconds | 7200 / 7200 | 保存发布身份并进入 queued 后至 worker 接手的监督，包括发布调用尚未返回的区间；不是模型执行超时 |
 | queue.task_time_limit_seconds | 1800 / 7200 | worker 接手后的整份合同硬时限，包含模型排队、实际请求、重试、检索和报告 |
 | queue.watchdog_interval_seconds | 10 / 10 | 检查队列任务的间隔；行为参数，必须为正数 |
 | queue.worker_disable_prefetch | true / true | 保留三 worker 各领取一份执行的部署约定 |
