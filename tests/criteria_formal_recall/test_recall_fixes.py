@@ -13,6 +13,7 @@ from docx import Document
 from docx.oxml import OxmlElement
 
 from agents.base_agent import estimate_chat_prompt_tokens
+from config import LLM_MAX_INPUT_TOKENS
 from agents.json_utils import AgentOutputValidationError
 from agents.orchestrator import (
     OrchestratorAgent,
@@ -22,7 +23,6 @@ from agents.orchestrator import (
 from agents.prompts import get_prompt, load_prompts
 from agents.schemas import ReflectorOutput, SubAgentOutput, SummaryOutput
 from agents.summarizer import (
-    SUMMARIZER_MAX_PROMPT_TOKENS,
     SummarizerAgent,
     apply_summary_duplicate_groups,
     conservative_message_token_upper_bound,
@@ -1321,24 +1321,27 @@ class SummarizerPromptBudgetTests(unittest.TestCase):
             {"role": "user", "content": "问题列表"},
         ])
 
-        self.assertLess(bound, SUMMARIZER_MAX_PROMPT_TOKENS)
+        self.assertLess(bound, LLM_MAX_INPUT_TOKENS)
 
     def test_conservative_bound_rejects_prompt_above_hard_limit(self) -> None:
         messages = [
-            {"role": "user", "content": " x" * (SUMMARIZER_MAX_PROMPT_TOKENS + 1)},
+            {"role": "user", "content": " x" * (LLM_MAX_INPUT_TOKENS + 1)},
         ]
         bound = conservative_message_token_upper_bound(messages)
 
-        self.assertGreater(bound, SUMMARIZER_MAX_PROMPT_TOKENS)
+        self.assertGreater(bound, LLM_MAX_INPUT_TOKENS)
         summarizer = SummarizerAgent.__new__(SummarizerAgent)
         summarizer.name = "Summarizer"
         summarizer.messages = messages
         summarizer.tools = []
-        summarizer.MAX_CONTEXT_TOKENS = 254_000
-        summarizer.MAX_PROMPT_TOKENS = SUMMARIZER_MAX_PROMPT_TOKENS
+        summarizer.MAX_INPUT_TOKENS = LLM_MAX_INPUT_TOKENS
+        summarizer.settings = type("Settings", (), {"model": "qwen3.6-35b-a3b", "enable_thinking": False})()
         summarizer.debug = False
-        with self.assertRaisesRegex(ValueError, "per-call safety limit"):
-            summarizer._check_context_limits()
+        prepared = summarizer._prepare_request_messages()
+        # Preparation cannot erase the original task. The unified send guard
+        # rejects this remaining required input before any network activity.
+        self.assertEqual(prepared, messages)
+        self.assertGreater(summarizer.last_input_preparation["input_tokens_after"], LLM_MAX_INPUT_TOKENS)
 
     def test_global_prompt_budget_includes_tool_schema(self) -> None:
         messages = [{"role": "user", "content": "检查合同"}]

@@ -6,7 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from config import LOGGING_ENABLED, LOGGING_DETAILED, MAX_CONTEXT_TOKENS
+from config import LOGGING_ENABLED, LOGGING_DETAILED, LLM_MAX_INPUT_TOKENS
 from loggers.api_event_logger import append_api_event
 
 
@@ -52,8 +52,8 @@ class WorkflowLogger:
             tokens = 0
 
         ctx_pct = ""
-        if tokens > 0 and MAX_CONTEXT_TOKENS > 0:
-            pct = int((tokens / MAX_CONTEXT_TOKENS) * 100)
+        if tokens > 0 and LLM_MAX_INPUT_TOKENS is not None:
+            pct = int((tokens / LLM_MAX_INPUT_TOKENS) * 100)
             ctx_pct = f" ({pct}%)"
 
         self.steps.append({

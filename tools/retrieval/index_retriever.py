@@ -26,8 +26,8 @@ class IndexRetriever:
         rerank_provider: str = "higress_qwen",
         chunk_size: int = 512,
         chunk_overlap: int = 200,
-        similarity_top_k: int = 5,
-        rerank_top_n: int = 3,
+        similarity_top_k: int | None = None,
+        rerank_top_n: int | None = None,
     ) -> None:
         self.llm_api_key = llm_api_key
         self.llm_base_url = llm_base_url

@@ -125,7 +125,7 @@ def _build_batches(
     used = 0
     for item in records:
         tokens = estimate_tokens(item[3])
-        if batch and used + tokens > batch_tokens:
+        if batch and batch_tokens is not None and used + tokens > batch_tokens:
             batches.append(batch)
             batch = []
             used = 0

@@ -169,7 +169,7 @@ class RoutePromptContractTests(unittest.TestCase):
         response = SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
                                    model_dump=lambda: {"choices": [{"message": {"content": content}}]})
         request = AsyncMock(return_value=(response, None))
-        with patch("tools.docxindex.llm.client.request_llm", request), \
+        with patch("tools.docxindex.llm.client.send_llm_request", request), \
              patch("endpoints.runtime.model_calls.model_semaphore", available_slot):
             with self.assertRaises(LLMResponseValidationError) as raised:
                 client.complete_model("route prompt", RouteResponse)

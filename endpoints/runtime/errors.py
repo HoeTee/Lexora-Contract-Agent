@@ -1,6 +1,23 @@
 import re
 
 
+class ModelInputTooLong(ValueError):
+    """A locally counted request exceeds its configured input allowance."""
+
+    failure_stage = "input_validation"
+    sent = False
+    retryable = False
+
+    def __init__(self, message: str, *, model_type: str | None = None,
+                 input_tokens: int | None = None, limit: int | None = None,
+                 caller: str | None = None):
+        self.model_type = model_type
+        self.input_tokens = input_tokens
+        self.limit = limit
+        self.caller = caller
+        super().__init__(message)
+
+
 class ModelCallError(RuntimeError):
     """Raised when an external model-style API fails after timeout/retries."""
 

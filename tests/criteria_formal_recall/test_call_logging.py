@@ -14,7 +14,7 @@ import httpx
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from endpoints.runtime.model_calls import execute_model
-from loggers.call_log import logical_call, map_with_context, new_call, reset_call_context, set_call_context
+from loggers.call_log import logical_call, map_with_context, new_call, reset_call_context, set_call_context, summarize_model_attempts
 from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_trace
 from mcp_service.client.client import MinimalMCPClient
 from tools.docxindex.llm.client import LLMClient, LLMClientError, LLMSettings
@@ -127,6 +127,80 @@ class CallLoggingTests(unittest.TestCase):
         self.assertEqual(persisted["known_input_tokens"], 40)
         self.assertIsNone(persisted["output_tokens"])
         self.assertIsNone(persisted["attempts"][0]["output_tokens"])
+
+    def test_failure_preserves_local_input_partial_output_and_provenance(self) -> None:
+        with tempfile.TemporaryDirectory() as directory, patch("loggers.call_log.LOGGING_DETAILED", False):
+            with logical_call("agent", "fake", directory=Path(directory) / "calls") as logical:
+                record = new_call(component="agent", model="fake", request={})
+                record.record_local_input(40, {"tokenizer": "cl100k_base", "estimated": True})
+                record.sent()
+                record.record_received_output(7)
+                record.failed(TimeoutError("stream stalled"))
+                logical.failed(TimeoutError("stream stalled"))
+            persisted = json.loads(logical.path.read_text(encoding="utf-8"))
+        self.assertEqual(persisted["status"], "failed")
+        self.assertEqual((persisted["input_tokens"], persisted["output_tokens"]), (40, 7))
+        self.assertFalse(persisted["usage_complete"])
+        attempt = persisted["attempts"][0]
+        self.assertEqual(attempt["output_completeness"], "partial")
+        self.assertEqual(attempt["input_token_source"], "local")
+        self.assertEqual(attempt["output_token_source"], "local")
+
+    def test_all_sent_attempts_count_once_but_local_rejection_is_not_service_usage(self):
+        with logical_call("agent", "fake") as logical:
+            rejected = new_call(component="agent", model="fake", request={})
+            rejected.record_local_input(100)
+            rejected.failed(ValueError("input too long"), stage="input_validation")
+            first = new_call(component="agent", model="fake", request={})
+            first.record_local_input(40)
+            first.sent()
+            first.failed(TimeoutError("no output"))
+            second = new_call(component="agent", model="fake", request={})
+            second.record_local_input(41)
+            second.sent()
+            second.succeeded({"usage": {"prompt_tokens": 42, "completion_tokens": 5}})
+        self.assertEqual((logical.payload["send_count"], logical.payload["retry_count"]), (2, 1))
+        self.assertEqual(logical.payload["input_tokens"], 82)
+        self.assertEqual(logical.payload["output_tokens"], 5)
+        self.assertFalse(logical.payload["input_usage_complete"])
+        self.assertFalse(logical.payload["output_count_complete"])
+        self.assertFalse(logical.payload["attempts"][0]["sent"])
+
+    def test_shared_summary_counts_failed_retries_input_only_and_deduplicates_calls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            logs = Path(directory) / "calls"
+            with logical_call("agent", "fake", directory=logs, source="Planner") as first:
+                record = new_call(component="agent", model="fake", request={})
+                record.record_local_input(40)
+                record.sent()
+                record.failed(TimeoutError("unknown output"))
+                first.failed(TimeoutError("unknown output"))
+            with logical_call("docxindex.embedding", "fake", directory=logs) as second:
+                record = new_call(component="docxindex.embedding", model="fake", request={})
+                record.record_local_input(12)
+                record.sent()
+                record.succeeded({"data": []})
+            self.assertEqual(second.payload["input_output_tokens"], 12)
+            duplicate = first.path.with_name("duplicate.json")
+            duplicate.write_text(first.path.read_text(encoding="utf-8"), encoding="utf-8")
+            summary = summarize_model_attempts(first.path.parent)
+        self.assertEqual(summary["sent_attempts"], 2)
+        self.assertEqual(summary["planner"], 40)
+        self.assertEqual(summary["retrieval"], 12)
+        self.assertEqual((summary["input"], summary["output"], summary["total"]), (52, 0, 52))
+        self.assertEqual(summary["unknown_output_attempts"], 1)
+        self.assertEqual(summary["local_fallback_attempts"], 2)
+
+    def test_unreadable_or_missing_logs_do_not_claim_complete_statistics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = summarize_model_attempts(Path(directory) / "missing")
+            (Path(directory) / "broken.json").write_text("{partial", encoding="utf-8")
+            damaged = summarize_model_attempts(directory)
+        for summary in (missing, damaged):
+            self.assertFalse(summary["output_complete"])
+            self.assertFalse(summary["stats_complete"])
+            self.assertTrue(summary["total_is_lower_bound"])
+        self.assertEqual(len(damaged["unreadable_records"]), 1)
 
     def test_nested_workers_keep_criterion_context_separate(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

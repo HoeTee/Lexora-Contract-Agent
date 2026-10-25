@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from loggers.call_log import call_stage
+from endpoints.runtime.errors import ModelInputTooLong
+from endpoints.runtime.model_calls import record_input_rejection
 from tools.docxindex.indexing import estimate_tokens
 from tools.docxindex.reranker import RerankerClient
 from tools.docxindex.llm.cache import JsonlCache, cache_key, text_hash
@@ -66,7 +68,7 @@ def _candidate_batches(index: dict[str, Any], query: str, candidates: list[dict[
                        input_tokens: int | None = None, *, client=None) -> list[list[dict[str, Any]]]:
     nodes = {node.get("node_id"): node for node in index.get("nodes") or []}
     tokenizer = model_tokenizer(getattr(client, "model", "legacy-rerank"))
-    limit = tokenizer.effective_limit(getattr(client, "max_input_tokens", input_tokens or 20000))
+    limit = tokenizer.effective_limit(getattr(client, "max_input_tokens", input_tokens))
     provider = getattr(client, "provider", None)
     instruct = "" if provider == "bge" or tokenizer.slug == "bge-reranker-v2-m3" else getattr(client, "instruct", "")
     pieces = []
@@ -85,8 +87,16 @@ def _candidate_batches(index: dict[str, Any], query: str, candidates: list[dict[
             "vector_score": candidate.get("vector_score") or candidate.get("score"),
         }
         document = json.dumps(item, ensure_ascii=False)
-        chunks = split_input(document, lambda value: tokenizer.count_rerank(query, value, instruct) <= limit,
-                             tokenizer=tokenizer)  # No reranker overlap.
+        try:
+            chunks = split_input(document, lambda value: limit is None or tokenizer.count_rerank(query, value, instruct) <= limit,
+                                 tokenizer=tokenizer)  # No reranker overlap.
+        except ModelInputTooLong as exc:
+            record_input_rejection(model_type="reranker", model=tokenizer.model, caller="docxindex.reranker",
+                request={"model": tokenizer.model, "query": query, "documents": [document], "instruct": instruct},
+                limit=limit, error=exc,
+                preparation={"stage": "reranker-slicing", "node_id": node_id,
+                             "fixed_input_tokens": tokenizer.count_rerank(query, "", instruct)})
+            raise
         pieces.extend({**item, "_document": chunk.text} for chunk in chunks)
     return [pieces[start:start + MODEL_INPUT_BATCH_SIZE] for start in range(0, len(pieces), MODEL_INPUT_BATCH_SIZE)]
 

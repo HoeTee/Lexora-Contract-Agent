@@ -315,7 +315,7 @@ class CleanupCancellationTests(unittest.IsolatedAsyncioTestCase):
         release = AsyncMock(side_effect=redis.RedisError("release unavailable"))
         with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), \
                 patch.object(semaphore, "release_async", release), \
-                self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+                self.assertLogs("endpoints.runtime.model_limits", level="ERROR"):
             with self.assertRaises(ModelCallTimeout) as caught:
                 await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
                                     budget=ModelCallBudget(timeout_seconds=0.04, max_retries=3))
@@ -332,7 +332,7 @@ class CleanupCancellationTests(unittest.IsolatedAsyncioTestCase):
         release = AsyncMock(side_effect=redis.RedisError("release unavailable"))
         with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), \
                 patch.object(semaphore, "release_async", release), \
-                self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+                self.assertLogs("endpoints.runtime.model_limits", level="ERROR"):
             operation = asyncio.create_task(execute_model(model_type="llm", model="test", caller="test",
                 request={}, send=send, budget=ModelCallBudget(timeout_seconds=1, max_retries=0)))
             await sending.wait()
@@ -357,7 +357,7 @@ class CleanupCancellationTests(unittest.IsolatedAsyncioTestCase):
         operation.cancel()
         await asyncio.sleep(0.03)
         operation.cancel()
-        with self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+        with self.assertLogs("endpoints.runtime.model_limits", level="ERROR"):
             with self.assertRaises(asyncio.CancelledError):
                 await operation
         self.assertTrue(finished.is_set())
@@ -823,11 +823,14 @@ class ModelControlIntegrationTests(unittest.IsolatedAsyncioTestCase):
             return await self._send("/retry", remaining)
         with logical_call("test.llm", "test") as logical:
             with self.assertRaisesRegex(ValueError, "schema requires"):
-                await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                await execute_model(model_type="llm", model="test", caller="test",
+                                    request={"messages": [{"role": "user", "content": "test"}]}, send=send,
                                     validate=reject, budget=ModelCallBudget(timeout_seconds=3, max_retries=1))
             self.assertEqual(self.http.counts["retry"], 2)
             self.assertEqual(logical.sent_count, 2)
-            self.assertIsNone(logical.payload["attempts"][0]["input_tokens"])
+            self.assertGreater(logical.payload["attempts"][0]["input_tokens"], 0)
+            self.assertEqual(logical.payload["attempts"][0]["input_tokens"],
+                             logical.payload["attempts"][0]["local_input_tokens"])
             self.assertEqual(logical.payload["attempts"][1]["input_tokens"], 3)
 
     async def test_trickle_response_is_cancelled_at_total_deadline(self):

@@ -48,13 +48,16 @@ def task_deadline() -> float | None:
 
 
 @contextmanager
-def task_execution(deadline: float, task_id: str | None = None):
+def task_execution(deadline: float | None, task_id: str | None = None):
     token = _task_deadline.set(deadline)
     previous = os.environ.get("CONTRACT_TASK_DEADLINE")
     previous_id = os.environ.get("CONTRACT_TASK_ID")
     if task_id is not None:
         os.environ["CONTRACT_TASK_ID"] = task_id
-    os.environ["CONTRACT_TASK_DEADLINE"] = str(deadline)
+    if deadline is None:
+        os.environ.pop("CONTRACT_TASK_DEADLINE", None)
+    else:
+        os.environ["CONTRACT_TASK_DEADLINE"] = str(deadline)
     try:
         yield
     finally:
@@ -71,12 +74,12 @@ def task_execution(deadline: float, task_id: str | None = None):
 
 @dataclass
 class ModelCallBudget:
-    timeout_seconds: float = MODEL_CALL_TIMEOUT_SECONDS
-    max_retries: int = MODEL_CALL_MAX_RETRIES
+    timeout_seconds: float | None = MODEL_CALL_TIMEOUT_SECONDS
+    max_retries: int | None = MODEL_CALL_MAX_RETRIES
     started: float = field(default_factory=time.monotonic)
     sends: int = 0
     deadline: float | None = field(default=None, init=False)
-    wait_timeout_seconds: float = MODEL_WAIT_TIMEOUT_SECONDS
+    wait_timeout_seconds: float | None = MODEL_WAIT_TIMEOUT_SECONDS
     wait_seconds: float = field(default=0.0, init=False)
     _task_deadline: float | None = field(default=None, init=False, repr=False)
     _waiting_since: float | None = field(default=None, init=False, repr=False)
@@ -103,7 +106,7 @@ class ModelCallBudget:
     @property
     def model_remaining_seconds(self) -> float:
         if self.deadline is None:
-            return self.timeout_seconds
+            return self.timeout_seconds if self.timeout_seconds is not None else float("inf")
         now = self._request_finished if self._request_finished is not None else time.monotonic()
         return max(0.0, self.deadline - now)
 
@@ -126,6 +129,8 @@ class ModelCallBudget:
 
     @property
     def wait_remaining_seconds(self) -> float:
+        if self.wait_timeout_seconds is None:
+            return float("inf")
         return max(0.0, self.wait_timeout_seconds - self.waiting_total_seconds)
 
     @property
@@ -150,7 +155,7 @@ class ModelCallBudget:
 
     def waiting_remaining(self) -> float:
         task_remaining = self._task_remaining(time.monotonic())
-        remaining = self.wait_timeout_seconds - self.waiting_total_seconds
+        remaining = self.wait_remaining_seconds
         if remaining <= 0:
             raise ModelSemaphoreTimeout("Model operation exhausted its cumulative slot-wait budget.")
         return min(remaining, task_remaining)
@@ -164,7 +169,7 @@ class ModelCallBudget:
 
     def reserve_send(self) -> None:
         self.task_remaining()
-        if self.sends >= self.max_retries + 1:
+        if self.max_retries is not None and self.sends >= self.max_retries + 1:
             raise ModelRetryLimitError("Model operation exhausted its shared send/retry allowance.")
         if self._request_started is not None and self._request_finished is None:
             raise RuntimeError("A model operation cannot send overlapping HTTP requests.")
@@ -172,12 +177,14 @@ class ModelCallBudget:
         self._request_started = time.monotonic()
         self._request_finished = None
         self.streaming = False
-        self.deadline = self._request_started + self.timeout_seconds
+        self.deadline = (self._request_started + self.timeout_seconds
+                         if self.timeout_seconds is not None else None)
 
     def received_content(self) -> None:
         """Extend a streaming request only while its current deadline is valid."""
         self.remaining()
-        self.deadline = time.monotonic() + self.timeout_seconds
+        self.deadline = (time.monotonic() + self.timeout_seconds
+                         if self.timeout_seconds is not None else None)
 
     def finish_request(self) -> None:
         """Freeze this request's duration before releasing its slot or validating."""
@@ -189,13 +196,23 @@ class ModelCallBudget:
     def can_retry(self) -> bool:
         task_remaining = (self._task_deadline - time.monotonic()
                           if self._task_deadline is not None else float("inf"))
-        return self.sends < self.max_retries + 1 and task_remaining > 0
+        return (self.max_retries is None or self.sends < self.max_retries + 1) and task_remaining > 0
 
-    def timeout_error(self, stage: str) -> ModelCallTimeout:
-        """Classify an asyncio deadline without hiding the enclosing task deadline."""
-        if self._task_deadline is not None and time.monotonic() >= self._task_deadline:
+    def timeout_error(self, stage: str, *, request_timer_expired: bool = False) -> ModelCallTimeout:
+        """Classify the expired timer by its limiting deadline, not clock rounding.
+
+        asyncio may wake one clock tick before the arithmetic deadline. Once its
+        timer has expired, the earlier limit identifies the source. A completed
+        request has frozen its model timer; optional trailer I/O is task-bound.
+        Call this before finish_request() freezes a failed HTTP attempt.
+        """
+        task_limited = (self._task_deadline is not None and
+                        (self._request_finished is not None or self.deadline is None
+                         or self._task_deadline <= self.deadline))
+        if self._task_deadline is not None and (
+                time.monotonic() >= self._task_deadline or request_timer_expired and task_limited):
             return TaskDeadlineExceeded("Contract task reached its execution deadline.")
-        if self.streaming:
+        if self.streaming and self.timeout_seconds is not None:
             return ModelCallTimeout(f"LLM stream received no new content for {self.timeout_seconds:g} seconds during {stage}.")
         return ModelCallTimeout(f"Model HTTP request reached its execution deadline during {stage}.")
 

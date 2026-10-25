@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 import json
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import httpx
+from openai import AsyncOpenAI
 
 from config import infer_rerank_provider
 from endpoints.runtime.model_budget import ModelCallBudget
+from endpoints.runtime import embedding_client, reranker_client
 from tools.docxindex import reranker
 from tools.docxindex.vector import client as vector_client
 from tools.retrieval.llamaindex import limited_embedding
@@ -42,6 +44,23 @@ class BGEModelControlTests(unittest.TestCase):
         self.http_timeouts.append(remaining)
         return httpx.AsyncClient(timeout=remaining, transport=httpx.MockTransport(self.handler))
 
+    @contextmanager
+    def transports(self):
+        client_type = httpx.AsyncClient
+        test = self
+
+        class TestClient(client_type):
+            def __init__(self, timeout=None, **kwargs):
+                test.http_timeouts.append(timeout)
+                super().__init__(timeout=timeout, transport=httpx.MockTransport(test.handler), **kwargs)
+
+        def sdk_factory(**kwargs):
+            return AsyncOpenAI(**kwargs, http_client=TestClient(kwargs.get("timeout")))
+
+        with patch.object(embedding_client, "AsyncOpenAI", sdk_factory), \
+                patch.object(reranker_client.httpx, "AsyncClient", TestClient):
+            yield
+
     async def respond(self, request):
         body = json.loads(request.content)
         self.requests.append((request.url.path, body))
@@ -57,8 +76,7 @@ class BGEModelControlTests(unittest.TestCase):
     def test_bge_embedding_name_uses_openai_compatible_protocol_in_both_backends(self):
         # The deployment owns the actual model name; no Qwen-only allow-list applies.
         model = "bge-m3"
-        with patch.object(vector_client, "async_http_client", self.http_client), \
-                patch.object(limited_embedding, "async_http_client", self.http_client):
+        with self.transports():
             docx = vector_client.EmbeddingClient(vector_client.EmbeddingSettings(
                 model=model, base_url="http://unused.invalid/v1", api_key="unused"))
             self.assertEqual(docx.embed_batch(["a", "b"]), [[0.0, 0.5], [1.0, 0.5]])
@@ -72,7 +90,7 @@ class BGEModelControlTests(unittest.TestCase):
     def test_bge_reranker_mapping_payload_and_shared_slot(self):
         model = "bge-reranker-v2-m3"
         self.assertEqual(infer_rerank_provider(model), "bge")
-        with patch.object(reranker, "async_http_client", self.http_client):
+        with self.transports():
             result = reranker.RerankerClient(model=model, base_url="http://unused.invalid/rerank",
                                             api_key="", instruct="unused").rank("query", ["a", "b"], 1)
         self.assertEqual(result, [(1, 0.9)])
@@ -81,8 +99,7 @@ class BGEModelControlTests(unittest.TestCase):
 
     def test_test_network_qwen_names_use_their_own_model_pools(self):
         self.assertEqual(infer_rerank_provider("qwen3-reranker"), "higress_qwen")
-        with patch.object(vector_client, "async_http_client", self.http_client), \
-                patch.object(reranker, "async_http_client", self.http_client):
+        with self.transports():
             embedding = vector_client.EmbeddingClient(vector_client.EmbeddingSettings(
                 model="qwen3-embedding", base_url="http://unused.invalid/v1", api_key="unused"))
             self.assertEqual(embedding.embed_batch(["text"]), [[0.0, 0.5]])
@@ -123,9 +140,7 @@ class BGEModelControlTests(unittest.TestCase):
                 self.slots.clear()
                 self.releases.clear()
                 self.http_timeouts.clear()
-                with patch.object(vector_client, "async_http_client", self.http_client), \
-                        patch.object(limited_embedding, "async_http_client", self.http_client), \
-                        patch.object(reranker, "async_http_client", self.http_client), \
+                with self.transports(), \
                         patch("loggers.call_log.ModelCallBudget", side_effect=lambda: ModelCallBudget(
                             timeout_seconds=0.15, max_retries=1)), \
                         patch("endpoints.runtime.model_calls._retry_delay", return_value=0):

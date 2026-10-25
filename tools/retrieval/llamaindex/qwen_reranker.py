@@ -10,7 +10,7 @@ class QwenRerankPostprocessor(BaseNodePostprocessor):
     api_base: str
     model: str
     provider: str = "higress_qwen"
-    top_n: int = 3
+    top_n: int | None = None
     instruct: str = ""
 
     def __init__(
@@ -19,7 +19,7 @@ class QwenRerankPostprocessor(BaseNodePostprocessor):
         base_url: str,
         model: str,
         provider: str = "higress_qwen",
-        top_n: int = 3,
+        top_n: int | None = None,
         instruct: str = "",
         **kwargs,
     ):

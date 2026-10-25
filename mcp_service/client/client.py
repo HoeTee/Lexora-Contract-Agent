@@ -91,10 +91,10 @@ class MinimalMCPClient:
                 )
 
             elif is_module or is_python or is_js:
-                command, args = resolve_stdio_target(server_target)
-                if os.getenv("CONTRACT_TASK_DEADLINE"):
-                    command = sys.executable
-                    args = ["-m", "mcp_service.client.worker_child", server_target]
+                # Parent-death protection is independent of task time limits.
+                resolve_stdio_target(server_target)
+                command = sys.executable
+                args = ["-m", "mcp_service.client.worker_child", server_target]
                 server_params = StdioServerParameters(
                     command=command,
                     args=args,

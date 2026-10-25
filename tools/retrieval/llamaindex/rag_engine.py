@@ -35,8 +35,8 @@ class LlamaIndexRAG:
         rerank_base_url: str = None,
         rerank_name: str = None,
         rerank_provider: str = RERANK_PROVIDER,
-        similarity_top_k: int = 5,
-        rerank_top_n: int = 3,
+        similarity_top_k: int | None = None,
+        rerank_top_n: int | None = None,
         chunk_size: int = 512,
         chunk_overlap: int = 100,
     ) -> None:
@@ -126,7 +126,11 @@ class LlamaIndexRAG:
         if self._index is None:
             raise RuntimeError("Build a temporary contract index before searching.")
 
-        retriever = self._index.as_retriever(similarity_top_k=self.similarity_top_k)
+        # LlamaIndex expects an integer k. Null means every indexed candidate,
+        # rather than silently restoring the library's default top-k limit.
+        top_k = (self.similarity_top_k if self.similarity_top_k is not None
+                 else len(self._index.index_struct.nodes_dict))
+        retriever = self._index.as_retriever(similarity_top_k=top_k)
         postprocessors = [self.reranker] if self.reranker else []
         query_engine = RetrieverQueryEngine.from_args(
             retriever=retriever,

@@ -4,7 +4,7 @@
     "bge-m3": {
       "repository": "BAAI/bge-m3",
       "revision": "5617a9f61b028005a4858fdac845db406aefb181",
-      "context_tokens": 8192,
+      "license": "mit",
       "files": {
         "config.json": {
           "sha256": "26159e7ad065073448460117eb24b7a4572f6f4e78eadff65dc0a11c052449fa",
@@ -31,7 +31,7 @@
     "bge-reranker-v2-m3": {
       "repository": "BAAI/bge-reranker-v2-m3",
       "revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e",
-      "context_tokens": 8192,
+      "license": "apache-2.0",
       "files": {
         "config.json": {
           "sha256": "13dcd6c31d9fec9d1d8e158702072f62d7fa7d312a64b9fe057bec9a08cfe41a",
@@ -58,7 +58,7 @@
     "qwen3-embedding": {
       "repository": "Qwen/Qwen3-Embedding-8B",
       "revision": "1d8ad4ca9b3dd8059ad90a75d4983776a23d44af",
-      "context_tokens": 32768,
+      "license": "apache-2.0",
       "files": {
         "LICENSE": {
           "sha256": "832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e",
@@ -89,7 +89,7 @@
     "qwen3-reranker": {
       "repository": "Qwen/Qwen3-Reranker-8B",
       "revision": "77d193c791ed757ca307ee72715aa132723da912",
-      "context_tokens": 32768,
+      "license": "apache-2.0",
       "files": {
         "chat_template.jinja": {
           "sha256": "6f682162495ec5b39fd9005c01b6aa2a74669379fe967039f1e2cbbe8752369d",
@@ -120,7 +120,7 @@
     "qwen3.6-35b-a3b": {
       "repository": "Qwen/Qwen3.6-35B-A3B",
       "revision": "995ad96eacd98c81ed38be0c5b274b04031597b0",
-      "context_tokens": 262144,
+      "license": "apache-2.0",
       "files": {
         "LICENSE": {
           "sha256": "50cbab8a892c5f2993b8c7351a99182507472def3b1374558308605d99b86b32",
@@ -149,6 +149,37 @@
         "vocab.json": {
           "sha256": "ce99b4cb2983d118806ce0a8b777a35b093e2000a503ebde25853284c9dfa003",
           "bytes": 6722759
+        }
+      }
+    },
+    "deepseek-v4-flash-0731": {
+      "repository": "deepseek-ai/DeepSeek-V4-Flash-0731",
+      "revision": "7872f01b1d1fe23eabc4c98b48bffcef5a386062",
+      "license": "mit",
+      "files": {
+        "LICENSE": {
+          "sha256": "f2c6c602815669d292889e5be8c802f2ed950653b77999b1584e8e6aed25d040",
+          "bytes": 1084
+        },
+        "config.json": {
+          "sha256": "6c8f3d2d3b48707541b88f32f22ef3f0f8a6b57d8523281e2b8d3cdb0ae9a023",
+          "bytes": 1888
+        },
+        "encoding/README.md": {
+          "sha256": "294ed6493ebfe5a487f172154d60c494899997fed8806fdd3352dd8e3c33f9de",
+          "bytes": 9168
+        },
+        "encoding/encoding_dsv4.py": {
+          "sha256": "abc0d26120250dda0ae077dc64aa28836026e61e970854aaeb792445e6a0dde6",
+          "bytes": 29001
+        },
+        "tokenizer.json": {
+          "sha256": "8f9f37ca37fdc4f5fd36d5cf4d3b0e8392edb4e894fd10cc0d70b4957c8633cf",
+          "bytes": 6367146
+        },
+        "tokenizer_config.json": {
+          "sha256": "6ac8c8dc065ed118161d02dd532749ae3f52c243deac27872134fae2f50d8547",
+          "bytes": 801
         }
       }
     }

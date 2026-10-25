@@ -16,9 +16,7 @@ from config import (
     LLM_ENABLE_THINKING,
     LLM_NAME,
     MAX_TOOL_CALLS,
-    MAX_CONTEXT_TOKENS,
-    MAX_PROMPT_TOKENS,
-    MAX_RESULT_TOKENS,
+    LLM_MAX_INPUT_TOKENS,
     MODEL_CALL_TIMEOUT_SECONDS,
     SEED,
     TEMPERATURE,
@@ -27,30 +25,15 @@ from config import (
 from endpoints.runtime.errors import ModelCallError
 from endpoints.runtime.model_budget import ModelCallTimeout
 from endpoints.runtime.model_calls import execute_model
+from endpoints.runtime.model_tokens import model_tokenizer, prepare_chat_messages
 from agents.prompts import get_prompt
 import json
 from contextlib import contextmanager
-import tiktoken
 
 
-_PROMPT_ENCODING = tiktoken.get_encoding("cl100k_base")
-_CHAT_MESSAGE_OVERHEAD_TOKENS = 16
-_CHAT_REQUEST_OVERHEAD_TOKENS = 64
-
-
-def estimate_chat_prompt_tokens(messages: list, tools: list | None = None) -> int:
-    """Estimate one complete chat request, including tool schemas."""
-    payload = json.dumps(
-        {"messages": messages, "tools": tools or []},
-        ensure_ascii=False,
-        separators=(",", ":"),
-        default=str,
-    )
-    return (
-        len(_PROMPT_ENCODING.encode(payload))
-        + len(messages) * _CHAT_MESSAGE_OVERHEAD_TOKENS
-        + _CHAT_REQUEST_OVERHEAD_TOKENS
-    )
+def estimate_chat_prompt_tokens(messages: list, tools: list | None = None, *, model: str = LLM_NAME) -> int:
+    """Count complete chat input with the configured offline model tokenizer."""
+    return model_tokenizer(model).count_chat(messages, tools, enable_thinking=LLM_ENABLE_THINKING)
 
 MODEL_API_ERRORS = (
     APITimeoutError,
@@ -81,10 +64,8 @@ class Agent:
         tools=None,
         settings: Settings | None = None,
         debug: bool = False,
-        max_tool_calls: int = MAX_TOOL_CALLS,
-        max_context_tokens: int = MAX_CONTEXT_TOKENS,
-        max_prompt_tokens: int = MAX_PROMPT_TOKENS,
-        max_result_tokens: int = MAX_RESULT_TOKENS,
+        max_tool_calls: int | None = MAX_TOOL_CALLS,
+        max_input_tokens: int | None = LLM_MAX_INPUT_TOKENS,
         criterion_id: str | None = None,
     ) -> None:
         """
@@ -98,8 +79,7 @@ class Agent:
             settings: Settings for the agent.
             debug: Whether to enable debug mode.
             MAX_TOOL_CALLS: Maximum number of tool calls.
-            MAX_CONTEXT_TOKENS: Maximum number of context tokens.
-            MAX_RESULT_TOKENS: Maximum number of result tokens.
+            max_input_tokens: Complete request limit; null leaves input unrestricted.
         """
         self.settings = settings or Settings()
         self.client = AsyncOpenAI(
@@ -119,12 +99,12 @@ class Agent:
         self.messages: list = []
         self.debug = debug
         self.MAX_TOOL_CALLS = max_tool_calls
-        self.MAX_CONTEXT_TOKENS = max_context_tokens
-        self.MAX_PROMPT_TOKENS = max_prompt_tokens
-        self.MAX_RESULT_TOKENS = max_result_tokens
+        self.MAX_INPUT_TOKENS = max_input_tokens
+        self.last_input_preparation: dict = {}
 
         # Token tracking
         self.token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self._token_attempts: dict[str, dict] = {}
         self.step_count = 0
         self.tool_call_count = 0
 
@@ -139,45 +119,52 @@ class Agent:
         if self.debug:
             print(f"[{self.name}] {message}")
     
-    def _estimate_tokens(self, chars: int) -> int:
-        return int(chars * 0.3)
-
     # ==================== Context ====================
 
-    def _check_context_limits(self) -> int:
-        total_chars = sum(len(str(msg.get("content", ""))) for msg in self.messages)
-        estimated = self._estimate_tokens(total_chars)
-        prompt_tokens = estimate_chat_prompt_tokens(self.messages, self.tools)
-        self._log(
-            f"Pre-request: {len(self.messages)} messages, "
-            f"~{estimated} content tokens, ~{prompt_tokens} complete prompt tokens"
+    def _prepare_request_messages(self) -> list[dict]:
+        messages, metadata = prepare_chat_messages(
+            self.messages, model=self.settings.model, tools=self.tools,
+            max_input_tokens=self.MAX_INPUT_TOKENS, strict=False,
+            enable_thinking=self.settings.enable_thinking,
         )
-        if prompt_tokens > self.MAX_PROMPT_TOKENS:
-            raise ValueError(
-                f"{self.name} prompt exceeds the configured per-call safety limit "
-                f"({prompt_tokens} estimated tokens > {self.MAX_PROMPT_TOKENS}); "
-                "the model call was not sent"
-            )
-        if estimated > self.MAX_CONTEXT_TOKENS:
-            print(f"[{self.name}] ⚠️ Context tokens ({estimated}) approaching limit!")
-        return prompt_tokens
-
-    def _truncate_text(self, text: str, max_tokens: int = None) -> str:
-        if max_tokens is None:
-            max_tokens = self.MAX_RESULT_TOKENS
-        estimated = self._estimate_tokens(len(text))
-        if estimated <= max_tokens:
-            return text
-        max_chars = int(max_tokens / 0.3)
-        return text[:max_chars] + "\n\n[... Content truncated ...]"
+        self.last_input_preparation = metadata
+        log_agent_step(self.name, {"input_preparation": metadata})
+        return messages
 
     # ==================== Token Tracking ====================
 
-    def _update_token_usage(self, usage: dict):
-        if usage:
-            self.token_usage["prompt_tokens"] += usage.prompt_tokens
-            self.token_usage["completion_tokens"] += usage.completion_tokens
-            self.token_usage["total_tokens"] += usage.total_tokens
+    def _update_token_usage(self, records):
+        """Include every sent attempt once; keep unknown output explicitly unknown."""
+        if not hasattr(self, "_token_attempts"):
+            self._token_attempts = {}
+        for record in records:
+            payload = record.payload
+            if payload.get("sent"):
+                self._token_attempts[record.call_id] = payload
+        attempts = list(self._token_attempts.values())
+        inputs = [item.get("input_tokens") for item in attempts]
+        outputs = [item.get("output_tokens") for item in attempts]
+        known_input = sum(value for value in inputs if value is not None)
+        known_output = sum(value for value in outputs if value is not None)
+        input_complete = all(value is not None for value in inputs)
+        output_complete = all(value is not None for value in outputs) and all(
+            item.get("output_completeness") == "complete" for item in attempts
+        )
+        self.token_usage = {
+            "prompt_tokens": known_input if input_complete else None,
+            "completion_tokens": known_output if all(value is not None for value in outputs) else None,
+            # Legacy workflow arithmetic consumes total_tokens. It is explicitly
+            # a known lower bound when any response was partial or unavailable.
+            "total_tokens": known_input + known_output,
+            "known_prompt_tokens": known_input, "known_completion_tokens": known_output,
+            "input_complete": input_complete, "output_complete": output_complete,
+            "total_is_lower_bound": not (input_complete and output_complete),
+            "input_token_sources": sorted({item.get("input_token_source") for item in attempts
+                                            if item.get("input_token_source")}),
+            "output_token_sources": sorted({item.get("output_token_source") for item in attempts
+                                             if item.get("output_token_source")}),
+            "sent_attempt_count": len(attempts),
+        }
 
     def get_token_usage(self) -> dict:
         return self.token_usage.copy()
@@ -231,12 +218,8 @@ class Agent:
             return f"No MCP client for tool {function_name}"
 
         result_str = str(result)
-        estimated = self._estimate_tokens(len(result_str))
-        if estimated > self.MAX_RESULT_TOKENS:
-            result_str = self._truncate_text(result_str)
-            self._log(f"← Tool '{function_name}': ~{estimated} tokens (truncated)")
-        else:
-            self._log(f"← Tool '{function_name}': ~{estimated} tokens")
+        tokens = model_tokenizer(self.settings.model).count_text(result_str)
+        self._log(f"← Tool '{function_name}': {tokens} tokens")
         return result_str
 
     ## Append tool calls onto history
@@ -244,7 +227,7 @@ class Agent:
         self.tool_call_count += len(tool_calls)
         self._log(f"Processing {len(tool_calls)} tool calls (total: {self.tool_call_count})")
 
-        if self.tool_call_count > self.MAX_TOOL_CALLS:
+        if self.MAX_TOOL_CALLS is not None and self.tool_call_count > self.MAX_TOOL_CALLS:
             print(f"[{self.name}] ⚠️ Max tool calls ({self.MAX_TOOL_CALLS}) reached. Aborting task and marking review invalid.")
             return get_prompt("AGENT_TOOL_LIMIT_PROMPT")
 
@@ -313,15 +296,18 @@ class Agent:
                 self._validation_call = logical
             async def send(remaining):
                 return await request_llm(self.client.chat.completions,
-                                         **{**request_kwargs, "timeout": remaining})
+                                         **{**{key: value for key, value in request_kwargs.items()
+                                               if key != "_input_preparation"}, "timeout": remaining})
             try:
                 completion = await execute_model(model_type="llm", model=self.settings.model,
                     caller="agent", request=request_kwargs, send=send,
-                    budget=logical.budget, serialize=lambda response: response.model_dump(),
+                    budget=logical.budget, input_limit=self.MAX_INPUT_TOKENS,
+                    serialize=lambda response: response.model_dump(),
                     record_options={"directory": agent_call_log_dir(), "source": self.name,
                                     "criterion_id": getattr(self, "criterion_id", None),
                                     "stage": "agent_model_call"})
             finally:
+                self._update_token_usage(logical.attempt_records)
                 if logical.last_record is not None:
                     record = logical.last_record
                     span.set_metadata({"call_id": record.reference_id,
@@ -344,7 +330,8 @@ class Agent:
     async def execute(self) -> str:
         tool_continuations = 0
         while True:
-            prompt_token_estimate = self._check_context_limits()
+            request_messages = self._prepare_request_messages()
+            prompt_token_estimate = self.last_input_preparation["input_tokens_after"]
             self.step_count += 1
             current_step = self.step_count
 
@@ -354,7 +341,8 @@ class Agent:
                     "temperature": self.settings.temperature,
                     "top_p": self.settings.top_p,
                     "seed": self.settings.seed,
-                    "messages": self.messages,
+                    "messages": request_messages,
+                    "_input_preparation": self.last_input_preparation,
                 }
                 if self.tools:
                     request_kwargs["tools"] = self.tools
@@ -370,16 +358,17 @@ class Agent:
                     inputs=llm_inputs(
                         agent_name=self.name,
                         model=self.settings.model,
-                        messages=self.messages,
+                        messages=request_messages,
                         tools=self.tools,
                         step=current_step,
                         prompt_token_estimate=prompt_token_estimate,
-                        prompt_token_limit=self.MAX_PROMPT_TOKENS,
+                        prompt_token_limit=self.MAX_INPUT_TOKENS,
                     ),
                     metadata={
                         "temperature": self.settings.temperature,
                         "top_p": self.settings.top_p,
                         "seed": self.settings.seed,
+                        "input_preparation": self.last_input_preparation,
                     },
                 ) as span:
                     stage = getattr(self, "call_stage", "model")
@@ -426,7 +415,6 @@ class Agent:
 
             response_message = completion.choices[0].message
             finish_reason = completion.choices[0].finish_reason
-            self._update_token_usage(completion.usage)
             tool_calls = response_message.tool_calls or []
             log_agent_step(
                 self.name,

@@ -16,6 +16,7 @@ from llama_index.core.schema import NodeWithScore, QueryBundle, TextNode
 from openai import AsyncOpenAI
 
 from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, ModelRetryLimitError, task_execution
+from endpoints.runtime import embedding_client as embedding_transport, llm_client as llm_transport
 from loggers.call_log import logical_call
 from tools.retrieval.llamaindex import limited_embedding, limited_llm, qwen_reranker
 
@@ -32,10 +33,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
             self.http_timeouts.append(timeout)
             return httpx.AsyncClient(timeout=timeout, transport=httpx.MockTransport(self.http_handler))
 
-        for module in (limited_llm, limited_embedding):
-            transport_patch = patch.object(module, "async_http_client", http_client)
-            transport_patch.start()
-            self.addCleanup(transport_patch.stop)
+        self.http_client = http_client
 
         @asynccontextmanager
         async def slot(model_type, caller, model, **kwargs):
@@ -69,9 +67,12 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
 
         def create(**kwargs):
             self.client_options.append(kwargs)
-            return AsyncOpenAI(**kwargs)
+            return AsyncOpenAI(**kwargs, http_client=self.http_client(kwargs.get("timeout")))
 
         return create
+
+    def transport_module(self, adapter):
+        return llm_transport if adapter is limited_llm else embedding_transport
 
     async def success(self, request):
         body = json.loads(request.content)
@@ -115,7 +116,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_sync_and_async_chat_and_completion_use_shared_controller(self):
         llm = self.llm(additional_kwargs={"extra_body": {"enable_thinking": False}})
-        with patch.object(limited_llm, "AsyncOpenAI", self.client_factory(self.success)):
+        with patch.object(llm_transport, "AsyncOpenAI", self.client_factory(self.success)):
             self.assertEqual(llm.chat([ChatMessage(role="user", content="query")]).message.content, "retrieval answer")
             self.assertEqual(
                 (await llm.achat([ChatMessage(role="user", content="query")])).message.content, "retrieval answer"
@@ -134,7 +135,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_embedding_entry_points_use_shared_controller_and_preserve_input_order(self):
         embedding = self.embedding()
-        with patch.object(limited_embedding, "AsyncOpenAI", self.client_factory(self.success)):
+        with patch.object(embedding_transport, "AsyncOpenAI", self.client_factory(self.success)):
             self.assertEqual(embedding.get_query_embedding("q\nuery"), [0.0, 0.5])
             self.assertEqual(embedding.get_text_embedding("text"), [0.0, 0.5])
             self.assertEqual(embedding.get_text_embedding_batch(["a", "b"]), [[0.0, 0.5], [1.0, 0.5]])
@@ -160,7 +161,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
                 )
             return await self.success(request)
 
-        with patch.object(limited_llm, "AsyncOpenAI", self.client_factory(rate_limited)):
+        with patch.object(llm_transport, "AsyncOpenAI", self.client_factory(rate_limited)):
             with logical_call("llamaindex.llm", "test-llm") as logical:
                 logical.budget = ModelCallBudget(timeout_seconds=2, max_retries=1)
                 response = await self.llm().achat([ChatMessage(role="user", content="query")])
@@ -189,7 +190,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
                         cancelled.append(True)
                         raise
 
-                with patch.object(module, "AsyncOpenAI", self.client_factory(slow)):
+                with patch.object(self.transport_module(module), "AsyncOpenAI", self.client_factory(slow)):
                     with logical_call(f"llamaindex.{kind}", f"test-{kind}") as logical:
                         logical.budget = ModelCallBudget(timeout_seconds=0.1, max_retries=1)
                         with self.assertRaises(ModelCallTimeout):
@@ -222,7 +223,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
                             cancelled.append(True)
                     return await self.success(request)
                 before = len(self.http_timeouts)
-                with patch.object(module, "AsyncOpenAI", self.client_factory(timeout_then_success)), \
+                with patch.object(self.transport_module(module), "AsyncOpenAI", self.client_factory(timeout_then_success)), \
                         patch("endpoints.runtime.model_calls._retry_delay", return_value=0):
                     with logical_call(f"llamaindex.{kind}", f"test-{kind}") as logical:
                         logical.budget = ModelCallBudget(timeout_seconds=0.15, max_retries=1)
@@ -241,7 +242,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(all(timeout > 0.13 for timeout in self.http_timeouts[before:]))
 
     async def test_nested_logical_calls_cannot_reset_send_allowance(self):
-        with patch.object(limited_llm, "AsyncOpenAI", self.client_factory(self.success)):
+        with patch.object(llm_transport, "AsyncOpenAI", self.client_factory(self.success)):
             with logical_call("llamaindex.llm", "test-llm") as logical:
                 logical.budget = ModelCallBudget(timeout_seconds=2, max_retries=0)
                 llm = self.llm()
@@ -263,7 +264,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
                 raise
 
         llm = self.llm()
-        with patch.object(limited_llm, "AsyncOpenAI", self.client_factory(slow)):
+        with patch.object(llm_transport, "AsyncOpenAI", self.client_factory(slow)):
             with task_execution(time.time() + 0.1):
                 with self.assertRaises(ModelCallTimeout):
                     llm.chat([ChatMessage(role="user", content="query")])
@@ -272,7 +273,7 @@ class LlamaIndexControlTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_streaming_paths_fail_before_any_request(self):
         llm = self.llm()
-        with patch.object(limited_llm, "AsyncOpenAI") as client:
+        with patch.object(llm_transport, "AsyncOpenAI") as client:
             with self.assertRaises(NotImplementedError):
                 llm.stream_chat([ChatMessage(role="user", content="query")])
             with self.assertRaises(NotImplementedError):

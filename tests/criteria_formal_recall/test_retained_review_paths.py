@@ -38,6 +38,7 @@ class RetainedReviewPathsTests(unittest.TestCase):
 
         def build_index(nodes):
             response.source_nodes = [NodeWithScore(node=node, score=0.9) for node in nodes]
+            index.index_struct = SimpleNamespace(nodes_dict={node.node_id: node.node_id for node in nodes})
             return index
 
         with TemporaryDirectory() as directory:
@@ -60,6 +61,7 @@ class RetainedReviewPathsTests(unittest.TestCase):
 
         self.assertEqual(built, {"status": "built_temporary_index", "num_nodes": 1})
         self.assertEqual(vector_index.call_count, 1)
+        index.as_retriever.assert_called_once_with(similarity_top_k=1)
         query_engine.query.assert_called_once_with("付款期限")
         self.assertIn("xml_anchor_type: paragraph", result)
         self.assertIn("xml_anchor_id: path:body/p1", result)

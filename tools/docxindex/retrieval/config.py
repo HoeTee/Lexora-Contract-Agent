@@ -16,14 +16,14 @@ class VectorRetrievalConfig(BaseModel):
 
     enabled: bool = True
     score_threshold: float = Field(default=0.45, ge=0.0, le=1.0)
-    probe_limit: int = Field(default=20, ge=1)
+    probe_limit: int | None = Field(default=None, ge=1, strict=True)
 
 
 class SemanticRetrievalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    structure_candidate_limit: int = Field(default=12, ge=1)
-    max_selected_nodes: int = Field(default=10, ge=1)
+    structure_candidate_limit: int | None = Field(default=None, ge=1, strict=True)
+    max_selected_nodes: int | None = Field(default=None, ge=1, strict=True)
 
 
 class RerankConfig(BaseModel):
@@ -35,9 +35,9 @@ class RerankConfig(BaseModel):
 class RetrievalConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    input_tokens: int = Field(default=20000, ge=500)
-    output_tokens: int = Field(default=12000, ge=500)
-    scan_batch_tokens: int = Field(default=6000, ge=500)
+    input_tokens: int | None = Field(default=None, ge=500, strict=True)
+    output_tokens: int | None = Field(default=None, ge=500, strict=True)
+    scan_batch_tokens: int | None = Field(default=None, ge=500, strict=True)
     vector: VectorRetrievalConfig = Field(default_factory=VectorRetrievalConfig)
     semantic: SemanticRetrievalConfig = Field(default_factory=SemanticRetrievalConfig)
     rerank: RerankConfig = Field(default_factory=RerankConfig)

@@ -12,12 +12,10 @@ from llama_index.llms.openai.utils import (
     to_openai_message_dicts,
 )
 from llama_index.llms.openai_like import OpenAILike
-from openai import AsyncOpenAI
 
 from endpoints.runtime.model_budget import run_sync
 from endpoints.runtime.model_calls import execute_model
-from endpoints.runtime.llm_client import request_llm
-from endpoints.runtime.model_http import async_http_client
+from endpoints.runtime.llm_client import send_llm_request
 from loggers.call_log import logical_call
 
 
@@ -40,17 +38,10 @@ class UnifiedOpenAILike(OpenAILike):
             raise ValueError("LLM timeout and retries must use the common model controller.")
         payload.pop("stream_options", None)
 
-        async def send(remaining: float):
-            async with AsyncOpenAI(
-                api_key=self.api_key,
-                base_url=self.api_base,
-                default_headers=self.default_headers,
-                timeout=remaining,
-                max_retries=0,
-                http_client=async_http_client(remaining),
-            ) as client:
-                endpoint = client.chat.completions if chat else client.completions
-                return await request_llm(endpoint, chat=chat, **payload)
+        async def send(remaining):
+            return await send_llm_request(api_key=self.api_key, base_url=self.api_base,
+                default_headers=self.default_headers, remaining=remaining, request=payload,
+                endpoint="chat" if chat else "completion")
 
         def validate(response):
             if not response.choices:
@@ -98,7 +89,6 @@ class UnifiedOpenAILike(OpenAILike):
 
     async def _acomplete(self, prompt: str, **kwargs: Any) -> CompletionResponse:
         payload = self._get_model_kwargs(**kwargs)
-        self._update_max_tokens(payload, prompt)
         payload["prompt"] = prompt
         response = await self._request(payload, chat=False)
         choice = response.choices[0]

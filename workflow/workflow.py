@@ -27,7 +27,7 @@ from config import (
 )
 from loggers.workflow_logger import WorkflowLogger, save_review_outputs_json
 from loggers.trace_logger import TraceLogger, reset_current_trace, set_current_trace
-from loggers.call_log import set_call_context, reset_call_context
+from loggers.call_log import set_call_context, reset_call_context, summarize_model_attempts
 from loggers.api_event_logger import append_api_event
 from agents.base_agent import Settings
 from agents.json_utils import AgentOutputValidationError
@@ -460,6 +460,7 @@ class ContractReviewWorkflow:
                     "criteria_count": len(results),
                     "issue_count": sum(len(result.get("issues", [])) for result in results),
                     "total_tokens": total_tokens,
+                    "token_stats": token_stats,
                     "elapsed_seconds": elapsed,
                     "phase_durations": self.logger.summarize_phase_durations(),
                     "annotation_stats": self.annotation_report_summary,
@@ -726,7 +727,13 @@ class ContractReviewWorkflow:
         return summary_sections
 
     def _collect_token_stats(self, results: list[dict]) -> dict[str, int]:
-        """Aggregate token counters collected across workflow phases."""
+        """Aggregate the unique sent attempts recorded by Agent and MCP adapters."""
+        events = getattr(self, "api_events_path", None)
+        if events:
+            summary = summarize_model_attempts(Path(events).parent / "logical_calls")
+            if summary["sent_attempts"] or summary["input_rejections"]:
+                return summary
+        # Logging can be explicitly disabled. Agent counters still include retries.
         planner_tokens = getattr(self, "_planner_tokens", 0)
         retrieval_tokens = getattr(self, "_retrieval_tokens", 0)
         summarizer_tokens = getattr(self, "_summarizer_tokens", 0)
@@ -737,6 +744,10 @@ class ContractReviewWorkflow:
             "execute": execute_tokens,
             "summarizer": summarizer_tokens,
             "total": planner_tokens + retrieval_tokens + execute_tokens + summarizer_tokens,
+            "count_source": "phase_counters_without_attempt_records",
+            "stats_complete": False,
+            "total_is_lower_bound": True,
+            "output_complete": False,
         }
 
     def _save_review_outputs(self, results: list[dict]) -> str | None:

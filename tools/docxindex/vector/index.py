@@ -18,7 +18,7 @@ def build_vector_index(
     source_index: str = "document_index.json",
     concurrency: int = 10,
 ) -> VectorIndex:
-    max_input_tokens = int(getattr(client.settings, "max_input_tokens", 8000))
+    max_input_tokens = getattr(client.settings, "max_input_tokens", None)
     overlap = int(getattr(client.settings, "chunk_overlap_tokens", 32))
     tokenizer = model_tokenizer(client.settings.model)
     entries = []

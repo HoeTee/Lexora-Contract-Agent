@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 async def run_queue_watchdog() -> None:
-    interval = max(1.0, QUEUE_WATCHDOG_INTERVAL_SECONDS)
+    interval = QUEUE_WATCHDOG_INTERVAL_SECONDS
     while True:
         await asyncio.sleep(interval)
         try:

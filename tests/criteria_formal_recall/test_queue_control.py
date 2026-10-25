@@ -11,6 +11,7 @@ from types import SimpleNamespace
 from threading import Event, Thread
 
 from endpoints.review import job_worker, task_store
+from endpoints.runtime import queue_watchdog
 from task_queue.celery_app import celery_app
 from task_queue.review_queue import enqueue_review_job
 from endpoints.runtime.model_budget import task_execution
@@ -42,6 +43,14 @@ def _task(task_id: str, *, status: str, created_at: str, queued_at: str | None =
 
 
 class QueueControlTests(unittest.TestCase):
+    def test_watchdog_uses_the_configured_positive_interval_without_clamping(self) -> None:
+        sleep = AsyncMock(side_effect=asyncio.CancelledError)
+        with patch.object(queue_watchdog, "QUEUE_WATCHDOG_INTERVAL_SECONDS", 0.25), \
+                patch.object(queue_watchdog.asyncio, "sleep", sleep):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(queue_watchdog.run_queue_watchdog())
+        sleep.assert_awaited_once_with(0.25)
+
     def test_celery_disables_redis_prefetch(self) -> None:
         self.assertTrue(celery_app.conf.worker_disable_prefetch)
         self.assertEqual(celery_app.conf.worker_prefetch_multiplier, 1)
@@ -255,6 +264,25 @@ class QueueControlTests(unittest.TestCase):
             self.assertEqual(failed["status"], "failed")
             self.assertEqual(failed["error"]["code"], "QUEUE_WAIT_TIMEOUT")
             self.assertEqual(still_queued["status"], "queued")
+
+    def test_null_waiting_timeouts_do_not_expire_pending_or_queued(self) -> None:
+        with TemporaryDirectory() as directory, patch.object(task_store, "DATA_DIR", Path(directory)):
+            old = (datetime.now(task_store.BEIJING_TZ) - timedelta(days=30)).isoformat(timespec="seconds")
+            for index, status in enumerate(("pending", "queued")):
+                task_store.write_task(_task(f"20260929-12000{index}-abcd", status=status,
+                                            created_at=old, queued_at=old))
+            expired = task_store.expire_stale_waiting_tasks(
+                pending_timeout_seconds=None, queued_timeout_seconds=None)
+            self.assertEqual(expired, [])
+
+    def test_null_execution_deadline_is_saved_and_not_reconciled_as_expired(self) -> None:
+        with TemporaryDirectory() as directory, patch.object(task_store, "DATA_DIR", Path(directory)):
+            task_id = "20260929-120000-abcd"
+            task_store.write_task(_task(task_id, status="queued", created_at=task_store.now_iso()))
+            with task_execution(None):
+                claimed = task_store.mark_worker_started("test-client", task_id, "worker:1")
+            self.assertIsNone(claimed["worker"]["execution_deadline"])
+            self.assertEqual(task_store.expire_executing_tasks(), [])
 
 
 if __name__ == "__main__":

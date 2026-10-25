@@ -4,6 +4,7 @@ Helpers for extracting, validating, and repairing JSON agent outputs.
 
 import json
 from collections import Counter
+from itertools import count
 from config import MODEL_CALL_MAX_RETRIES
 from contextlib import contextmanager, nullcontext
 from typing import TypeVar
@@ -101,16 +102,19 @@ async def chat_until_valid_json(
     """Validate agent JSON, optionally relaxing only the final parsed response."""
     scope = agent.validation_requests() if hasattr(agent, "validation_requests") else nullcontext()
     with scope:
+        limits = [value for value in (max_attempts,
+                  MODEL_CALL_MAX_RETRIES + 1 if MODEL_CALL_MAX_RETRIES is not None else None)
+                  if value is not None]
         return await _chat_until_valid_json(
             agent, initial_prompt, schema, expected_format,
-            max_attempts=min(max_attempts or MODEL_CALL_MAX_RETRIES + 1, MODEL_CALL_MAX_RETRIES + 1),
+            max_attempts=min(limits) if limits else None,
             final_attempt_schema=final_attempt_schema, validation_context=validation_context,
         )
 
 
 async def _chat_until_valid_json(
     agent, initial_prompt: str, schema: type[ModelT], expected_format: str, *,
-    max_attempts: int, final_attempt_schema: type[BaseModel] | None,
+    max_attempts: int | None, final_attempt_schema: type[BaseModel] | None,
     validation_context: dict | None,
 ) -> tuple[dict, str]:
     prompt = render_prompt(
@@ -119,7 +123,8 @@ async def _chat_until_valid_json(
     last_error: Exception | None = None
     raw_output = ""
 
-    for attempt in range(1, max_attempts + 1):
+    attempts = count(1) if max_attempts is None else range(1, max_attempts + 1)
+    for attempt in attempts:
         raw_output = await agent.chat(prompt)
         parsed: dict | None = None
         try:

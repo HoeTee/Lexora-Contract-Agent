@@ -162,6 +162,9 @@ class CallRecord:
             "attempt": logical.sent_count + 1 if logical else 1,
             "is_retry": bool(logical and logical.sent_count),
             **token_fields(None),
+            "local_input_tokens": None, "received_output_tokens": None,
+            "service_usage": None, "input_token_source": None, "output_token_source": None,
+            "output_completeness": "unknown", "sent": False,
         }
         if logical is not None:
             logical.attempt_records.append(self)
@@ -178,6 +181,7 @@ class CallRecord:
     def sent(self) -> None:
         """Count only requests that actually reach the model client."""
         self.payload["sent"] = True
+        self.payload["sent_at"] = _now()
         if self.logical:
             self.logical.sent_count += 1
             self.logical.payload["send_count"] = self.logical.sent_count
@@ -185,13 +189,51 @@ class CallRecord:
             self.logical.last_record = self
             self.logical._write()
 
+    def record_local_input(self, count: int, metadata: dict[str, Any] | None = None) -> None:
+        """Save locally counted input even when admission or HTTP later fails."""
+        self.payload["local_input_tokens"] = count
+        if metadata:
+            self.payload["tokenizer"] = deepcopy(metadata)
+        self._refresh_tokens()
+        self._write()
+
+    def record_received_output(self, count: int, complete: bool = False) -> None:
+        """Count cumulative received output; callers must not sum tokenized deltas."""
+        self.payload.update(received_output_tokens=count,
+                            output_completeness="complete" if complete else "partial")
+        self._refresh_tokens()
+
+    def record_service_usage(self, usage: Any, *, embedding: bool = False) -> None:
+        if hasattr(usage, "model_dump"):
+            usage = usage.model_dump()
+        if isinstance(usage, dict):
+            self.payload["service_usage"] = deepcopy(usage)
+        self._refresh_tokens(embedding=embedding)
+
+    def _refresh_tokens(self, *, embedding: bool = False) -> None:
+        embedding = embedding or self.payload.get("model_type") == "embedding" or self.payload["component"].endswith("embedding")
+        reranker = self.payload.get("model_type") == "reranker" or self.payload["component"].endswith("reranker")
+        usage = token_fields(self.payload.get("service_usage"), embedding=embedding)
+        local_input = self.payload.get("local_input_tokens")
+        local_output = self.payload.get("received_output_tokens")
+        received_input, received_output = usage["input_tokens"], usage["output_tokens"]
+        input_count = received_input if received_input is not None else local_input
+        output_count = received_output if received_output is not None else local_output
+        self.payload.update(
+            input_tokens=input_count, output_tokens=None if embedding or reranker else output_count,
+            input_token_source="service" if received_input is not None else "local" if local_input is not None else None,
+            output_token_source="not_applicable" if embedding or reranker else "service" if received_output is not None else "local" if local_output is not None else None,
+            input_output_tokens=input_count if embedding or reranker else
+            input_count + output_count if input_count is not None and output_count is not None else None,
+        )
+
     def succeeded(self, response: Any, *, http_status: int | None = None) -> None:
-        tokens = token_fields(response.get("usage") if isinstance(response, dict) else None,
-                              embedding=self.payload["component"].endswith("embedding"))
+        usage = response.get("usage") if isinstance(response, dict) else getattr(response, "usage", None)
+        self.record_service_usage(usage)
         self.payload.update(status="succeeded", finished_at=_now(), response=response,
-                            http_status=http_status, **tokens)
+                            http_status=http_status, output_completeness="complete")
         if self.logical:
-            self.logical.tokens = tokens
+            self.logical.tokens = {key: self.payload[key] for key in token_fields(None)}
             self.logical.last_record = self
         self._write()
 
@@ -206,12 +248,10 @@ class CallRecord:
             status="failed", finished_at=_now(), failure_stage=stage,
             error={"type": type(exc).__name__, "message": str(exc),
                    "http_status": self.payload.get("http_status") if stage == "output_validation" else _error_http_status(exc)},
-            **(token_fields(None) if self.payload.get("response") is None else {}),
         )
         if timing is not None:
             self.payload["timing"] = timing
         if self.logical:
-            self.logical.tokens = token_fields(None)
             self.logical.last_record = self
         self._write()
 
@@ -234,6 +274,61 @@ def token_fields(usage: Any, *, embedding: bool = False) -> dict[str, int | None
             input_tokens + output_tokens if input_tokens is not None and output_tokens is not None else None
         ),
     }
+
+
+def summarize_model_attempts(logical_dir: str | Path) -> dict[str, Any]:
+    """Sum unique sent attempts, including failed/partial ones, from compact logs.
+
+    Input/output totals are known received or locally counted amounts. Missing
+    output remains explicitly unknown rather than being claimed as zero usage.
+    """
+    summary = {key: 0 for key in ("planner", "retrieval", "execute", "summarizer", "total",
+               "input", "output", "unknown_output_attempts", "local_fallback_attempts",
+               "sent_attempts", "input_rejections", "partial_output_attempts", "unknown_input_attempts")}
+    attempts = {}
+    unreadable = []
+    for path in Path(logical_dir).glob("*.json"):
+        try:
+            logical = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            unreadable.append({"path": str(path), "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        source = str(logical.get("source") or "").lower()
+        category = str(logical.get("category") or "").lower()
+        group = ("planner" if source.startswith("planner") else "summarizer" if source.startswith("summarizer")
+                 else "retrieval" if category.startswith(("docxindex", "llamaindex"))
+                 or source.startswith(("docxindex", "llamaindex")) else "execute")
+        for attempt in logical.get("attempts") or []:
+            call_id = attempt.get("call_id")
+            if call_id:
+                attempts[call_id] = (group, attempt)
+    for group, attempt in attempts.values():
+        if not attempt.get("sent"):
+            summary["input_rejections"] += int(attempt.get("failure_stage") == "input_validation")
+            continue
+        summary["sent_attempts"] += 1
+        input_count = attempt.get("input_tokens")
+        output_count = attempt.get("output_tokens")
+        known_input = input_count if isinstance(input_count, int) else 0
+        known_output = output_count if isinstance(output_count, int) else 0
+        summary["input"] += known_input
+        summary["unknown_input_attempts"] += int(input_count is None)
+        summary["output"] += known_output
+        summary[group] += known_input + known_output
+        summary["unknown_output_attempts"] += int(
+            output_count is None and attempt.get("output_token_source") != "not_applicable"
+            and attempt.get("model_type") not in {"embedding", "reranker"})
+        summary["local_fallback_attempts"] += int(
+            attempt.get("input_token_source") == "local" or attempt.get("output_token_source") == "local")
+        summary["partial_output_attempts"] += int(attempt.get("output_completeness") == "partial")
+    summary["total"] = summary["input"] + summary["output"]
+    missing_logs = not Path(logical_dir).is_dir() or bool(unreadable)
+    summary["output_complete"] = not (missing_logs or summary["unknown_output_attempts"] or summary["partial_output_attempts"])
+    summary["stats_complete"] = summary["output_complete"] and not summary["unknown_input_attempts"]
+    summary["total_is_lower_bound"] = not summary["stats_complete"]
+    if unreadable:
+        summary["unreadable_records"] = unreadable
+    return summary
 
 
 def request_model(resource, **kwargs):
@@ -261,15 +356,18 @@ class LogicalCall:
         phase = context.get("phase", "indexing")
         if component.endswith("reranker"):
             phase = "retrieval"
-        category = "agent" if component == "agent" else f"docxindex.{phase}.{component.rsplit('.', 1)[-1]}"
+        backend = "llamaindex" if component.startswith("llamaindex.") else "docxindex"
+        category = "agent" if component == "agent" else f"{backend}.{phase}.{component.rsplit('.', 1)[-1]}"
         criterion_id = context.get("criterion_id")
-        call_source = source or (f"docxindex_{criterion_id}" if criterion_id else f"docxindex_indexing_{component.rsplit('.', 1)[-1]}" if phase == "indexing" else "docxindex")
+        call_source = source or (f"{backend}_{criterion_id}" if criterion_id else f"{backend}_indexing_{component.rsplit('.', 1)[-1]}" if phase == "indexing" else backend)
         stage = stage or context.get("stage") or "model"
         reason = reason if reason is not None else context.get("reason")
         filename = "__".join((_filename_part(call_source), _filename_part(stage), self.logical_call_id))
         self.path = directory.parent / "logical_calls" / f"{filename}.json" if directory and LOGGING_ENABLED else None
         self.payload = {
             "logical_call_id": self.logical_call_id, "category": category,
+            "operation_id": context.get("operation_id"), "criterion_id": criterion_id,
+            "task_id": os.getenv("CONTRACT_TASK_ID"), "worker_pid": os.getpid(),
             "source": call_source, "stage": stage, "reason": str(reason)[:200] if reason else None,
             "model": model, "started_at": _now(),
             "finished_at": None, "status": "pending", "retry_count": 0,
@@ -280,23 +378,43 @@ class LogicalCall:
     def _write(self) -> None:
         self.payload["attempts"] = [
             {key: record.payload.get(key) for key in
-             ("call_id", "status", "sent", "send_number", "http_status", "model_type", "semaphore_key", "budget_seconds",
+             ("call_id", "status", "sent", "sent_at", "started_at", "finished_at", "send_number", "http_status", "model_type", "semaphore_key", "budget_seconds",
               "remaining_seconds", "input_tokens", "output_tokens", "input_output_tokens",
               "failure_stage", "error", "timing", "retry_reason", "retry_delay_seconds",
               "transport", "stream", "first_chunk_seconds", "response_seconds", "stream_complete",
               "timeout_kind", "stream_chunk_count", "content_chars", "reasoning_chars", "tool_chars",
               "first_content_seconds", "last_content_seconds", "max_content_gap_seconds",
-              "finish_reasons", "usage_received", "lease_renewals")}
+              "finish_reasons", "usage_received", "lease_renewals", "done_received", "end_source", "error_response",
+              "local_input_tokens", "received_output_tokens", "service_usage", "tokenizer",
+              "input_token_source", "output_token_source", "output_completeness",
+              "input_token_counts", "max_input_tokens", "input_preparation",
+              "rpm_key", "rpm_count", "max_requests_per_minute", "concurrent_requests", "wait_reason",
+              "rpm_window_count", "concurrency_wait_seconds", "rpm_wait_seconds", "admitted_at",
+              "admitted_at_ms", "acquired_concurrency", "stream_finished_seconds",
+              "input_headroom_tokens", "input_limit_utilization")}
             for record in self.attempt_records
         ]
         sent = [record.payload for record in self.attempt_records if record.payload.get("sent")]
-        self.payload["input_usage_complete"] = all(item.get("input_tokens") is not None for item in sent)
+        self.payload["input_usage_complete"] = all(
+            token_fields(item.get("service_usage"))["input_tokens"] is not None for item in sent)
         self.payload["output_usage_complete"] = all(
-            item.get("output_tokens") is not None or item["component"].endswith("embedding") for item in sent
+            token_fields(item.get("service_usage"))["output_tokens"] is not None
+            or item.get("model_type") in {"embedding", "reranker"}
+            or item["component"].endswith(("embedding", "reranker")) for item in sent
         )
         self.payload["usage_complete"] = self.payload["input_usage_complete"] and self.payload["output_usage_complete"]
         self.payload["known_input_tokens"] = sum(item["input_tokens"] for item in sent if item.get("input_tokens") is not None)
         self.payload["known_output_tokens"] = sum(item["output_tokens"] for item in sent if item.get("output_tokens") is not None)
+        self.payload["input_tokens"] = self.payload["known_input_tokens"] if any(item.get("input_tokens") is not None for item in sent) else None
+        self.payload["output_tokens"] = self.payload["known_output_tokens"] if any(item.get("output_tokens") is not None for item in sent) else None
+        non_text_output = bool(sent) and all(item.get("output_token_source") == "not_applicable" for item in sent)
+        self.payload["input_output_tokens"] = self.payload["input_tokens"] if non_text_output else (
+            self.payload["input_tokens"] + self.payload["output_tokens"]
+            if self.payload["input_tokens"] is not None and self.payload["output_tokens"] is not None else None)
+        self.payload["input_count_complete"] = all(item.get("input_tokens") is not None for item in sent)
+        self.payload["output_count_complete"] = all(
+            item.get("output_tokens") is not None and item.get("output_completeness") == "complete"
+            or item.get("output_token_source") == "not_applicable" for item in sent)
         _atomic_write(self.path, self.payload)
 
     def reject_response(self, exc: BaseException, *, reason: str = "JSON/schema 校验未通过") -> None:
@@ -321,7 +439,7 @@ class LogicalCall:
         http_status = _error_http_status(exc)
         if http_status is None and self.last_record and self.last_record.payload.get("failure_stage") == "output_validation":
             http_status = (self.last_record.payload.get("error") or {}).get("http_status")
-        self.payload.update(status="failed", **token_fields(None), error={
+        self.payload.update(status="failed", error={
             "type": getattr(exc, "error_type", type(exc).__name__),
             "http_status": http_status,
             "message": str(exc)[:200],

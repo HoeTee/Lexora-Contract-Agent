@@ -89,7 +89,7 @@ def _compact_structure(
 
 
 def _split_structure(structure: list[dict[str, Any]], input_tokens: int) -> list[list[dict[str, Any]]]:
-    if estimate_tokens(json.dumps(structure, ensure_ascii=False)) <= input_tokens:
+    if input_tokens is None or estimate_tokens(json.dumps(structure, ensure_ascii=False)) <= input_tokens:
         return [structure]
     chunks: list[list[dict[str, Any]]] = []
     group: list[dict[str, Any]] = []

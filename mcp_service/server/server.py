@@ -195,29 +195,36 @@ async def generate_pdf_report(
 
 # ============ Retrieval Tools ============
 
-async def llamaindex_build_index(docx_path: str, api_events_path: str | None = None) -> str:
+async def llamaindex_build_index(docx_path: str, api_events_path: str | None = None,
+                                log_operation_id: str | None = None) -> str:
     """
     Build a temporary in-memory LlamaIndex index for the current contract.
     This does not persist contract vectors to RAG_persist.
     """
     token = set_model_event_path(api_events_path)
+    call_token = set_call_context(api_events_path, operation_id=log_operation_id, stage="indexing")
     try:
         with redirect_stdout(sys.stderr):
             return await index_retriever.build_contract_llamaindex_index(docx_path)
     finally:
+        reset_call_context(call_token)
         reset_model_event_path(token)
 
 
-async def llamaindex_search(query: str, api_events_path: str | None = None) -> str:
+async def llamaindex_search(query: str, api_events_path: str | None = None,
+                           criterion_id: str | None = None, log_operation_id: str | None = None) -> str:
     """
     Search the temporary in-memory LlamaIndex index for the current contract.
     Must call llamaindex_build_index first in the same workflow run.
     """
     token = set_model_event_path(api_events_path)
+    call_token = set_call_context(api_events_path, operation_id=log_operation_id,
+                                  criterion_id=criterion_id, stage="retrieval")
     try:
         with redirect_stdout(sys.stderr):
             return await index_retriever.search_contract_llamaindex(query)
     finally:
+        reset_call_context(call_token)
         reset_model_event_path(token)
 
 
@@ -294,7 +301,7 @@ async def contract_build_index(
     """Build the configured temporary contract retrieval index."""
     if RETRIEVAL_BACKEND == "docxindex":
         return await docxindex_build_index(docx_path, api_events_path, artifact_dir, log_operation_id)
-    return await llamaindex_build_index(docx_path, api_events_path)
+    return await llamaindex_build_index(docx_path, api_events_path, log_operation_id=log_operation_id)
 
 
 async def contract_search(
@@ -315,7 +322,7 @@ async def contract_search(
             return_metadata=return_metadata,
             log_operation_id=log_operation_id,
         )
-    return await llamaindex_search(query, api_events_path)
+    return await llamaindex_search(query, api_events_path, criterion_id=criterion_id, log_operation_id=log_operation_id)
 
 
 mcp.tool(structured_output=False)(llamaindex_build_index)

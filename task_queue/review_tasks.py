@@ -6,7 +6,7 @@ import time
 from celery import Task
 from config import QUEUE_TASK_TIME_LIMIT_SECONDS
 from endpoints.runtime.model_budget import task_execution
-from endpoints.runtime.llm_semaphore import close_model_clients
+from endpoints.runtime.model_limits import close_model_clients
 
 from endpoints.review.job_worker import run_async_review_job
 from endpoints.review.task_store import read_task
@@ -25,7 +25,9 @@ def run_review_job_task(client_dir: str, task_id: str) -> dict[str, str]:
         finally:
             await close_model_clients()
 
-    with task_execution(time.time() + QUEUE_TASK_TIME_LIMIT_SECONDS, task_id=task_id):
+    deadline = (time.time() + QUEUE_TASK_TIME_LIMIT_SECONDS
+                if QUEUE_TASK_TIME_LIMIT_SECONDS is not None else None)
+    with task_execution(deadline, task_id=task_id):
         asyncio.run(execute())
     task = read_task(client_dir, task_id)
     return {

@@ -29,6 +29,7 @@ from endpoints.review.task_store import (
     task_conversation_log_dir,
     docxindex_state_dir,
     task_mcp_log_file,
+    task_model_token_stats,
     task_review_outputs_path,
     task_trace_path,
     update_task,
@@ -179,6 +180,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
 
         completed = mark_succeeded(
             client_dir, task_id, criteria=result.get("criteria"), summary=result.get("summary"),
+            token_stats=result.get("token_stats"),
         )
         if completed.get("status") != "succeeded":
             return
@@ -191,6 +193,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
                              criteria_count=result.get("criteria_count"),
                              issue_count=result.get("issue_count"),
                              summary=result.get("summary"),
+                             token_stats=completed.get("token_stats"),
                              annotation_stats=result.get("annotation_stats"))
     except Exception as exc:
         try:
@@ -248,6 +251,7 @@ async def run_async_review_job(client_dir: str, task_id: str) -> None:
             error_type=type(exc).__name__,
             error_message=str(exc),
             traceback=traceback.format_exc(),
+            token_stats=task_model_token_stats(client_dir, task_id),
         )
     finally:
         if heartbeat_task is not None:

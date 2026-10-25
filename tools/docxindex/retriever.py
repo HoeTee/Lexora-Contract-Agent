@@ -439,7 +439,7 @@ class DocxIndexRetriever:
         )[: config.semantic.structure_candidate_limit]
         vector_matches: list[dict[str, Any]] = []
         max_selected_nodes = config.semantic.max_selected_nodes
-        vector_triggered = config.vector.enabled and self._vector_index is not None and len(structure_matches) < max_selected_nodes
+        vector_triggered = config.vector.enabled and self._vector_index is not None and (max_selected_nodes is None or len(structure_matches) < max_selected_nodes)
         if vector_triggered:
             vector_matches = vector_search(
                 index,

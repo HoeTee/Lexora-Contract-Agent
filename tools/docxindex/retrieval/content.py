@@ -76,7 +76,7 @@ def _content_units(index: dict[str, Any], candidates: list[dict[str, Any]], inpu
             units.append(item)
             continue
         item_tokens = estimate_tokens(item.get("text") or "")
-        if item_tokens > input_tokens:
+        if input_tokens is not None and item_tokens > input_tokens:
             units.extend(_chunk_oversized_node(index, node, candidate, input_tokens))
         else:
             units.append(item)
@@ -112,7 +112,7 @@ def _paginate_units(units: list[dict[str, Any]], input_tokens: int) -> list[list
     used = 0
     for unit in units:
         tokens = estimate_tokens(unit.get("text") or "")
-        if current and used + tokens > input_tokens:
+        if current and input_tokens is not None and used + tokens > input_tokens:
             pages.append(current)
             current = []
             used = 0

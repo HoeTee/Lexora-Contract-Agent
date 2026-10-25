@@ -50,6 +50,7 @@ def present_review_task(
         "error": task["error"],
         "quality": summarize_criteria(task.get("criteria") or []),
         "summary": task.get("summary"),
+        "token_stats": task.get("token_stats"),
         "criteria": task.get("criteria", []),
         "input": {
             "contract_filename": task["input"]["contract_filename"],

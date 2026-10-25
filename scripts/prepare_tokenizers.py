@@ -2,31 +2,35 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 
 import httpx
 
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = {
-    "bge-m3": ("BAAI/bge-m3", 8192),
-    "bge-reranker-v2-m3": ("BAAI/bge-reranker-v2-m3", 8192),
-    "qwen3-embedding": ("Qwen/Qwen3-Embedding-8B", 32768),
-    "qwen3-reranker": ("Qwen/Qwen3-Reranker-8B", 32768),
-    "qwen3.6-35b-a3b": ("Qwen/Qwen3.6-35B-A3B", 262144),
+    "bge-m3": "BAAI/bge-m3",
+    "bge-reranker-v2-m3": "BAAI/bge-reranker-v2-m3",
+    "qwen3-embedding": "Qwen/Qwen3-Embedding-8B",
+    "qwen3-reranker": "Qwen/Qwen3-Reranker-8B",
+    "qwen3.6-35b-a3b": "Qwen/Qwen3.6-35B-A3B",
+    "deepseek-v4-flash-0731": "deepseek-ai/DeepSeek-V4-Flash-0731",
 }
 FILES = {
     "tokenizer.json", "tokenizer_config.json", "special_tokens_map.json",
     "sentencepiece.bpe.model", "tokenizer.model", "vocab.json", "merges.txt",
-    "added_tokens.json", "chat_template.jinja", "config.json", "LICENSE",
+    "added_tokens.json", "chat_template.jinja", "config.json", "LICENSE", "LICENSE.txt",
+    "encoding/encoding_dsv4.py", "encoding/README.md",
 }
 
 
 def download_one(name: str, destination: Path) -> tuple[str, dict]:
-    repo, context = MODELS[name]
+    repo = MODELS[name]
     manifest_path = destination / "manifest.json"
     existing = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     with httpx.Client(timeout=120, follow_redirects=True) as client:
@@ -43,6 +47,7 @@ def download_one(name: str, destination: Path) -> tuple[str, dict]:
             if filename not in FILES:
                 continue
             target = directory / filename
+            target.parent.mkdir(parents=True, exist_ok=True)
             old = ((existing.get("models", {}).get(name) or {}).get("files") or {}).get(filename)
             if old and target.exists() and sha256(target.read_bytes()).hexdigest() == old["sha256"]:
                 records[filename] = old
@@ -61,7 +66,8 @@ def download_one(name: str, destination: Path) -> tuple[str, dict]:
             print(f"downloaded {name}/{filename}: {len(data)} bytes", flush=True)
         if not {"tokenizer.json", "tokenizer_config.json"} <= records.keys():
             raise RuntimeError(f"Tokenizer files are incomplete for {repo}")
-        return name, {"repository": repo, "revision": revision, "context_tokens": context, "files": records}
+        license_name = (metadata.get("cardData") or {}).get("license")
+        return name, {"repository": repo, "revision": revision, "license": license_name, "files": records}
 
 
 def main() -> None:
@@ -74,8 +80,11 @@ def main() -> None:
         from transformers import AutoTokenizer
 
         manifest = json.loads((args.destination / "manifest.json").read_text(encoding="utf-8"))
+        fallback = gzip.decompress((args.destination / "cl100k_base.tiktoken.gz").read_bytes())
+        if sha256(fallback).hexdigest() != "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7":
+            raise RuntimeError("Offline cl100k_base tokenizer checksum mismatch")
         if set(manifest["models"]) != set(MODELS):
-            raise RuntimeError("Offline manifest must contain all five required models")
+            raise RuntimeError("Offline manifest must contain all six required models")
         for name, entry in manifest["models"].items():
             directory = args.destination / name
             for filename, expected in entry["files"].items():
@@ -83,12 +92,14 @@ def main() -> None:
                     raise RuntimeError(f"Tokenizer checksum mismatch: {name}/{filename}")
             tokenizer = AutoTokenizer.from_pretrained(directory, local_files_only=True, use_fast=True,
                                                         trust_remote_code=False)
-            ids = tokenizer.encode("合同运输费用由甲方承担。 Test 123!", add_special_tokens=True)
+            ids = tokenizer.encode("合同运输费用由甲方承担。 Test 123!", add_special_tokens=True, truncation=False)
             if not ids:
                 raise RuntimeError(f"Tokenizer returned no tokens: {name}")
             print(json.dumps({"model": name, "revision": entry["revision"], "test_tokens": len(ids)}), flush=True)
         return
     args.destination.mkdir(parents=True, exist_ok=True)
+    fallback_source = ROOT / "tools" / "docxindex" / "assets" / "cl100k_base.tiktoken.gz"
+    shutil.copyfile(fallback_source, args.destination / "cl100k_base.tiktoken.gz")
     with ThreadPoolExecutor(max_workers=3) as pool:
         models = dict(pool.map(lambda name: download_one(name, args.destination), MODELS))
     manifest = {"version": 1, "models": models}

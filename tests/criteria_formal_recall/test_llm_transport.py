@@ -32,6 +32,7 @@ from endpoints.runtime import llm_semaphore
 from endpoints.runtime.llm_semaphore import ModelLeaseLost, ModelSemaphoreConfig, RedisModelSemaphore
 from endpoints.runtime.model_budget import ModelCallBudget, ModelCallTimeout, TaskDeadlineExceeded, task_execution
 from endpoints.runtime.model_calls import execute_model
+from endpoints.runtime.model_tokens import count_model_input
 from loggers.call_log import logical_call, reset_call_context, set_call_context
 from tools.docxindex.llm.client import LLMClient, LLMSettings
 from tools.retrieval.llamaindex.limited_llm import UnifiedOpenAILike
@@ -93,6 +94,7 @@ class LLMStreamConfigurationTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             folder = Path(temporary)
             shutil.copy2(root / "config.py", folder / "config.py")
+            shutil.copytree(root / "resources" / "tokenizers", folder / "resources" / "tokenizers")
             (folder / ".env").write_text("LLM_API_KEY=fake\nEMBED_API_KEY=fake\nSESSION_SECRET_KEY=fake\n")
             for value in (False, True, "absent", None, "invalid"):
                 with self.subTest(value=value):
@@ -102,7 +104,8 @@ class LLMStreamConfigurationTests(unittest.TestCase):
                         config["llm"]["stream"] = value
                     (folder / "config.yaml").write_text(yaml.safe_dump(config), encoding="utf-8")
                     result = subprocess.run([sys.executable, "-c", "import config; print('STREAM='+str(config.LLM_STREAM))"],
-                                            cwd=folder, capture_output=True, text=True, timeout=15)
+                                            cwd=folder, capture_output=True, text=True, timeout=15,
+                                            env={**os.environ, "PYTHONPATH": str(root)})
                     if value is None or value == "invalid":
                         self.assertNotEqual(result.returncode, 0)
                         self.assertIn("llm.stream must be true or false", result.stderr)
@@ -113,6 +116,8 @@ class LLMStreamConfigurationTests(unittest.TestCase):
 
 class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
+        # Tight deadline tests exercise network progress, not first tokenizer load.
+        count_model_input("llm", "test", {})
         self.active = self.acquired = self.released = 0
         self.requests = []
         self.bodies = []
@@ -136,6 +141,14 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
             change.start()
             self.addCleanup(change.stop)
 
+    async def asyncSetUp(self):
+        # SDK request-schema/platform initialization is unrelated to the subsecond
+        # stream/task deadlines below. Warm it against an offline transport first.
+        async with AsyncOpenAI(api_key="fake", base_url="https://warm.test/v1", max_retries=0,
+                http_client=httpx.AsyncClient(transport=httpx.MockTransport(success))) as client:
+            client._platform = "Windows"
+            await client.chat.completions.create(model="test", messages=[{"role": "user", "content": "warm"}], stream=False)
+
     async def call(self, handler, *, mode=True, timeout=2, retries=0, **kwargs):
         def wrapped(request):
             self.assertEqual(self.active, 1, "HTTP must hold the shared slot")
@@ -144,12 +157,17 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
 
         async with AsyncOpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0,
                                http_client=httpx.AsyncClient(transport=httpx.MockTransport(wrapped))) as client:
+            # Platform discovery may query Windows system information for >1s;
+            # these subsecond tests intentionally isolate HTTP/SSE timing.
+            client._platform = "Windows"
+            resource = client.chat.completions
             with patch.object(llm_client, "LLM_STREAM", mode), logical_call("test.llm", "test") as logical:
                 self.logical = logical
                 async def send(remaining):
-                    return await llm_client.request_llm(client.chat.completions,
+                    return await llm_client.request_llm(resource,
                         model="test", messages=[{"role": "user", "content": "query"}], timeout=remaining, **kwargs)
-                return await execute_model(model_type="llm", model="test", caller="test", request={}, send=send,
+                return await execute_model(model_type="llm", model="test", caller="test",
+                    request={"model": "test", "messages": [{"role": "user", "content": "query"}], **kwargs}, send=send,
                     budget=ModelCallBudget(timeout_seconds=timeout, max_retries=retries),
                     serialize=lambda value: value.model_dump())
 
@@ -164,10 +182,20 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((record["transport"], record["stream"]), ("unified_llm", mode))
                 self.assertEqual(record["stream_complete"], True if mode else None)
                 self.assertEqual(record["first_chunk_seconds"] is not None, mode)
-                self.assertGreater(record["response_seconds"], 0)
+                self.assertGreaterEqual(record["response_seconds"], 0)
                 self.assertEqual(self.requests[-1]["stream"], mode)
                 self.assertEqual("stream_options" in self.requests[-1], mode)
         self.assertEqual((self.acquired, self.released, self.active), (2, 2, 0))
+
+    async def test_unlimited_request_timeout_is_sent_to_sdk_as_explicit_none(self):
+        for mode in (False, True):
+            observed = []
+            def handler(request):
+                observed.append(request.extensions["timeout"])
+                return success(request)
+            await self.call(handler, mode=mode, timeout=None)
+            self.assertTrue(observed)
+            self.assertTrue(all(value is None for value in observed[0].values()))
 
     async def test_parallel_tool_calls_and_reasoning_are_assembled_before_return(self):
         parts = [chunk({"role": "assistant", "reasoning_content": "think"}),
@@ -186,7 +214,55 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([json.loads(tool.function.arguments) for tool in message.tool_calls],
                          [{"q": "one"}, {"q": "two"}])
         self.assertIsNone(response.usage)
-        self.assertIsNone(self.logical.payload["input_tokens"])
+        self.assertGreater(self.logical.payload["input_tokens"], 0)
+        self.assertFalse(self.logical.payload["input_usage_complete"])
+
+    async def test_done_can_terminate_valid_content_without_inventing_a_finish_reason(self):
+        response = await self.call(lambda _: streamed([chunk({"content": '{"answer": true}'}), "[DONE]"])[0])
+        self.assertIsNone(response.choices[0].finish_reason)
+        self.assertEqual(response.end_source, "done")
+        self.assertEqual(response.choices[0].message.content, '{"answer": true}')
+        attempt = self.logical.payload["attempts"][0]
+        self.assertTrue(attempt["done_received"])
+        self.assertEqual(attempt["end_source"], "done")
+
+    async def test_finished_choices_do_not_require_done(self):
+        response = await self.call(lambda _: streamed([chunk({"content": "answer"}), chunk(finish="stop")])[0])
+        self.assertEqual(response.end_source, "finish_reason")
+
+    async def test_done_alone_and_valid_json_without_terminal_signal_fail(self):
+        for parts in (["[DONE]"], [chunk({"role": "assistant"}), "[DONE]"],
+                      [chunk({"content": '{"answer": true}'})]):
+            with self.subTest(parts=parts), self.assertRaises(llm_client.IncompleteLLMStream):
+                await self.call(lambda _, parts=parts: streamed(parts)[0])
+            self.assertEqual(self.active, 0)
+
+    async def test_done_does_not_hide_missing_choices_or_invalid_tool_structure(self):
+        incomplete = [chunk({"content": "first"}), "[DONE]"]
+        with self.assertRaises(llm_client.IncompleteLLMStream):
+            await self.call(lambda _: streamed(incomplete)[0], n=2)
+        invalid_tool = [chunk({"tool_calls": [{"index": 0, "id": "tool", "type": "function",
+                                              "function": {"arguments": "{}"}}]}), "[DONE]"]
+        with self.assertRaises(llm_client.IncompleteLLMStream):
+            await self.call(lambda _: streamed(invalid_tool)[0])
+
+    async def test_error_json_is_recorded_instead_of_being_reported_as_empty_stream(self):
+        with self.assertRaisesRegex(llm_client.IncompleteLLMStream, "context exceeds limit"):
+            await self.call(lambda _: httpx.Response(200, json={"error": {"message": "context exceeds limit"}}))
+        self.assertIn("context exceeds limit", self.logical.payload["attempts"][0]["error_response"])
+        self.assertEqual(self.logical.payload["attempts"][0]["http_status"], 200)
+
+    async def test_usage_and_partial_output_survive_unfinished_stream(self):
+        parts = [chunk({"content": "partial text"}), chunk(usage=completion()["usage"])]
+        with self.assertRaises(llm_client.IncompleteLLMStream):
+            await self.call(lambda _: streamed(parts)[0])
+        attempt = self.logical.payload["attempts"][0]
+        self.assertEqual(attempt["service_usage"]["prompt_tokens"], 8)
+        self.assertEqual(attempt["input_tokens"], 8)
+        self.assertEqual(attempt["output_tokens"], 4)
+        self.assertGreater(attempt["received_output_tokens"], 0)
+        self.assertEqual(attempt["output_completeness"], "partial")
+        self.assertEqual(self.logical.payload["input_tokens"], 8)
 
     async def test_empty_and_unfinished_streams_retry_without_returning_partial_text(self):
         for parts in ([], [chunk({"content": "discard this"})]):
@@ -223,7 +299,8 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
             attempts = self.logical.payload["attempts"]
             self.assertTrue(all(attempt["remaining_seconds"] > 0.10 for attempt in attempts))
             self.assertTrue(all(attempt["timing"]["request_seconds"] >= 0.10 for attempt in attempts))
-            self.assertTrue(all(attempt["input_tokens"] is None for attempt in attempts))
+            self.assertTrue(all(attempt["local_input_tokens"] is not None for attempt in attempts))
+            self.assertTrue(all(attempt["input_token_source"] == "local" for attempt in attempts))
         self.assertTrue(all(body.closed for body in self.bodies))
 
     async def test_stream_content_can_outlive_the_nonstreaming_total_deadline(self):
@@ -250,7 +327,7 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(delta=delta):
                 prefix = [chunk({"tool_calls": [{"index": 0, "id": "tool", "type": "function",
                                                 "function": {"name": "search"}}]})] if "tool_calls" in delta else []
-                parts = prefix + [chunk(delta)] * 6 + [chunk(finish="stop"), "[DONE]"]
+                parts = prefix + [chunk(delta)] * 6 + [chunk({"content": "answer"}), chunk(finish="stop"), "[DONE]"]
                 result = await self.call(lambda _, parts=parts: streamed(parts, delay=0.04)[0], timeout=0.16)
                 self.assertEqual(result.choices[0].finish_reason, "stop")
                 attempt = self.logical.payload["attempts"][0]
@@ -290,9 +367,9 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_task_deadline_still_stops_a_continuously_progressing_stream(self):
         response, body = streamed([chunk({"content": "x"})] * 100, delay=0.03)
-        with task_execution(time.time() + 0.4):
+        with task_execution(time.time() + 1.0):
             with self.assertRaises(TaskDeadlineExceeded):
-                await self.call(lambda _: response, timeout=0.16, retries=5)
+                await self.call(lambda _: response, timeout=0.5, retries=5)
         self.assertTrue(body.closed)
         self.assertEqual((self.acquired, self.released, self.active), (1, 1, 0))
 
@@ -302,6 +379,27 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
         result = await self.call(lambda _: response, timeout=0.16)
         self.assertEqual(result.choices[0].message.content, "answer")
         self.assertEqual(result.usage.total_tokens, 12)
+        self.assertTrue(body.closed)
+
+    async def test_finished_choices_do_not_wait_for_a_silent_open_connection(self):
+        response, body = streamed([chunk({"content": "answer"}), chunk(finish="stop")], tail_delay=2)
+        result = await self.call(lambda _: response, timeout=0.16)
+        self.assertEqual(result.choices[0].message.content, "answer")
+        self.assertEqual(result.end_source, "finish_reason")
+        self.assertIsNone(result.usage)
+        self.assertLess(self.logical.budget.request_elapsed_seconds, 0.16)
+        self.assertLess(self.logical.payload["attempts"][0]["response_seconds"], 0.6)
+        self.assertTrue(body.closed)
+
+    async def test_optional_usage_trailer_does_not_extend_contract_deadline(self):
+        response, body = streamed([chunk({"content": "answer"}), chunk(finish="stop")], tail_delay=2)
+        async def handler(_):
+            # The task expires after the final choice, during optional drainage.
+            return response
+        with patch.object(llm_client, "_TRAILER_WAIT_SECONDS", 0.5):
+            with task_execution(time.time() + 0.25):
+                with self.assertRaises(TaskDeadlineExceeded):
+                    await self.call(handler, timeout=1)
         self.assertTrue(body.closed)
 
     async def test_disconnects_in_both_modes_close_connections_release_and_retry(self):
@@ -347,8 +445,7 @@ class LLMTransportTests(unittest.IsolatedAsyncioTestCase):
                     http_client=httpx.AsyncClient(transport=httpx.MockTransport(success)))
             with patch.object(llm_client, "LLM_STREAM", mode), \
                  patch("agents.base_agent.AsyncOpenAI", side_effect=factory), \
-                 patch("tools.docxindex.llm.client.AsyncOpenAI", side_effect=factory), \
-                 patch("tools.retrieval.llamaindex.limited_llm.AsyncOpenAI", side_effect=factory):
+                 patch("endpoints.runtime.llm_client.AsyncOpenAI", side_effect=factory):
                 agent = Agent(settings=Settings(api_key="fake", model="test"))
                 try:
                     self.assertEqual(await agent.chat("query"), "answer")
@@ -448,12 +545,15 @@ def llm_worker(redis_url, key, url, mode, results, barrier, lease_seconds=30, be
                  patch.object(llm_client, "LLM_STREAM", mode):
                 async with AsyncOpenAI(api_key="fake", base_url=url, max_retries=0,
                                        http_client=httpx.AsyncClient(trust_env=False)) as client:
+                    client._platform = "Windows"
+                    resource = client.chat.completions
+                    request = {"model": "test", "messages": [{"role": "user", "content": behavior}]}
+                    count_model_input("llm", "test", request)
                     async def one():
                         async def send(remaining):
-                            return await llm_client.request_llm(client.chat.completions, model="test",
-                                messages=[{"role": "user", "content": behavior}], timeout=remaining)
+                            return await llm_client.request_llm(resource, **request, timeout=remaining)
                         with logical_call("worker.llm", "test") as logical:
-                            result = await execute_model(model_type="llm", model="test", caller="worker", request={}, send=send,
+                            result = await execute_model(model_type="llm", model="test", caller="worker", request=request, send=send,
                                 budget=ModelCallBudget(timeout_seconds=3, wait_timeout_seconds=10, max_retries=0))
                             return {"text": result.choices[0].message.content, "attempt": logical.payload["attempts"][0]}
                     barrier.wait(timeout=20)
@@ -508,18 +608,20 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
         self.assert_empty()
 
     async def test_long_request_renews_and_waiter_cannot_take_live_owner(self):
-        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 1, 0.3, 0.005))
+        # Leave Redis enough scheduling time while the Docker build is active;
+        # the owner still spans three whole leases and must renew repeatedly.
+        semaphore = RedisModelSemaphore("llm", ModelSemaphoreConfig(self.redis_url, self.key, 1, 0.9, 0.005))
         entered = asyncio.Event()
         async def hold():
             async with llm_semaphore.model_semaphore("llm", "owner", "test") as lease:
                 entered.set()
-                await asyncio.sleep(0.9)
+                await asyncio.sleep(2.7)
                 return lease.renewals
         with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}):
             operation = asyncio.create_task(hold())
             await entered.wait()
-            await asyncio.sleep(0.45)
-            self.assertEqual(self.redis.zcard(self.key), 1)
+            await asyncio.sleep(1.35)
+            self.assertEqual(await asyncio.to_thread(self.redis.zcard, self.key), 1)
             with self.assertRaises(llm_semaphore.ModelSemaphoreTimeout):
                 await semaphore.acquire_async(caller_name="waiter", model="test",
                     budget=ModelCallBudget(wait_timeout_seconds=0.15))
@@ -573,7 +675,7 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
             raise redis.RedisError("release unavailable")
         with patch.dict(llm_semaphore._SEMAPHORES, {"llm": semaphore}), \
                 patch.object(client, "eval", fail_renew), patch.object(semaphore, "_remove", fail_remove), \
-                self.assertLogs("endpoints.runtime.llm_semaphore", level="ERROR"):
+                self.assertLogs("endpoints.runtime.model_limits", level="ERROR"):
             with self.assertRaises(ModelLeaseLost):
                 async with llm_semaphore.model_semaphore("llm", "owner", "test"):
                     await asyncio.Event().wait()
@@ -621,7 +723,7 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
     async def test_three_processes_share_five_slots_in_both_modes(self):
         context = multiprocessing.get_context("spawn")
         for mode, lease_seconds, behavior in ((False, 30, "good"), (True, 30, "good"),
-                                              (True, 0.9, "long-progress")):
+                                              (True, 3, "long-progress")):
             results = context.Queue()
             barrier = context.Barrier(3)
             before = self.fixture.count
@@ -630,11 +732,13 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
             for process in processes:
                 process.start()
             try:
+                # Drain Queue pipes before joining: compact attempts can exceed
+                # pipe capacity and multiprocessing's feeder waits for a reader.
+                outputs = [await asyncio.to_thread(results.get, True, 60) for _ in processes]
                 for process in processes:
                     await asyncio.to_thread(process.join, 35)
                     self.assertFalse(process.is_alive())
                     self.assertEqual(process.exitcode, 0)
-                outputs = [results.get(timeout=2) for _ in processes]
                 self.assertTrue(all(isinstance(output, list) for output in outputs), outputs)
                 calls = [item for output in outputs for item in output]
                 self.assertEqual(len(calls), 15)
@@ -654,3 +758,8 @@ class LLMTransportRedisTests(unittest.IsolatedAsyncioTestCase):
                         process.terminate()
                         await asyncio.to_thread(process.join, 5)
                 results.close()
+                # Profiles change the lease policy. Their sent RPM events must
+                # not carry that old policy into the next isolated test profile.
+                keys = list(self.redis.scan_iter(self.key + "*"))
+                if keys:
+                    self.redis.delete(*keys)

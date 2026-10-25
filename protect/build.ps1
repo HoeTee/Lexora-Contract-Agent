@@ -76,7 +76,7 @@ try {
         throw "Offline model tokenizer self-test failed for image: $Tag"
     }
 
-    Write-Output "Built protected image with all five offline model tokenizers: $Tag"
+    Write-Output "Built protected image with all six offline model tokenizers: $Tag"
 }
 finally {
     if ($temporaryKey -and (Test-Path -LiteralPath $temporaryKey)) {

@@ -20,7 +20,7 @@ async def run(
     route_json: str | None,
     route_base64: str | None,
 ) -> None:
-    client = MinimalMCPClient("module:mcp_service.server.server")
+    client = MinimalMCPClient("module:mcp_service.server.stdio_entry")
     await client.connect()
     try:
         result = await client.call_tool("docxindex_build_index", {"docx_path": docx_path})

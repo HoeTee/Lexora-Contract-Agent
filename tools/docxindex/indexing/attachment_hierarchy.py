@@ -332,7 +332,7 @@ def _infer_profile(
         max_levels,
         inside_attachment=inside_attachment,
     )
-    if estimate_tokens(prompt) <= input_max_tokens:
+    if input_max_tokens is None or estimate_tokens(prompt) <= input_max_tokens:
         return _infer_profile_batch(
             node,
             candidates,

@@ -49,7 +49,7 @@ def vector_search(
             }
     scored = list(by_node.values())
     scored.sort(key=lambda item: item["score"], reverse=True)
-    limit = top_k or VECTOR_INTERNAL_CANDIDATE_LIMIT
+    limit = top_k
     result = []
     used = 0
     for item in scored[:limit]:

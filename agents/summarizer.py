@@ -8,7 +8,6 @@ from copy import deepcopy
 from pydantic import ValidationError
 
 from agents.base_agent import Agent, estimate_chat_prompt_tokens
-from config import MAX_PROMPT_TOKENS
 from agents.json_utils import chat_until_valid_json
 from agents.prompts import get_prompt, render_prompt
 from agents.schemas import SummaryContentOutput, SummaryDuplicateGroup, SummaryOutput
@@ -16,8 +15,6 @@ from agents.schemas import SummaryContentOutput, SummaryDuplicateGroup, SummaryO
 
 SUMMARIZER_SYSTEM_PROMPT = get_prompt("SUMMARIZER_SYSTEM_PROMPT")
 SUMMARY_EXPECTED_JSON = get_prompt("SUMMARY_EXPECTED_JSON")
-
-SUMMARIZER_MAX_PROMPT_TOKENS = MAX_PROMPT_TOKENS
 
 
 def _normalize_user_facing_text(value: str) -> str:

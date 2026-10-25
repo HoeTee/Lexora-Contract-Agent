@@ -18,9 +18,9 @@ from tools.docxindex.vector.search import vector_search
 
 
 class ChunkedModelInputTests(unittest.TestCase):
-    def test_all_five_tokenizers_are_versioned_local_native_resources(self):
+    def test_all_six_tokenizers_are_versioned_local_native_resources(self):
         manifest = json.loads((TOKENIZER_ROOT / "manifest.json").read_text(encoding="utf-8"))
-        self.assertEqual(len(manifest["models"]), 5)
+        self.assertEqual(len(manifest["models"]), 6)
         for model in manifest["models"]:
             with self.subTest(model=model):
                 tokenizer = model_tokenizer(model)
@@ -47,10 +47,11 @@ class ChunkedModelInputTests(unittest.TestCase):
                         else:
                             self.assertLessEqual(model_tokenizer(model).count_text(text[current.start:previous.end]), overlap)
 
-    def test_native_model_capacity_remains_a_ceiling_when_config_is_40k(self):
-        self.assertEqual(model_tokenizer("bge-m3").effective_limit(40000), 8192)
-        self.assertEqual(model_tokenizer("qwen3-reranker").effective_limit(40000), 32768)
+    def test_only_explicit_configuration_controls_the_input_limit(self):
+        self.assertEqual(model_tokenizer("bge-m3").effective_limit(40000), 40000)
+        self.assertEqual(model_tokenizer("qwen3-reranker").effective_limit(40000), 40000)
         self.assertEqual(model_tokenizer("bge-m3").effective_limit(1024), 1024)
+        self.assertIsNone(model_tokenizer("bge-m3").effective_limit(None))
 
     def test_build_keeps_original_node_and_embeds_its_last_piece(self):
         node = {"node_id": "N001", "node_type": "paragraph", "title": "运输", "summary": "费用承担",

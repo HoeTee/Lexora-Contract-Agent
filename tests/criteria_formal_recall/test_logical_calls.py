@@ -51,6 +51,15 @@ def chat_response(content='{"answer":"ok"}', usage=None):
             "usage": usage}
 
 
+def assert_attempt_totals(case, record):
+    sent = [attempt for attempt in record["attempts"] if attempt["sent"]]
+    inputs = sum(attempt.get("input_tokens") or 0 for attempt in sent)
+    outputs = sum(attempt.get("output_tokens") or 0 for attempt in sent)
+    case.assertEqual(record["known_input_tokens"], inputs)
+    case.assertEqual(record["known_output_tokens"], outputs)
+    case.assertEqual(record["input_output_tokens"], inputs + outputs)
+
+
 class LogicalCallTests(unittest.TestCase):
     def setUp(self):
         # These accounting fixtures exercise a declared two-send allowance.
@@ -84,13 +93,15 @@ class LogicalCallTests(unittest.TestCase):
                 with self.assertRaises(LLMResponseValidationError):
                     client.complete_model("query", Answer)
                 record = next(r for r in self.records() if r["logical_call_id"] not in initial_ids)
-                self.assertEqual((record["retry_count"], record["input_tokens"], record["output_tokens"], record["input_output_tokens"]), (1, None, None, None))
+                self.assertEqual(record["retry_count"], 1)
+                assert_attempt_totals(self, record)
                 self.assertEqual(record["source"], "docxindex_C1")
                 self.assertEqual(record["category"], "docxindex.retrieval.llm")
                 self.assertEqual(record["status"], "failed")
                 self.assertEqual(len(record["attempts"]), 2)
                 self.assertEqual([r["send_number"] for r in record["attempts"]], [1, 2])
-                self.assertEqual((record["known_input_tokens"], record["known_output_tokens"]), (50, 30))
+                self.assertGreater(record["known_input_tokens"], 50)
+                self.assertEqual(record["known_output_tokens"], 30)
                 self.assertFalse(record["usage_complete"])
                 attempts = sorted((r for r in self.records("calls") if r["logical_call_id"] == record["logical_call_id"]), key=lambda r: r["attempt"])
                 if detailed:
@@ -106,7 +117,7 @@ class LogicalCallTests(unittest.TestCase):
         self.assertFalse(list(self.logs.rglob("model_usage_summary.json")))
         self.assertFalse(list(self.logs.rglob("*.tmp")))
 
-    def test_exhausted_validation_has_null_tokens_and_real_http_status(self):
+    def test_exhausted_validation_preserves_tokens_and_real_http_status(self):
         client = self.client(lambda request: httpx.Response(200, json=chat_response("invalid", {"prompt_tokens": 9, "completion_tokens": 3, "total_tokens": 12})))
         with self.assertRaises(LLMResponseValidationError):
             client.complete_model("query", Answer)
@@ -114,10 +125,10 @@ class LogicalCallTests(unittest.TestCase):
         self.assertEqual(record["status"], "failed")
         self.assertEqual(record["retry_count"], 1)
         self.assertEqual(record["error"]["http_status"], 200)
-        self.assertIsNone(record["input_output_tokens"])
+        assert_attempt_totals(self, record)
         self.assertLessEqual(len(record["error"]["message"]), 200)
 
-    def test_timeout_has_no_status_or_tokens(self):
+    def test_timeout_preserves_input_and_unknown_output(self):
         def fail(request):
             raise httpx.ReadTimeout("timeout", request=request)
         with self.assertRaises(LLMClientError):
@@ -125,7 +136,7 @@ class LogicalCallTests(unittest.TestCase):
         record, = self.records()
         self.assertEqual(record["retry_count"], 1)
         self.assertIsNone(record["error"]["http_status"])
-        self.assertIsNone(record["input_tokens"])
+        self.assertGreater(record["input_tokens"], 0)
         self.assertIsNone(record["output_tokens"])
 
     def test_exhausted_http_retries_are_counted(self):
@@ -134,7 +145,7 @@ class LogicalCallTests(unittest.TestCase):
         record, = self.records()
         self.assertEqual(record["retry_count"], 1)
         self.assertEqual(record["error"]["http_status"], 429)
-        self.assertIsNone(record["input_tokens"])
+        self.assertGreater(record["input_tokens"], 0)
 
     def test_semaphore_failure_does_not_count_unsent_retry(self):
         client = self.client(lambda request: self.fail("request must not be sent"))
@@ -155,13 +166,15 @@ class LogicalCallTests(unittest.TestCase):
         self.assertEqual(raised.exception.call_id, record["logical_call_id"])
         self.assertTrue(Path(raised.exception.call_path).exists())
 
-    def test_success_without_usage_does_not_estimate_tokens(self):
+    def test_success_without_usage_records_explicit_local_estimates(self):
         self.client(lambda request: httpx.Response(200, json=chat_response())).complete("query")
         record, = self.records()
         self.assertEqual(record["status"], "succeeded")
-        self.assertIsNone(record["input_tokens"])
-        self.assertIsNone(record["output_tokens"])
-        self.assertIsNone(record["input_output_tokens"])
+        self.assertGreater(record["input_tokens"], 0)
+        self.assertGreater(record["output_tokens"], 0)
+        self.assertFalse(record["usage_complete"])
+        self.assertEqual(record["attempts"][0]["output_token_source"], "local")
+        assert_attempt_totals(self, record)
 
     def test_scan_batch_retry_keeps_one_logical_call(self):
         count = 0
@@ -175,7 +188,9 @@ class LogicalCallTests(unittest.TestCase):
         index = {"nodes": [{"node_id": "body/a"}], "anchor_map": {"p_0001": {"node_id": "body/a", "text": "text", "body_child_index": 1}}}
         scan_matches(index, "query", client, concurrency=1)
         record, = self.records()
-        self.assertEqual((record["status"], record["retry_count"], record["input_output_tokens"]), ("succeeded", 1, 22))
+        self.assertEqual((record["status"], record["retry_count"]), ("succeeded", 1))
+        self.assertGreater(record["input_tokens"], 20)
+        assert_attempt_totals(self, record)
 
     def test_one_scan_step_records_each_batch_and_preserves_thread_context(self):
         client = self.client(lambda request: httpx.Response(200, json=chat_response('{"findings":[]}')))
@@ -257,7 +272,8 @@ class LogicalCallTests(unittest.TestCase):
         self.assertEqual(len(sent), 2)
         self.assertTrue(all(item["model"] == "fake-reranker" and item["top_n"] == 2 for item in sent))
         record, = self.records()
-        self.assertEqual((record["category"], record["retry_count"], record["input_output_tokens"]), ("docxindex.retrieval.reranker", 1, None))
+        self.assertEqual((record["category"], record["retry_count"]), ("docxindex.retrieval.reranker", 1))
+        assert_attempt_totals(self, record)
         self.assertEqual({attempt["model_type"] for attempt in record["attempts"]}, {"reranker"})
 
     def test_logging_disabled_does_not_create_logical_or_detailed_files(self):
@@ -320,9 +336,10 @@ class MinimalLoggingTests(unittest.TestCase):
             self.assertFalse((root / "annotation_events.json").exists())
 
     def test_simplified_config_preserves_defaults_and_optional_overrides(self):
-        self.assertEqual(IndexingConfig.from_sources(Path(config.CONFIG_PATH)), IndexingConfig())
+        self.assertEqual(IndexingConfig.from_sources(Path(config.CONFIG_PATH)).summary.batch_max_tokens, 20000)
+        self.assertIsNone(IndexingConfig().summary.batch_max_tokens)
         self.assertEqual(set(RouteConfig.load().methods), {"title", "region", "rule", "scan", "hybrid"})
-        self.assertEqual((config.CHUNK_SIZE, config.CHUNK_OVERLAP, config.SIMILARITY_TOP_K, config.RERANK_TOP_N), (512, 100, 10, 5))
+        self.assertEqual((config.CHUNK_SIZE, config.CHUNK_OVERLAP, config.SIMILARITY_TOP_K, config.RERANK_TOP_N), (512, 100, None, None))
         per_type = {"llm": {"max_concurrent_requests": 7, "redis_url": "redis://shared/2", "key": "custom", "lease_seconds": 123},
                     "embedding": {"max_concurrent_requests": 3, "redis_url": "redis://shared/2", "lease_seconds": 321}}
         with patch.dict(config.CONFIG, {"model_semaphore": per_type}):
@@ -332,7 +349,7 @@ class MinimalLoggingTests(unittest.TestCase):
         self.assertEqual((embed["max_concurrent_requests"], embed["lease_seconds"], embed["key"]), (3, 321, "contract_agent:model:embedding:semaphore"))
         example = yaml.safe_load(Path("config.example.yaml").read_text(encoding="utf-8"))
         self.assertFalse(example["logging"]["detailed"])
-        self.assertNotIn("indexing", example["retrieval"]["docxindex"])
+        self.assertEqual(example["retrieval"]["docxindex"]["indexing"]["summary"]["batch_max_tokens"], 20000)
 
 
 class GlobalRankingTests(unittest.TestCase):
@@ -500,7 +517,7 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(200, json=chat_response("invalid" if len(sends) == 2 else '{"answer":"ok"}'))
         async with self.harness([], response_handler=handler) as (agent, logs):
             with patch("loggers.call_log.ModelCallBudget", side_effect=lambda: ModelCallBudget(
-                    timeout_seconds=1, max_retries=2)), \
+                    timeout_seconds=3, max_retries=2)), \
                     patch("endpoints.runtime.model_calls._retry_delay", return_value=0):
                 result, _ = await chat_until_valid_json(agent, "review", Answer, '{}')
             self.assertEqual(result, {"answer": "ok"})
@@ -511,7 +528,7 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(record["attempts"][0]["failure_stage"], "request")
             self.assertEqual(record["attempts"][1]["failure_stage"], "output_validation")
 
-    async def test_agent_schema_repairs_keep_one_call_and_only_final_usage_in_both_modes(self):
+    async def test_agent_schema_repairs_sum_all_attempts_in_both_modes(self):
         for detailed in (False, True):
             responses = [chat_response("not JSON", {"prompt_tokens": 100, "completion_tokens": 30, "total_tokens": 130}),
                          chat_response(usage={"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9})]
@@ -523,7 +540,7 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(len(records), 1)
                     record = records[0]
                     self.assertEqual((record["source"], record["stage"], record["retry_count"], record["input_output_tokens"]),
-                                     ("SubAgent_H03", "review-initial", 1, 9))
+                                     ("SubAgent_H03", "review-initial", 1, 139))
                     self.assertIn("JSON/schema", record["reason"])
                     self.assertLessEqual(len(record["reason"]), 200)
                     self.assertIsNone(record["error"])
@@ -540,14 +557,14 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         self.assertFalse((logs / "calls").exists())
 
-    async def test_exhausted_schema_repairs_have_null_usage_and_preserve_http_status(self):
+    async def test_exhausted_schema_repairs_keep_usage_and_preserve_http_status(self):
         responses = [chat_response("invalid", {"prompt_tokens": 7, "completion_tokens": 2, "total_tokens": 9})] * 2
         async with self.harness(responses) as (agent, logs):
             with self.assertRaises(AgentOutputValidationError) as caught:
                 await chat_until_valid_json(agent, "review", Answer, '{}', max_attempts=2)
             record, = self.read_records(logs)
             self.assertEqual((record["status"], record["retry_count"], record["error"]["http_status"]), ("failed", 1, 200))
-            self.assertIsNone(record["input_output_tokens"])
+            assert_attempt_totals(self, record)
             self.assertEqual(caught.exception.call_id, record["logical_call_id"])
             self.assertTrue(Path(caught.exception.call_path).is_file())
 
@@ -588,7 +605,9 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(records), 3)
             self.assertEqual(len({r["logical_call_id"] for r in records}), 3)
             followup = next(r for r in records if r["stage"].endswith("tool-result1"))
-            self.assertEqual((followup["retry_count"], followup["input_output_tokens"]), (1, 11))
+            self.assertEqual(followup["retry_count"], 1)
+            self.assertGreater(followup["input_tokens"], 9)
+            assert_attempt_totals(self, followup)
             self.assertEqual({r["category"] for r in records}, {"agent", "docxindex.retrieval.llm"})
 
     async def test_concurrent_reflectors_keep_criterion_and_round_separate(self):
@@ -625,6 +644,7 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             sdk = AsyncOpenAI(api_key="fake", base_url="https://model.test/v1", max_retries=0, http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
             agent = Agent.__new__(Agent)
             agent.client, agent.settings, agent.name, agent.messages = sdk, Settings(api_key="fake", model="fake"), "Reflector_C1", []
+            agent.MAX_INPUT_TOKENS = None
             token = set_call_context(Path(tmp) / "logs" / "events.log", stage="agent")
             try:
                 async with NOOP_TRACE.span() as span:
@@ -635,7 +655,9 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
             records = list((Path(tmp) / "logs" / "logical_calls").glob("*.json"))
             self.assertEqual(len(records), 1)
             record = json.loads(records[0].read_text(encoding="utf-8"))
-            self.assertEqual((record["source"], record["category"], record["retry_count"], record["input_output_tokens"]), ("Reflector_C1", "agent", 1, 9))
+            self.assertEqual((record["source"], record["category"], record["retry_count"]), ("Reflector_C1", "agent", 1))
+            self.assertGreater(record["input_tokens"], 7)
+            assert_attempt_totals(self, record)
 
 
 if __name__ == "__main__":

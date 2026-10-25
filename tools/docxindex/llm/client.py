@@ -5,12 +5,11 @@ import re
 from pathlib import Path
 from typing import Any, TypeVar
 
-from openai import AsyncOpenAI
 from endpoints.runtime.model_budget import run_sync
 from endpoints.runtime.model_calls import execute_model
-from endpoints.runtime.llm_client import request_llm
-from endpoints.runtime.model_http import async_http_client
-from pydantic import BaseModel, ConfigDict, ValidationError
+from endpoints.runtime.errors import ModelInputTooLong
+from endpoints.runtime.llm_client import send_llm_request
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from loggers.call_log import logical_call
 
 from .config import env_api_key, find_local_env, find_project_config, load_env_file, load_yaml
@@ -56,6 +55,7 @@ class LLMSettings(BaseModel):
     api_key: str = "EMPTY"
     temperature: float = 0.0
     enable_thinking: bool | None = None
+    max_input_tokens: int | None = Field(default=None, gt=0, strict=True)
 
     @classmethod
     def from_sources(
@@ -74,6 +74,7 @@ class LLMSettings(BaseModel):
             api_key=api_key or local_env.get("LLM_API_KEY") or env_api_key(),
             temperature=float(llm.get("temperature", 0.0)),
             enable_thinking=llm.get("enable_thinking", False),
+            max_input_tokens=llm.get("max_input_tokens"),
         )
 
 
@@ -94,33 +95,32 @@ class LLMClient:
         return self._execute(prompt, validate=check, schema=schema)
 
     def _execute(self, prompt, *, validate=None, schema=None):
-        current_prompt = prompt
-        request = {"messages": [{"role": "user", "content": prompt}]}
+        request = {"model": self.settings.model,
+                   "messages": [{"role": "user", "content": prompt}],
+                   "temperature": self.settings.temperature}
+        if self.settings.enable_thinking is not None:
+            request["extra_body"] = {"enable_thinking": self.settings.enable_thinking}
         async def send(remaining):
-            async with AsyncOpenAI(api_key=self.settings.api_key, base_url=self.settings.base_url,
-                                   max_retries=0, timeout=remaining, http_client=async_http_client(remaining)) as client:
-                kwargs = dict(model=self.settings.model, messages=[{"role": "user", "content": current_prompt}],
-                              temperature=self.settings.temperature)
-                if self.settings.enable_thinking is not None:
-                    kwargs["extra_body"] = {"enable_thinking": self.settings.enable_thinking}
-                return await request_llm(client.chat.completions, **kwargs)
+            return await send_llm_request(api_key=self.settings.api_key, base_url=self.settings.base_url,
+                                          request=request, remaining=remaining)
 
         def check(response):
-            nonlocal current_prompt
             content = response.choices[0].message.content or ""
             try:
                 return validate(content) if validate else content
             except (ValueError, ValidationError) as exc:
                 if schema:
-                    current_prompt = retry_prompt(prompt, schema, content, exc)
-                    request["messages"] = [{"role": "user", "content": current_prompt}]
+                    request["messages"] = [{"role": "user", "content": retry_prompt(prompt, schema, content, exc)}]
                 raise
 
         with logical_call("docxindex.llm", self.settings.model):
             try:
                 return run_sync(execute_model(model_type="llm", model=self.settings.model,
                     caller="docxindex.llm", request=request, send=send, validate=check,
+                    input_limit=self.settings.max_input_tokens,
                     serialize=lambda response: response.model_dump()))
+            except ModelInputTooLong:
+                raise
             except Exception as exc:
                 error_type = "response_validation_error" if isinstance(exc, ValueError) else type(exc).__name__
                 cls = LLMResponseValidationError if isinstance(exc, ValueError) else LLMClientError

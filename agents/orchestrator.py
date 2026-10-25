@@ -6,6 +6,7 @@ import asyncio
 from copy import deepcopy
 import hashlib
 import inspect
+from itertools import count
 import json
 import re
 import time
@@ -23,7 +24,7 @@ from agents.json_utils import AgentOutputValidationError, agent_call_purpose, ch
 from agents.reflector import ReflectorAgent
 from agents.prompts import get_prompt, render_prompt
 from agents.schemas import SubAgentOutput
-from endpoints.runtime.errors import ModelCallError, classify_model_call_error
+from endpoints.runtime.errors import ModelCallError, ModelInputTooLong, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
 from endpoints.review.task_store import write_task_log_event
 from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_info
@@ -1168,7 +1169,8 @@ class OrchestratorAgent:
         ledger = _FindingLedger(parsed_opinion)
         quality_status = "incomplete"
         reflector_tokens = 0
-        for round_num in range(MAX_REFLECTION_ROUNDS):
+        rounds = count() if MAX_REFLECTION_ROUNDS is None else range(MAX_REFLECTION_ROUNDS)
+        for round_num in rounds:
             if execution.route is not None:
                 missing_text_review_notes = get_prompt("ORCHESTRATOR_ROUTED_EVIDENCE_NOTES")
             else:
@@ -1337,7 +1339,7 @@ class OrchestratorAgent:
         self,
         criterion: dict,
         *,
-        max_attempts: int,
+        max_attempts: int | None,
     ) -> dict:
         cid = str(criterion["id"])
         if self.state_store is not None:
@@ -1348,7 +1350,8 @@ class OrchestratorAgent:
                 return existing_output
 
         last_error: BaseException | None = None
-        for attempt in range(1, max_attempts + 1):
+        attempts = count(1) if max_attempts is None else range(1, max_attempts + 1)
+        for attempt in attempts:
             if self.state_store is not None:
                 self.state_store.save_criterion_input(
                     criterion,
@@ -1369,12 +1372,15 @@ class OrchestratorAgent:
                         attempt=attempt,
                         max_attempts=max_attempts,
                     )
-                if attempt < max_attempts:
+                input_too_long = (isinstance(exc, ModelInputTooLong)
+                                  or getattr(exc, "failure_stage", None) == "input_validation")
+                if not input_too_long and (max_attempts is None or attempt < max_attempts):
+                    attempt_limit = max_attempts if max_attempts is not None else "unlimited"
                     print(
-                        f"[Orchestrator] {cid}: attempt {attempt}/{max_attempts} failed, retrying: {exc}"
+                        f"[Orchestrator] {cid}: attempt {attempt}/{attempt_limit} failed, retrying: {exc}"
                     )
                     continue
-                print(f"[Orchestrator] {cid}: failed after {max_attempts} attempt(s): {exc}")
+                print(f"[Orchestrator] {cid}: failed after {attempt} attempt(s): {exc}")
                 if self.state_store is not None:
                     write_task_log_event(
                         self.state_store.client_dir, self.state_store.task_id,
@@ -1397,12 +1403,14 @@ class OrchestratorAgent:
     ) -> list[dict]:
         """Execute criteria with bounded retries, concurrency, and saved output recovery."""
         # execute_tasks = [self.execute_single_criterion(criterion) for criterion in criteria_list]
-        semaphore = asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)
+        semaphore = (asyncio.Semaphore(MAX_ORCHESTRATOR_CONCURRENCY)
+                     if MAX_ORCHESTRATOR_CONCURRENCY is not None else None)
         max_attempts = CRITERION_RETRY_MAX_ATTEMPTS
 
         async def execute_with_limit(criterion: dict) -> dict:
             # async with semaphore:
-            await semaphore.acquire()
+            if semaphore is not None:
+                await semaphore.acquire()
             span = None
             try:
                 await _emit_criterion_progress(
@@ -1445,7 +1453,8 @@ class OrchestratorAgent:
                 )
                 raise
             finally: 
-                semaphore.release()
+                if semaphore is not None:
+                    semaphore.release()
 
         execute_tasks = [execute_with_limit(criterion) for criterion in criteria_list]
         results = await asyncio.gather(*execute_tasks, return_exceptions=True)

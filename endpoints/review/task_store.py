@@ -18,6 +18,7 @@ from fastapi import UploadFile
 from config import API_KEEP_INPUT, DATA_DIR, LOGGING_ENABLED, LOGGING_DETAILED
 from endpoints.runtime.filenames import safe_upload_filename
 from loggers.api_event_logger import append_api_event
+from loggers.call_log import summarize_model_attempts
 from endpoints.runtime.model_budget import task_deadline
 
 if os.name == "nt":
@@ -253,8 +254,8 @@ def save_task_input_url(
     file_url: str,
     fallback_filename: str,
     *,
-    timeout_seconds: float,
-    max_bytes: int,
+    timeout_seconds: float | None,
+    max_bytes: int | None,
 ) -> Path:
     target_dir = task_input_work_dir(client_dir, task_id)
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -274,7 +275,7 @@ def save_task_input_url(
                     if not chunk:
                         continue
                     total += len(chunk)
-                    if total > max_bytes:
+                    if max_bytes is not None and total > max_bytes:
                         raise ValueError("Downloaded file exceeds configured max size.")
                     f.write(chunk)
     except Exception:
@@ -723,8 +724,8 @@ def _parse_task_timestamp(value: Any) -> datetime | None:
 
 def expire_stale_waiting_tasks(
     *,
-    pending_timeout_seconds: float,
-    queued_timeout_seconds: float,
+    pending_timeout_seconds: float | None,
+    queued_timeout_seconds: float | None,
     current_time: datetime | None = None,
 ) -> list[dict[str, Any]]:
     now = current_time or datetime.now(BEIJING_TZ)
@@ -733,7 +734,7 @@ def expire_stale_waiting_tasks(
     for task in iter_active_tasks():
         status = str(task.get("status") or "")
         timeout_seconds = pending_timeout_seconds if status == "pending" else queued_timeout_seconds
-        if status not in {"pending", "queued"} or timeout_seconds <= 0:
+        if status not in {"pending", "queued"} or timeout_seconds is None or timeout_seconds <= 0:
             continue
         worker = task.get("worker") if isinstance(task.get("worker"), dict) else {}
         if worker.get("worker_id"):
@@ -788,12 +789,18 @@ def expire_stale_waiting_tasks(
     return expired
 
 
+def task_model_token_stats(client_dir: str, task_id: str) -> dict[str, Any]:
+    """Return the same attempt totals for successful and failed terminal tasks."""
+    return summarize_model_attempts(logs_dir(client_dir, task_id) / "logical_calls")
+
+
 def mark_succeeded(
     client_dir: str,
     task_id: str,
     *,
     criteria: list[dict[str, Any]] | None = None,
     summary: dict[str, Any] | None = None,
+    token_stats: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task = read_task(client_dir, task_id)
     if task is None:
@@ -820,6 +827,7 @@ def mark_succeeded(
             criteria=final_criteria,
             quality=quality,
             summary=summary_state,
+            token_stats=token_stats if token_stats is not None else task_model_token_stats(client_dir, task_id),
             error=None,
         )
         return True
@@ -842,7 +850,8 @@ def mark_failed(
         if component:
             error["component"] = component
     def apply(task: dict[str, Any]) -> bool:
-        task.update(status="failed", finished_at=now_iso(), message="Contract review failed.", error=error)
+        task.update(status="failed", finished_at=now_iso(), message="Contract review failed.", error=error,
+                    token_stats=task_model_token_stats(client_dir, task_id))
         return True
     updated = mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
     task = updated or read_task(client_dir, task_id)
@@ -880,7 +889,8 @@ def is_cancel_requested(client_dir: str, task_id: str) -> bool:
 def mark_cancelled(client_dir: str, task_id: str) -> dict[str, Any]:
     timestamp = now_iso()
     def apply(task: dict[str, Any]) -> bool:
-        task.update(status="cancelled", finished_at=timestamp, message="Review job cancelled.")
+        task.update(status="cancelled", finished_at=timestamp, message="Review job cancelled.",
+                    token_stats=task_model_token_stats(client_dir, task_id))
         cancel = task.setdefault("cancel", {})
         cancel.update(requested=True, requested_at=cancel.get("requested_at") or timestamp, cancelled_at=timestamp)
         return True
@@ -900,7 +910,8 @@ def fail_active_task(client_dir: str, task_id: str, *, code: str, detail: str,
         if worker_id and worker_id != (task.get("worker") or {}).get("worker_id"):
             return False
         task.update(status="failed", finished_at=now_iso(), message="Contract review failed.",
-                    error={"code": code, "message": detail, "component": "worker"})
+                    error={"code": code, "message": detail, "component": "worker"},
+                    token_stats=task_model_token_stats(client_dir, task_id))
         return True
     return mutate_task_if_status(client_dir, task_id, ACTIVE_STATUSES, apply)
 

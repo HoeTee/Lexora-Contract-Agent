@@ -103,8 +103,8 @@ def _pack_tasks(
     for task in tasks:
         task_tokens = estimate_tokens(task.content)
         if current and (
-            len(current) >= max(1, batch_max_nodes)
-            or current_tokens + task_tokens > max(1, batch_max_tokens)
+            (batch_max_nodes is not None and len(current) >= batch_max_nodes)
+            or (batch_max_tokens is not None and current_tokens + task_tokens > batch_max_tokens)
         ):
             batches.append(current)
             current = []

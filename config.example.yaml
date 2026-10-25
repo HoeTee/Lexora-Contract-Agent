@@ -4,9 +4,7 @@ llm:
   name: qwen3.6-27b
   enable_thinking: false
   stream: false
-  max_context_tokens: 254000
-  max_prompt_tokens: 88000
-  max_result_tokens: 64000
+  max_input_tokens: 88000
   max_tool_calls: 25
   temperature: 0.0
   top_p: 0.01
@@ -36,6 +34,7 @@ rerank:
   name: Qwen3-Reranker-8B
   provider_model_names:
     higress_qwen:
+    - Qwen-Reranker-8B
     - Qwen3-Reranker-8B
     - qwen3-reranker
     bge:
@@ -64,18 +63,21 @@ queue:
 model_semaphore:
   llm:
     max_concurrent_requests: 5
+    max_requests_per_minute: 30
     redis_url: redis://redis:6379/2
     key: contract_agent:model:llm:semaphore
     lease_seconds: 600
     poll_interval_seconds: 0.2
   embedding:
     max_concurrent_requests: 3
+    max_requests_per_minute: null
     redis_url: redis://redis:6379/2
     key: contract_agent:model:embedding:semaphore
     lease_seconds: 600
     poll_interval_seconds: 0.2
   reranker:
     max_concurrent_requests: 10
+    max_requests_per_minute: null
     redis_url: redis://redis:6379/2
     key: contract_agent:model:reranker:semaphore
     lease_seconds: 600
@@ -83,6 +85,12 @@ model_semaphore:
 retrieval:
   backend: llamaindex
   docxindex:
+    indexing:
+      summary:
+        batch_max_nodes: 10
+        batch_max_tokens: 20000
+      hierarchy:
+        input_max_tokens: 20000
     input_tokens: 20000
     output_tokens: 12000
     scan_batch_tokens: 6000
@@ -121,3 +129,23 @@ docx:
 logging:
   enabled: false
   detailed: false
+
+tokenizers:
+  qwen3.6-35b-a3b:
+    - Qwen3.6-35B-A3B
+  qwen3-embedding:
+    - Qwen-Embedding-8B
+    - Qwen3-Embedding-8B
+    - qwen3-embedding
+  qwen3-reranker:
+    - Qwen-Reranker-8B
+    - Qwen3-Reranker-8B
+    - qwen3-reranker
+  bge-m3:
+    - bge-m3
+  bge-reranker-v2-m3:
+    - bge-reranker-v2-m3
+  deepseek-v4-flash-0731:
+    - DeepSeek-V4-Flash-0731
+  cl100k_base:
+    - other
