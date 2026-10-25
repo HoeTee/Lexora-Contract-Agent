@@ -398,9 +398,15 @@ def write_task(task: dict[str, Any]) -> dict[str, Any]:
 
 def read_task(client_dir: str, task_id: str) -> dict[str, Any] | None:
     path = task_json_path(client_dir, task_id)
-    if not path.exists():
-        return None
-    task = json.loads(path.read_text(encoding="utf-8"))
+    for attempt in range(3):
+        try:
+            raw = path.read_text(encoding="utf-8")
+            break
+        except FileNotFoundError:
+            if attempt == 2:
+                return None
+            time.sleep(0.01)
+    task = json.loads(raw)
     if not isinstance(task, dict) or task.get("client_dir") != validate_client_dir(client_dir):
         return None
     return task
