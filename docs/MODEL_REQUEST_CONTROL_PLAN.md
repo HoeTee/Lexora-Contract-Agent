@@ -1,7 +1,7 @@
 # 模型请求统一控制修改方案
 
 日期：2026-10-25  
-状态：已获批准，正在实施与验证。真实合同验收结果另行记录；尚未宣称整批通过。
+状态：已完成实施与验收（2026-10-26）。最终同批混合六份全部成功，另有两份非流式专项通过；详见[实施与验收记录](C:/Users/lenovo/Desktop/contract_agent/docs/MODEL_REQUEST_CONTROL_IMPLEMENTATION.md)。下文保留获批准的设计与验收要求。
 
 ## 1. 本次目的和范围
 
@@ -32,7 +32,7 @@
 
 本节是制定方案时的代码快照，行号和行为用于说明修改原因。实施后的实际行为以 [配置说明](C:/Users/lenovo/Desktop/contract_agent/docs/CONCURRENCY_TIMEOUT_CONFIGURATION.md) 和实施验收记录为准。
 
-| 当前事实 | 代码位置 |
+| 修改前事实 | 当时代码位置（快照） |
 | --- | --- |
 | LLM 输入安全检查仍使用 cl100k_base，max_context_tokens 超过后仅警告 | [base_agent.py:36](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:36)、[base_agent.py:147](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:147) |
 | max_result_tokens 实际用于截断工具返回内容 | [base_agent.py:233](C:/Users/lenovo/Desktop/contract_agent/agents/base_agent.py:233) |
@@ -511,4 +511,4 @@ if __name__ == "__main__":
 10. 执行通信模式专项和正式混合六合同验收，保存证据。挂载总数据目录，按现有用户/任务分区保存输入、日志和报告，不写入容器临时文件系统作为长期交付。
 11. 达到全部结束条件后提交实施结果，交付配置文档、提交记录、六任务清单、逐份最终状态和报告路径、token 与时延统计、并发/RPM 峰值、最终 Redis 名额清理结果。
 
-本方案已获实施授权，代码修改、离线资源准备、镜像构建及真实合同验收正在执行。必须按第 15.4 节达到全部条件后，才可以将状态改为验收通过。
+本方案已按第 15.4 节完成验收。最终镜像为 lexora:model-control-20261026-r5；六份合同属于同一批次 mc202610260056324b8812，均 18/18。非流式专项、500 项跨平台回归、限额与最终清理证据见[实施与验收记录](C:/Users/lenovo/Desktop/contract_agent/docs/MODEL_REQUEST_CONTROL_IMPLEMENTATION.md)。旧 deploy.tar.gz/images.tar 未重打包。

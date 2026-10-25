@@ -1,6 +1,6 @@
 # 模型请求、并发与超时配置说明
 
-更新日期：2026-10-25。本文对应本轮实现；真实验收结果单独记录，不能由配置说明推断任务已经成功。
+更新日期：2026-10-26。本文对应本轮实现。最终 r5 镜像的同批混合六合同、非流式专项及自动化回归结果见[实施与验收记录](C:/Users/lenovo/Desktop/contract_agent/docs/MODEL_REQUEST_CONTROL_IMPLEMENTATION.md)。
 
 ## 1. 完整链路
 
