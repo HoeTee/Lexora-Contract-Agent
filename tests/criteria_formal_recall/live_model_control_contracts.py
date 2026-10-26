@@ -13,6 +13,7 @@ from hashlib import sha256
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import socket
 import subprocess
@@ -71,17 +72,19 @@ def isolated_redis(url: str):
     return urlunsplit(("redis", "redis:6379", parts.path or "/0", "", ""))
 
 
-def prepare(directory: Path, *, image: str, stream: bool, count: int, redis_image: str):
+def prepare(directory: Path, *, image: str, stream: bool, count: int, redis_image: str,
+            contract: Path | None = None):
     directory.mkdir(parents=True, exist_ok=True)
     fixtures = []
-    for number, source in enumerate(CONTRACTS[:count], 1):
+    sources = [contract.resolve()] * count if contract is not None else CONTRACTS[:count]
+    for number, source in enumerate(sources, 1):
         content = source.read_bytes()
         with ZipFile(source) as archive:
             if archive.testzip() is not None or "word/document.xml" not in archive.namelist():
                 raise ValueError(f"Contract is not a valid DOCX: {source}")
         fixtures.append({"fixture": f"C{number}", "source": str(source), "sha256": sha256(content).hexdigest(),
                          "size_bytes": len(content), "content": content})
-    if len({item["sha256"] for item in fixtures}) != count:
+    if contract is None and len({item["sha256"] for item in fixtures}) != count:
         raise ValueError("The acceptance batch must contain distinct contract contents")
     save(directory / "fixtures.json", [{key: value for key, value in item.items() if key != "content"} for item in fixtures])
 
@@ -227,6 +230,7 @@ def inspect_job(directory: Path, public: dict, fixture: dict):
         errors.append(f"Events: {exc}")
     if "review_completed task_id=" + task_id not in events:
         errors.append("Missing successful final event")
+    log_evidence = inspect_numbered_logs(task_dir / "logs", calls, events, errors)
     quality = public.get("quality") or {}
     if not quality.get("total_count") or quality.get("completed_count") != quality.get("total_count"):
         errors.append("API quality count is incomplete")
@@ -243,10 +247,76 @@ def inspect_job(directory: Path, public: dict, fixture: dict):
             "api_status": public.get("status"), "stored_status": task.get("status"), "quality": quality,
             "summary": public.get("summary"), "source_sha256_verified": not any("contract" in error for error in errors),
             "token_stats": token_stats, "recomputed_token_stats": recomputed_stats,
+            "numbered_logging": log_evidence,
             "original_task_error": task.get("error"), "request_count": len(sent),
             "request_failures": [{key: call.get(key) for key in ("call_id", "model_type", "error", "input_tokens", "output_tokens")}
                                  for call in sent if call.get("status") == "failed"],
             "errors": errors}, sent
+
+
+def inspect_numbered_logs(logs: Path, calls: list[dict], events: str, errors: list[str]):
+    """Link every human-readable model row and raw attempt to its logical JSON."""
+    logicals = {}
+    for path in (logs / "logical_calls").glob("*.json"):
+        payload = read_json(path, errors)
+        if not payload:
+            continue
+        number = payload.get("logical_no")
+        if not isinstance(number, int) or number < 1 or number in logicals:
+            errors.append(f"Invalid or duplicate logical number: {path.name}")
+            continue
+        logicals[number] = payload
+        if not path.name.startswith(f"{number}__{payload.get('category')}__"):
+            errors.append(f"Logical filename does not match number/category: {path.name}")
+        attempts = payload.get("attempts", [])
+        if any(item.get("logical_no") != number for item in attempts):
+            errors.append(f"Attempt lost logical number: {path.name}")
+        if payload.get("status") not in {"succeeded", "failed"} or not payload.get("finished_at"):
+            errors.append(f"Logical operation has no final state: {path.name}")
+        if payload.get("send_count", 0) != sum(bool(item.get("sent")) for item in attempts):
+            errors.append(f"Logical send count differs from attempts: {path.name}")
+    if not logicals or min(logicals) != 1:
+        errors.append("Task-local numbering did not begin at 1")
+    model_lines = []
+    finished = defaultdict(int)
+    for line in events.splitlines():
+        match = re.match(r"^(\d+)\s+\S+\s+\w+\s+(\S+)\s+(\S+)\s+\|\s+(.*)$", line)
+        if not match:
+            if re.match(r"^\d+\s", line):
+                errors.append("Malformed numbered model event")
+            continue
+        number, category, location, summary = match.groups()
+        payload = logicals.get(int(number))
+        if payload is None or category != payload.get("category"):
+            errors.append(f"Event number/category lacks matching logical JSON: {number}/{category}")
+        if payload is not None:
+            expected = "/".join("_".join(str(payload.get(key) or "-").split())
+                                for key in ("criterion_id", "source", "stage"))
+            if location != expected:
+                errors.append(f"Event location differs from logical JSON: {number}/{location}")
+        if summary.startswith(("Validation passed.", "Validation failed.", "Operation completed.", "Operation failed.")):
+            finished[int(number)] += 1
+        model_lines.append(line)
+    if not model_lines:
+        errors.append("No numbered model timeline events found")
+    logical_attempts = {item["call_id"]: item for payload in logicals.values() for item in payload.get("attempts", [])}
+    if set(logical_attempts) != {call.get("call_id") for call in calls}:
+        errors.append("Logical attempts and detailed requests do not match bidirectionally")
+    for number in logicals:
+        if finished[number] != 1:
+            errors.append(f"Expected one final timeline event for operation {number}; found {finished[number]}")
+    for call in calls:
+        number = call.get("logical_no")
+        if number not in logicals or call.get("logical_call_id") != logicals[number].get("logical_call_id"):
+            errors.append(f"Detailed request lacks matching logical number: {call.get('call_id')}")
+        attempt = logical_attempts.get(call.get("call_id"), {})
+        for key in ("logical_no", "status", "sent", "input_tokens", "output_tokens", "failure_stage"):
+            if attempt.get(key) != call.get(key):
+                errors.append(f"Detailed request differs from logical attempt: {call.get('call_id')}/{key}")
+    return {"logical_count": len(logicals), "event_rows": len(model_lines),
+            "first_number": min(logicals) if logicals else None,
+            "last_number": max(logicals) if logicals else None,
+            "detailed_attempt_count": len(calls), "finish_rows": dict(finished)}
 
 
 def audit_calls(calls: list[dict], config: dict):
@@ -288,7 +358,7 @@ def redis_counts(base: list[str], config: dict):
 async def run(args):
     directory = (args.output or Path(tempfile.mkdtemp(prefix="model_control_"))).resolve()
     compose, port, api_key, config, fixtures = prepare(directory, image=args.image, stream=args.stream == "true",
-                                                      count=args.count, redis_image=args.redis_image)
+                                                      count=args.count, redis_image=args.redis_image, contract=args.contract)
     batch_id = "mc" + datetime.now().strftime("%Y%m%d%H%M%S") + secrets.token_hex(3)
     base = ["docker", "compose", "-p", batch_id, "-f", str(compose)]
     save(directory / "project.json", {"project": batch_id, "port": port, "started_at": instant()})
@@ -417,7 +487,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--image", required=True)
     parser.add_argument("--stream", choices=("true", "false"), required=True)
-    parser.add_argument("--count", type=int, choices=(2, 6), default=6)
+    parser.add_argument("--count", type=int, choices=(2, 4, 6), default=6)
+    parser.add_argument("--contract", type=Path, help="Submit this real DOCX repeatedly; default uses distinct fixtures")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--redis-image", default="redis:7-alpine")
     parser.add_argument("--timeout", type=float, help="Harness wait limit in seconds; does not alter service timeouts")

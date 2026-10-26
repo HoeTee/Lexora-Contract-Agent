@@ -75,6 +75,7 @@ def record_input_rejection(*, model_type, model, caller, request, limit,
         error.call_id = record.reference_id
         error.call_path = str(record.reference_path) if record.reference_path else None
         record.failed(error, stage="input_validation")
+        record.event("model_input_rejected", f"Request not sent. Input: {counted.input_tokens} tokens. Input validation failed.")
         logical.failed(error)
 
 
@@ -109,6 +110,39 @@ def _retry_delay(exc: Exception, attempt: int) -> float:
             except (TypeError, ValueError):
                 pass
     return min(0.5 * 2 ** min(5, max(0, attempt - 1)), 8)
+
+
+def _output_description(record: CallRecord) -> str:
+    if record.payload.get("output_token_source") == "not_applicable":
+        return "not applicable"
+    value = record.payload.get("output_tokens")
+    if value is None:
+        return "unknown"
+    qualifier = " (partial)" if record.payload.get("output_completeness") != "complete" else ""
+    return f"{value} tokens{qualifier}"
+
+
+def _failure_event(record: CallRecord, exc: BaseException, stage: str,
+                   request_started: float | None, request_finished: float | None) -> None:
+    sent = record.payload.get("sent")
+    elapsed = (request_finished or time.monotonic()) - request_started if request_started is not None else 0
+    number = record.payload.get("send_number", record.payload.get("attempt", 1))
+    if not sent:
+        summary = f"Request not sent. Failed during {stage}."
+    elif isinstance(exc, ModelCallTimeout):
+        summary = f"Request {number} timed out after {elapsed:.3f}s."
+    elif stage == "output_validation":
+        summary = f"Response {number} failed output validation after {elapsed:.3f}s."
+    elif isinstance(exc, asyncio.CancelledError):
+        summary = f"Request {number} cancelled after {elapsed:.3f}s."
+    else:
+        status = (record.payload.get("error") or {}).get("http_status")
+        reason = f"HTTP {status}" if status is not None else type(exc).__name__
+        summary = f"Request {number} failed during {stage} after {elapsed:.3f}s ({reason})."
+    input_tokens = record.payload.get("input_tokens")
+    input_text = f"{input_tokens} tokens" if input_tokens is not None else "unknown"
+    record.event("model_request_failed", summary +
+                 f" Input: {input_text}. Output: {_output_description(record)}.")
 
 
 async def execute_model(*, model_type, model, caller, request, send, validate=None,
@@ -157,7 +191,9 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
             if input_guard is not None:
                 input_guard(record)
             stage = "semaphore_wait"
+            record.event("model_admission_wait", "Waiting for model admission.")
             async with model_semaphore(model_type, caller, model, budget=budget) as lease:
+                lease.release_event = record.event
                 budget.reserve_send()
                 stage = "request"
                 request_started = time.monotonic()
@@ -172,6 +208,9 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                         if hasattr(lease, "model_type"):
                             record.payload.update(semaphore_metadata(lease))
                         record.sent()
+                        record.event("model_request_sent",
+                                     f"Request {budget.sends} sent. Input: {record.payload['input_tokens']} tokens. "
+                                     f"Wait: {budget.waiting_total_seconds - wait_before:.3f}s.")
                         token = _ACTIVE_CALL.set(ModelRequest(record, budget, timer))
                         try:
                             # Admission reserves RPM atomically with capacity.
@@ -194,6 +233,9 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                 # Redis slot fails or the deadline expires during cleanup.
                 payload = serialize(response) if serialize else response
                 record.succeeded(payload, http_status=status)
+                record.event("model_response_received",
+                             f"Response {budget.sends} received in {request_finished - request_started:.3f}s. "
+                             f"Input: {record.payload['input_tokens']} tokens. Output: {_output_description(record)}.")
                 # Synchronous SDK parsing can overrun without yielding to the
                 # asyncio timer. Check the frozen request duration as well.
                 budget.remaining()
@@ -205,6 +247,7 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
             return result
         except asyncio.CancelledError as exc:
             record.failed(exc, stage=stage)
+            _failure_event(record, exc, stage, request_started, request_finished)
             raise
         except Exception as exc:
             if stage == "request" and isinstance(exc, TimeoutError) and not isinstance(exc, ModelCallTimeout):
@@ -220,6 +263,7 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                     exc = deadline
             stage = getattr(exc, "failure_stage", stage)
             record.failed(exc, stage=stage)
+            _failure_event(record, exc, stage, request_started, request_finished)
             exc.call_id = record.reference_id
             exc.call_path = str(record.reference_path) if record.reference_path else None
             exc.failure_stage = stage
@@ -228,6 +272,7 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
             delay = 0 if stage == "output_validation" else _retry_delay(exc, budget.sends)
             record.payload["retry_reason"] = type(exc).__name__
             record.payload["retry_delay_seconds"] = min(delay, budget.task_remaining())
+            record.event("model_retry_scheduled", f"Retry scheduled in {record.payload['retry_delay_seconds']:.3f}s.")
             backoff_started = time.monotonic()
             try:
                 async with asyncio.timeout(budget.task_remaining()):
@@ -237,7 +282,11 @@ async def execute_model(*, model_type, model, caller, request, send, validate=No
                 error.call_id = record.reference_id
                 error.call_path = str(record.reference_path) if record.reference_path else None
                 record.failed(error, stage=error.failure_stage)
+                record.event("model_backoff_failed", "Contract execution deadline reached during retry backoff.")
                 raise error from timeout
+            except asyncio.CancelledError:
+                record.event("model_retry_cancelled", "Retry cancelled during backoff.")
+                raise
             finally:
                 backoff_seconds = time.monotonic() - backoff_started
         finally:

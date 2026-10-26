@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from config import LOGGING_ENABLED, LOGGING_DETAILED
 
 from loggers.mcp_logger import create_mcp_logger
+from loggers.call_log import current_call_context
 from loggers.trace_helpers import mcp_inputs, mcp_outputs
 from loggers.trace_logger import get_current_trace
 from mcp import ClientSession, StdioServerParameters
@@ -132,7 +133,14 @@ class MinimalMCPClient:
                 "function": {
                     "name": tool.name, # function name
                     "description": tool.description, # doc string
-                    "parameters": tool.inputSchema, # MyModel.model_json_schema()
+                    # Recovery metadata is transport-only and must not enter the LLM schema.
+                    "parameters": {
+                        **tool.inputSchema,
+                        "properties": {
+                            key: value for key, value in tool.inputSchema.get("properties", {}).items()
+                            if key != "criterion_attempt"
+                        },
+                    },
                 },
             }
             for tool in response.tools
@@ -149,9 +157,14 @@ class MinimalMCPClient:
         if not self.session:
             raise RuntimeError("Client not connected")
         operation_id = None
-        if name in {"contract_search", "contract_build_index", "docxindex_search", "docxindex_build_index"} and args.get("api_events_path"):
+        if name in {
+            "contract_search", "contract_build_index", "docxindex_search", "docxindex_build_index",
+            "llamaindex_search", "llamaindex_build_index",
+        } and args.get("api_events_path"):
             operation_id = uuid.uuid4().hex
-            args = {**args, "log_operation_id": operation_id}
+            context = current_call_context()
+            args = {**args, "log_operation_id": operation_id,
+                    "criterion_attempt": context.get("criterion_attempt")}
         # Functions in an MCP server that are exposed as tools cannot use variable arguments like *args or **kwargs. 
         # This restriction is because the protocol requires a complete and predictable parameter schema to be generated 
         # for the Language Model (LLM) client, which is not possible with variable argument lists.

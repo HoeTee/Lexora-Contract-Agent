@@ -259,6 +259,7 @@ class ModelLimitsRedisTests(unittest.IsolatedAsyncioTestCase):
         processes = [context.Process(target=_shared_worker, args=(self.redis_url, self.key, output, barrier))
                      for _ in range(3)]
         events = []
+        done = 0
         try:
             for process in processes:
                 process.start()
@@ -272,6 +273,10 @@ class ModelLimitsRedisTests(unittest.IsolatedAsyncioTestCase):
                     self.assertNotEqual(event[0], "error", event)
                     if event[0] == "admitted":
                         events.append(event[1])
+                    if event[0] == "done":
+                        # One worker can finish all three calls among the first
+                        # five admissions; retain its completion across phases.
+                        done += 1
                     self.assertLessEqual(self.redis.zcard(self.key), 2)
             await asyncio.sleep(0.15)
             self.assertEqual(self.redis.zcard(self.key + ":rpm"), 5)
@@ -279,7 +284,6 @@ class ModelLimitsRedisTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.redis.zcard(self.key + ":waiting"), 4)
             now = self.server_ms()
             self.redis.zadd(self.key + ":rpm", {member: now - 59950 for member in events})
-            done = 0
             async with asyncio.timeout(10):
                 while done < 3:
                     try:

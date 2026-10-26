@@ -15,6 +15,8 @@ from typing import Any
 
 from config import LOGGING_ENABLED, LOGGING_DETAILED
 from endpoints.runtime.model_budget import ModelCallBudget
+from loggers.api_event_logger import append_api_event
+from loggers.task_log_io import allocate_logical_no
 
 
 _CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar("model_call_context", default=None)
@@ -22,16 +24,39 @@ _LOGICAL: ContextVar[LogicalCall | None] = ContextVar("logical_model_call", defa
 
 
 def set_call_context(events_path: str | Path | None, *, operation_id: str | None = None,
-                     criterion_id: str | None = None, stage: str = "indexing"):
+                     criterion_id: str | None = None, criterion_attempt: int | None = None,
+                     stage: str = "indexing"):
     path = Path(events_path).parent / "calls" if events_path and LOGGING_ENABLED else None
     return _CONTEXT.set({"directory": path, "operation_id": operation_id,
                          "events_path": str(events_path) if events_path else None,
-                         "criterion_id": criterion_id, "stage": stage,
+                         "criterion_id": criterion_id, "criterion_attempt": criterion_attempt,
+                         "stage": stage,
                          "phase": "indexing" if stage == "indexing" else "retrieval"})
 
 
 def reset_call_context(token) -> None:
     _CONTEXT.reset(token)
+
+
+def current_call_context() -> dict[str, Any]:
+    """Return task correlation without exposing the mutable context dictionary."""
+    return dict(_CONTEXT.get() or {})
+
+
+@contextmanager
+def criterion_call_context(criterion_id: str, criterion_attempt: int, *,
+                           events_path: str | Path | None = None):
+    """Add criterion recovery metadata while retaining the task's log paths."""
+    context = {**(_CONTEXT.get() or {}), "criterion_id": criterion_id,
+               "criterion_attempt": criterion_attempt}
+    if events_path is not None:
+        context.update(events_path=str(events_path),
+                       directory=Path(events_path).parent / "calls" if LOGGING_ENABLED else None)
+    token = _CONTEXT.set(context)
+    try:
+        yield
+    finally:
+        _CONTEXT.reset(token)
 
 
 def set_call_stage(stage: str):
@@ -94,7 +119,8 @@ def current_logical_call():
 
 def new_call(*, component: str, model: str, request: dict[str, Any],
              directory: Path | None = None, criterion_id: str | None = None,
-             stage: str | None = None, source: str | None = None) -> "CallRecord":
+             stage: str | None = None, source: str | None = None,
+             criterion_attempt: int | None = None) -> "CallRecord":
     context = _CONTEXT.get() or {}
     return CallRecord(
         directory=(directory if directory is not None else context.get("directory")) if LOGGING_ENABLED else None,
@@ -104,6 +130,8 @@ def new_call(*, component: str, model: str, request: dict[str, Any],
         operation_id=context.get("operation_id"),
         source=source,
         logical=_LOGICAL.get(),
+        criterion_attempt=(criterion_attempt if criterion_attempt is not None
+                           else context.get("criterion_attempt")),
     )
 
 
@@ -133,7 +161,8 @@ class CallRecord:
     def __init__(self, *, directory: Path | None, component: str, model: str,
                  request: dict[str, Any], criterion_id: str | None, stage: str | None,
                  operation_id: str | None, source: str | None,
-                 logical: LogicalCall | None = None) -> None:
+                 logical: LogicalCall | None = None,
+                 criterion_attempt: int | None = None) -> None:
         self.logical = logical
         if logical and "attempt" in request:
             request = {**request, "attempt": logical.sent_count + 1}
@@ -141,6 +170,10 @@ class CallRecord:
         instant = datetime.now(timezone.utc)
         call_source = logical.payload["source"] if logical else source or criterion_id or "Task"
         stage = logical.payload["stage"] if logical else stage
+        if logical:
+            criterion_id = logical.payload["criterion_id"] or criterion_id
+            criterion_attempt = (logical.payload["criterion_attempt"] if logical.payload["criterion_attempt"] is not None
+                                 else criterion_attempt)
         filename = "__".join((
             _filename_part(call_source),
             _filename_part(stage or _call_stage_label(component, stage, criterion_id)),
@@ -151,13 +184,15 @@ class CallRecord:
         self.payload: dict[str, Any] = {
             "call_id": self.call_id, "operation_id": operation_id,
             "task_id": os.getenv("CONTRACT_TASK_ID"), "worker_pid": os.getpid(),
-            "criterion_id": criterion_id, "source": call_source,
+            "criterion_id": criterion_id, "criterion_attempt": criterion_attempt,
+            "source": call_source,
             "component": component, "stage": stage,
             "reason": logical.payload["reason"] if logical else None,
             "model": model, "status": "pending",
             "started_at": instant.astimezone().isoformat(timespec="milliseconds"),
             "request": deepcopy(request), "response": None, "error": None,
             "logical_call_id": logical.logical_call_id if logical else None,
+            "logical_no": logical.logical_no if logical else None,
             "category": logical.payload["category"] if logical else None,
             "attempt": logical.sent_count + 1 if logical else 1,
             "is_retry": bool(logical and logical.sent_count),
@@ -177,6 +212,16 @@ class CallRecord:
     @property
     def reference_path(self) -> Path | None:
         return self.path or (self.logical.path if self.logical else None)
+
+    def event(self, event: str, summary: str, **fields: Any) -> None:
+        """Write a summary using this attempt's stored task and logical identity."""
+        if self.logical is not None:
+            self.logical.event(event, summary, **fields)
+        elif self.path is not None and LOGGING_ENABLED:
+            append_api_event(self.path.parent.parent / "events.log", event, summary=summary,
+                             **{**fields, "logical_no": self.payload["logical_no"],
+                                "category": self.payload["category"], "criterion_id": self.payload["criterion_id"],
+                                "source": self.payload["source"], "stage": self.payload["stage"]})
 
     def sent(self) -> None:
         """Count only requests that actually reach the model client."""
@@ -344,29 +389,39 @@ async def request_model_async(resource, **kwargs):
 
 class LogicalCall:
     def __init__(self, component: str, model: str, directory: Path | None, source: str | None,
-                 stage: str | None = None, reason: str | None = None):
+                 stage: str | None = None, reason: str | None = None,
+                 criterion_id: str | None = None, criterion_attempt: int | None = None):
         context = _CONTEXT.get() or {}
         directory = directory or context.get("directory")
+        directory = Path(directory) if directory is not None and LOGGING_ENABLED else None
         self.logical_call_id = uuid.uuid4().hex
+        self.logical_no = allocate_logical_no(directory.parent) if directory is not None else None
+        self.events_path = directory.parent / "events.log" if directory is not None else None
         self.sent_count = 0
         self.budget = ModelCallBudget()
         self.attempt_records = []
         self.last_record: CallRecord | None = None
         self.tokens = token_fields(None)
+        self._finished_event_signature: tuple[str, int, int] | None = None
         phase = context.get("phase", "indexing")
         if component.endswith("reranker"):
             phase = "retrieval"
         backend = "llamaindex" if component.startswith("llamaindex.") else "docxindex"
         category = "agent" if component == "agent" else f"{backend}.{phase}.{component.rsplit('.', 1)[-1]}"
-        criterion_id = context.get("criterion_id")
+        criterion_id = criterion_id if criterion_id is not None else context.get("criterion_id")
+        criterion_attempt = (criterion_attempt if criterion_attempt is not None
+                             else context.get("criterion_attempt"))
         call_source = source or (f"{backend}_{criterion_id}" if criterion_id else f"{backend}_indexing_{component.rsplit('.', 1)[-1]}" if phase == "indexing" else backend)
         stage = stage or context.get("stage") or "model"
         reason = reason if reason is not None else context.get("reason")
-        filename = "__".join((_filename_part(call_source), _filename_part(stage), self.logical_call_id))
+        filename = "__".join((str(self.logical_no), _filename_part(category, allow_dots=True),
+                              _filename_part(call_source), _filename_part(stage)))
         self.path = directory.parent / "logical_calls" / f"{filename}.json" if directory and LOGGING_ENABLED else None
         self.payload = {
-            "logical_call_id": self.logical_call_id, "category": category,
+            "logical_call_id": self.logical_call_id, "logical_no": self.logical_no,
+            "category": category,
             "operation_id": context.get("operation_id"), "criterion_id": criterion_id,
+            "criterion_attempt": criterion_attempt,
             "task_id": os.getenv("CONTRACT_TASK_ID"), "worker_pid": os.getpid(),
             "source": call_source, "stage": stage, "reason": str(reason)[:200] if reason else None,
             "model": model, "started_at": _now(),
@@ -374,11 +429,21 @@ class LogicalCall:
             **self.tokens, "error": None,
         }
         self._write()
+        self.event("logical_call_started", "Operation started.")
+
+    def event(self, event: str, summary: str, **fields: Any) -> None:
+        """Use one identity for the time line and the detailed logical record."""
+        if self.events_path is not None and LOGGING_ENABLED:
+            append_api_event(self.events_path, event, summary=summary,
+                             **{**fields, "logical_no": self.logical_no, "category": self.payload["category"],
+                                "criterion_id": self.payload["criterion_id"], "source": self.payload["source"],
+                                "stage": self.payload["stage"]})
 
     def _write(self) -> None:
         self.payload["attempts"] = [
             {key: record.payload.get(key) for key in
-             ("call_id", "status", "sent", "sent_at", "started_at", "finished_at", "send_number", "http_status", "model_type", "semaphore_key", "budget_seconds",
+             ("call_id", "logical_call_id", "logical_no", "category", "criterion_id", "criterion_attempt", "source", "stage",
+              "status", "sent", "sent_at", "started_at", "finished_at", "send_number", "http_status", "model_type", "semaphore_key", "budget_seconds",
               "remaining_seconds", "input_tokens", "output_tokens", "input_output_tokens",
               "failure_stage", "error", "timing", "retry_reason", "retry_delay_seconds",
               "transport", "stream", "first_chunk_seconds", "response_seconds", "stream_complete",
@@ -424,6 +489,9 @@ class LogicalCall:
         reason = f"{reason}：{exc}"
         self.payload["reason"] = f"{original}; {reason}"[:200] if original else reason[:200]
         self._write()
+        number = self.last_record.payload.get("send_number", self.sent_count) if self.last_record else self.sent_count
+        self.event("model_output_validation_failed",
+                   f"Response {number} failed JSON/schema validation. {type(exc).__name__}.")
 
     def finish(self, exc: BaseException | None = None) -> None:
         if exc is not None:
@@ -432,8 +500,32 @@ class LogicalCall:
             self.failed(exc)
         elif self.payload["status"] != "failed":
             self.payload.update(status="succeeded", **self.tokens)
+        signature = (self.payload["status"], self.sent_count, len(self.attempt_records))
+        if self._finished_event_signature == signature:
+            # An outer validator can replace the final error without another
+            # request. Persist that detail while retaining one finish event.
+            self._write()
+            return
         self.payload["finished_at"] = _now()
         self._write()
+        self._finished_event_signature = signature
+        self.event("logical_call_failed" if self.payload["status"] == "failed" else "logical_call_finished",
+                   self._finish_summary())
+
+    def _finish_summary(self) -> str:
+        validation = "Operation failed" if self.payload["status"] == "failed" else "Validation passed"
+        result = (f"{validation}. Requests: {self.sent_count}. "
+                  f"Total input: {self.payload['known_input_tokens']} tokens")
+        if not self.payload["input_count_complete"]:
+            result += " (incomplete)"
+        result += ". "
+        sent = [record.payload for record in self.attempt_records if record.payload.get("sent")]
+        if sent and all(item.get("output_token_source") == "not_applicable" for item in sent):
+            return result + "Output: not applicable."
+        result += f"Known output: {self.payload['known_output_tokens']} tokens"
+        if not self.payload["output_count_complete"]:
+            result += " (incomplete)"
+        return result + "."
 
     def failed(self, exc: BaseException) -> None:
         http_status = _error_http_status(exc)
@@ -450,13 +542,15 @@ class LogicalCall:
 def logical_call(component: str, model: str, *, directory: Path | None = None,
                  source: str | None = None, stage: str | None = None,
                  reason: str | None = None, record: LogicalCall | None = None,
-                 finalize: bool = True):
+                 finalize: bool = True, criterion_id: str | None = None,
+                 criterion_attempt: int | None = None):
     """Nested transport/schema retries belong to the same logical request."""
     current = _LOGICAL.get()
     if current is not None:
         yield current
         return
-    record = record or LogicalCall(component, model, directory, source, stage, reason)
+    record = record or LogicalCall(component, model, directory, source, stage, reason,
+                                   criterion_id, criterion_attempt)
     token = _LOGICAL.set(record)
     try:
         yield record
@@ -496,8 +590,9 @@ def _file_timestamp(instant: datetime) -> str:
     return instant.strftime("%Y%m%dT%H%M%S%f")[:-3] + "Z"
 
 
-def _filename_part(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_-]+", "-", str(value)).strip("-")[:64] or "Task"
+def _filename_part(value: str, *, allow_dots: bool = False) -> str:
+    pattern = r"[^A-Za-z0-9_.-]+" if allow_dots else r"[^A-Za-z0-9_-]+"
+    return re.sub(pattern, "-", str(value)).strip("-.")[:64] or "Task"
 
 
 def _call_stage_label(component: str, stage: str | None, criterion_id: str | None) -> str:

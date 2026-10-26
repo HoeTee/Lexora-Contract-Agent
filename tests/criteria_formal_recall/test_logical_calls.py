@@ -25,7 +25,10 @@ from endpoints.review import task_store
 from endpoints.review.review_state import ReviewStateStore
 from endpoints.runtime import model_budget
 from endpoints.runtime.model_budget import ModelCallBudget
-from loggers.call_log import call_stage, logical_call, map_with_context, new_call, reset_call_context, set_call_context
+from loggers.call_log import (
+    LogicalCall, call_stage, criterion_call_context, current_call_context,
+    logical_call, map_with_context, new_call, reset_call_context, set_call_context,
+)
 from loggers.trace_logger import NOOP_TRACE
 from routing.config import RouteConfig
 from tools.docxindex.indexing.config import IndexingConfig
@@ -226,7 +229,10 @@ class LogicalCallTests(unittest.TestCase):
         finally:
             reset_call_context(token)
         self.assertEqual({r["source"] for r in self.records()}, {"docxindex_indexing_llm", "docxindex_indexing_embedding"})
-        self.assertTrue(all(p.name.startswith("docxindex_indexing_") for p in (self.logs / "logical_calls").glob("*.json")))
+        self.assertEqual({p.name for p in (self.logs / "logical_calls").glob("*.json")}, {
+            "1__docxindex.indexing.llm__docxindex_indexing_llm__index-llm-batch1.json",
+            "2__docxindex.indexing.embedding__docxindex_indexing_embedding__index-embedding-batch1.json",
+        })
 
     def test_embedding_records_input_only(self):
         def handler(request):
@@ -253,6 +259,7 @@ class LogicalCallTests(unittest.TestCase):
         records = self.records()
         self.assertEqual(len(records), 20)
         self.assertEqual(len({r["logical_call_id"] for r in records}), 20)
+        self.assertEqual(sorted(r["logical_no"] for r in records), list(range(1, 21)))
         self.assertEqual(sorted(r["input_tokens"] for r in records), list(range(20)))
         self.assertFalse(list(self.logs.rglob("*.tmp")))
 
@@ -280,6 +287,108 @@ class LogicalCallTests(unittest.TestCase):
         with patch("loggers.call_log.LOGGING_ENABLED", False), patch("loggers.call_log.LOGGING_DETAILED", True):
             self.client(lambda request: httpx.Response(200, json=chat_response())).complete("query")
         self.assertFalse(self.logs.exists())
+
+    def test_natural_number_and_criterion_attempt_are_shared_by_all_attempt_files(self):
+        with patch("loggers.call_log.LOGGING_DETAILED", True), criterion_call_context("H04", 3):
+            with logical_call("agent", "fake", source="SubAgent_H04", stage="review-initial") as logical:
+                for count in (4, 7):
+                    record = new_call(component="agent", model="fake", request={})
+                    record.sent()
+                    record.succeeded({"usage": {"prompt_tokens": count, "completion_tokens": 2}})
+        expected = (1, "H04", 3)
+        payload, = self.records()
+        self.assertEqual((payload["logical_no"], payload["criterion_id"], payload["criterion_attempt"]), expected)
+        self.assertEqual(logical.path.name, "1__agent__SubAgent_H04__review-initial.json")
+        for attempt in payload["attempts"] + self.records("calls"):
+            self.assertEqual((attempt["logical_no"], attempt["criterion_id"], attempt["criterion_attempt"]), expected)
+            self.assertEqual(attempt["logical_call_id"], payload["logical_call_id"])
+            self.assertEqual(attempt["category"], "agent")
+        self.assertEqual(payload["known_input_tokens"], 11)
+
+    def test_nested_and_resumed_schema_group_keeps_one_number_and_one_finish(self):
+        with logical_call("agent", "fake", source="SubAgent_H04", finalize=False) as logical:
+            with logical_call("docxindex.llm", "fake") as nested:
+                self.assertIs(nested, logical)
+            record = new_call(component="agent", model="fake", request={})
+            record.sent()
+            record.succeeded({"usage": {"prompt_tokens": 4, "completion_tokens": 2}})
+        logical.reject_response(ValueError("invalid JSON"))
+        with logical_call("agent", "fake", record=logical, finalize=False):
+            repaired = new_call(component="agent", model="fake", request={})
+            repaired.sent()
+            repaired.succeeded({"usage": {"prompt_tokens": 5, "completion_tokens": 2}})
+        logical.finish()
+        logical.finish()
+        payload, = self.records()
+        self.assertEqual(payload["logical_no"], 1)
+        self.assertEqual({item["logical_no"] for item in payload["attempts"]}, {1})
+        events = (self.logs / "events.log").read_text(encoding="utf-8")
+        self.assertEqual(events.count("Operation started."), 1)
+        self.assertEqual(events.count("failed JSON/schema validation."), 1)
+        self.assertEqual(events.count("Validation passed."), 1)
+        self.assertEqual(payload["attempts"][0]["failure_stage"], "output_validation")
+
+    def test_failed_input_counts_survive_and_finish_marks_output_incomplete(self):
+        with self.assertRaises(TimeoutError):
+            with logical_call("agent", "fake", source="SubAgent_H04"):
+                record = new_call(component="agent", model="fake", request={})
+                record.record_local_input(17)
+                record.sent()
+                record.failed(TimeoutError("model timeout"))
+                raise TimeoutError("model timeout")
+        payload, = self.records()
+        self.assertEqual((payload["known_input_tokens"], payload["attempts"][0]["input_tokens"]), (17, 17))
+        self.assertIsNone(payload["attempts"][0]["output_tokens"])
+        events = (self.logs / "events.log").read_text(encoding="utf-8")
+        self.assertIn("Operation failed. Requests: 1. Total input: 17 tokens.", events)
+        self.assertIn("Known output: 0 tokens (incomplete).", events)
+
+    def test_repeated_finish_persists_outer_error_without_duplicate_event(self):
+        logical = LogicalCall("agent", "fake", self.logs / "calls", "SubAgent_H04")
+        logical.finish(ValueError("invalid response"))
+        first, = self.records()
+        before = (self.logs / "events.log").read_text(encoding="utf-8")
+        logical.finish(AgentOutputValidationError("schema repair attempts exhausted"))
+        final, = self.records()
+        self.assertEqual(final["error"]["type"], "AgentOutputValidationError")
+        self.assertEqual(final["error"]["message"], "schema repair attempts exhausted")
+        self.assertEqual(final["finished_at"], first["finished_at"])
+        self.assertEqual((self.logs / "events.log").read_text(encoding="utf-8"), before)
+
+    def test_explicit_agent_directory_and_criterion_do_not_need_parent_context(self):
+        token = set_call_context(None)
+        try:
+            logical = LogicalCall("agent", "fake", self.logs / "calls", "Reflector_H07",
+                                  criterion_id="H07", criterion_attempt=2)
+            logical.finish()
+        finally:
+            reset_call_context(token)
+        payload, = self.records()
+        self.assertEqual((payload["logical_no"], payload["criterion_id"], payload["criterion_attempt"]), (1, "H07", 2))
+        self.assertTrue((self.logs / "events.log").exists())
+
+    def test_explicit_logical_criterion_wins_over_outer_context_for_attempts(self):
+        with logical_call("agent", "fake", source="Reflector_H07",
+                          criterion_id="H07", criterion_attempt=2):
+            record = new_call(component="agent", model="fake", request={})
+            record.record_local_input(3)
+            record.sent()
+            record.succeeded({"usage": {"prompt_tokens": 3, "completion_tokens": 1}})
+        payload, = self.records()
+        self.assertEqual((payload["criterion_id"], payload["criterion_attempt"]), ("H07", 2))
+        self.assertEqual((payload["attempts"][0]["criterion_id"], payload["attempts"][0]["criterion_attempt"]),
+                         ("H07", 2))
+
+    def test_criterion_context_preserves_paths_and_restores_parent_metadata(self):
+        original = current_call_context()
+        with criterion_call_context("H06", 2):
+            context = current_call_context()
+            self.assertEqual(context["directory"], original["directory"])
+            self.assertEqual(context["events_path"], original["events_path"])
+            self.assertEqual((context["criterion_id"], context["criterion_attempt"]), ("H06", 2))
+            context["criterion_id"] = "must-not-mutate-context"
+            self.assertEqual(current_call_context()["criterion_id"], "H06")
+        self.assertEqual(current_call_context(), original)
 
 
 class MinimalLoggingTests(unittest.TestCase):
@@ -546,7 +655,8 @@ class AgentRetryTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIsNone(record["error"])
                     self.assertEqual((record["known_input_tokens"], record["known_output_tokens"]), (107, 32))
                     self.assertTrue(record["usage_complete"])
-                    self.assertTrue(next((logs / "logical_calls").glob("*.json")).name.startswith("SubAgent_H03__review-initial__"))
+                    self.assertEqual(next((logs / "logical_calls").glob("*.json")).name,
+                                     "1__agent__SubAgent_H03__review-initial.json")
                     attempts = sorted(self.read_records(logs, "calls"), key=lambda x: x["attempt"])
                     if detailed:
                         self.assertEqual([r["is_retry"] for r in attempts], [False, True])

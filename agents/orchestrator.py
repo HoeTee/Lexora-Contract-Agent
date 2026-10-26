@@ -27,6 +27,7 @@ from agents.schemas import SubAgentOutput
 from endpoints.runtime.errors import ModelCallError, ModelInputTooLong, classify_model_call_error
 from endpoints.review.review_state import ReviewStateStore
 from endpoints.review.task_store import write_task_log_event
+from loggers.call_log import criterion_call_context
 from loggers.trace_helpers import criterion_inputs, criterion_outputs, error_info
 from loggers.trace_logger import get_current_trace
 from routing.schemas import ReviewExecutionPlan
@@ -1397,7 +1398,8 @@ class OrchestratorAgent:
                     max_attempts=max_attempts,
                 )
             try:
-                result = await self.execute_single_criterion(criterion)
+                with criterion_call_context(cid, attempt, events_path=self.api_events_path):
+                    result = await self.execute_single_criterion(criterion)
                 if self.state_store is not None:
                     self.state_store.save_criterion_output(result, attempt=attempt)
                 return result

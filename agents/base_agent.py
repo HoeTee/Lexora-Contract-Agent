@@ -313,6 +313,7 @@ class Agent:
         grouped = getattr(self, "_validation_group_enabled", False)
         with logical_call("agent", self.settings.model,
                           directory=agent_call_log_dir(), source=self.name,
+                          criterion_id=getattr(self, "criterion_id", None),
                           stage=stage or getattr(self, "call_stage", "model"),
                           reason=reason if reason is not None else getattr(self, "call_reason", None),
                           record=getattr(self, "_validation_call", None) if grouped else None,

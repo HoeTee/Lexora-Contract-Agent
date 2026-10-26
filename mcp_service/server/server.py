@@ -196,13 +196,15 @@ async def generate_pdf_report(
 # ============ Retrieval Tools ============
 
 async def llamaindex_build_index(docx_path: str, api_events_path: str | None = None,
-                                log_operation_id: str | None = None) -> str:
+                                log_operation_id: str | None = None,
+                                criterion_attempt: int | None = None) -> str:
     """
     Build a temporary in-memory LlamaIndex index for the current contract.
     This does not persist contract vectors to RAG_persist.
     """
     token = set_model_event_path(api_events_path)
-    call_token = set_call_context(api_events_path, operation_id=log_operation_id, stage="indexing")
+    call_token = set_call_context(api_events_path, operation_id=log_operation_id,
+                                  criterion_attempt=criterion_attempt, stage="indexing")
     try:
         with redirect_stdout(sys.stderr):
             return await index_retriever.build_contract_llamaindex_index(docx_path)
@@ -212,14 +214,16 @@ async def llamaindex_build_index(docx_path: str, api_events_path: str | None = N
 
 
 async def llamaindex_search(query: str, api_events_path: str | None = None,
-                           criterion_id: str | None = None, log_operation_id: str | None = None) -> str:
+                           criterion_id: str | None = None, log_operation_id: str | None = None,
+                           criterion_attempt: int | None = None) -> str:
     """
     Search the temporary in-memory LlamaIndex index for the current contract.
     Must call llamaindex_build_index first in the same workflow run.
     """
     token = set_model_event_path(api_events_path)
     call_token = set_call_context(api_events_path, operation_id=log_operation_id,
-                                  criterion_id=criterion_id, stage="retrieval")
+                                  criterion_id=criterion_id, criterion_attempt=criterion_attempt,
+                                  stage="retrieval")
     try:
         with redirect_stdout(sys.stderr):
             return await index_retriever.search_contract_llamaindex(query)
@@ -248,10 +252,12 @@ async def docxindex_build_index(
     api_events_path: str | None = None,
     artifact_dir: str | None = None,
     log_operation_id: str | None = None,
+    criterion_attempt: int | None = None,
 ) -> str:
     """Build the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
-    call_token = set_call_context(api_events_path, operation_id=log_operation_id, stage="indexing")
+    call_token = set_call_context(api_events_path, operation_id=log_operation_id,
+                                  criterion_attempt=criterion_attempt, stage="indexing")
     try:
         with redirect_stdout(sys.stderr):
             retriever = _get_docxindex_retriever()
@@ -274,11 +280,13 @@ async def docxindex_search(
     criterion_id: str | None = None,
     return_metadata: bool = False,
     log_operation_id: str | None = None,
+    criterion_attempt: int | None = None,
 ) -> str:
     """Search the temporary in-memory docxindex index for the current contract."""
     token = set_model_event_path(api_events_path)
     call_token = set_call_context(api_events_path, operation_id=log_operation_id,
-                                  criterion_id=criterion_id, stage="route_plan")
+                                  criterion_id=criterion_id, criterion_attempt=criterion_attempt,
+                                  stage="route_plan")
     try:
         with redirect_stdout(sys.stderr):
             return await _get_docxindex_retriever().search(
@@ -297,11 +305,18 @@ async def contract_build_index(
     api_events_path: str | None = None,
     artifact_dir: str | None = None,
     log_operation_id: str | None = None,
+    criterion_attempt: int | None = None,
 ) -> str:
     """Build the configured temporary contract retrieval index."""
     if RETRIEVAL_BACKEND == "docxindex":
-        return await docxindex_build_index(docx_path, api_events_path, artifact_dir, log_operation_id)
-    return await llamaindex_build_index(docx_path, api_events_path, log_operation_id=log_operation_id)
+        return await docxindex_build_index(
+            docx_path, api_events_path, artifact_dir, log_operation_id,
+            criterion_attempt=criterion_attempt,
+        )
+    return await llamaindex_build_index(
+        docx_path, api_events_path, log_operation_id=log_operation_id,
+        criterion_attempt=criterion_attempt,
+    )
 
 
 async def contract_search(
@@ -311,6 +326,7 @@ async def contract_search(
     criterion_id: str | None = None,
     return_metadata: bool = False,
     log_operation_id: str | None = None,
+    criterion_attempt: int | None = None,
 ) -> str:
     """Search the configured temporary contract retrieval index."""
     if RETRIEVAL_BACKEND == "docxindex":
@@ -321,8 +337,12 @@ async def contract_search(
             criterion_id=criterion_id,
             return_metadata=return_metadata,
             log_operation_id=log_operation_id,
+            criterion_attempt=criterion_attempt,
         )
-    return await llamaindex_search(query, api_events_path, criterion_id=criterion_id, log_operation_id=log_operation_id)
+    return await llamaindex_search(
+        query, api_events_path, criterion_id=criterion_id, log_operation_id=log_operation_id,
+        criterion_attempt=criterion_attempt,
+    )
 
 
 mcp.tool(structured_output=False)(llamaindex_build_index)

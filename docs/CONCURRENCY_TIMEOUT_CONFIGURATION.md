@@ -1,6 +1,6 @@
 # 模型请求、并发与超时配置说明
 
-更新日期：2026-10-26。本文对应本轮实现。最终 r5 镜像的同批混合六合同、非流式专项及自动化回归结果见[实施与验收记录](C:/Users/lenovo/Desktop/contract_agent/docs/MODEL_REQUEST_CONTROL_IMPLEMENTATION.md)。
+更新日期：2026-10-26。本文对应模型控制实现。本次任务日志编号、英文时间线及四合同验收见[模型日志说明](MODEL_LOGGING.md)。
 
 ## 1. 完整链路
 
@@ -161,13 +161,17 @@ logical_calls 是合同任务下的基础日志目录：API 位于 data/api/<tas
 
 | 内容 | 含义 |
 | --- | --- |
+| logical_no | 同一合同任务内从 1 开始的自然数编号；不同进程共享分配，同次操作的全部重试沿用；不同任务独立编号 |
 | logical_call_id / task_id / source / stage | 逻辑操作标识、所属合同任务、调用方和阶段 |
+| category / criterion_id / criterion_attempt | 模型调用类别、要点编号、整条要点当前尝试轮次；无所属要点时为 null |
 | send_count / retry_count | 实际发送次数、首次发送之外的次数；未发送的本地拒绝不增加这些计数 |
 | attempts | 每次尝试的 call_id、发送状态、失败环节、错误、等待及请求耗时、token 与计数来源 |
 | status | 整次逻辑操作的最终结果；成功记录中仍可包含失败尝试 |
 | input_tokens / output_tokens | 所有已发送尝试的已知消耗总和，包含失败尝试；未知输出配合完整性字段读取 |
 
-logging.enabled=true 时写 logical_calls，不要求 detailed=true；开启 detailed 后，另在同级 calls 目录按实际尝试保存完整请求和响应，并通过 logical_call_id 关联。写入时先生成临时文件再替换目标 JSON，操作结束时保存最终状态。task_store.task_model_token_stats 读取 logical_calls，按 call_id 去重汇总供任务/API 使用；清理这类任务日志会失去逐次排障依据及后续重新统计的来源。
+logging.enabled=true 时写 events.log 和 logical_calls，不要求 detailed=true。events.log 每行按“自然数编号、时间、级别、category、要点/调用方/阶段、英文摘要”排列；摘要记录等待、发送、响应、失败、重试和实际名额释放。普通任务事件没有模型编号和类别，使用 - 占位。logical_calls 文件名为 `<logical_no>__<category>__<source>__<stage>.json`，例如 `1__agent__SubAgent_H10__review-initial.json`，可直接按行首编号查找。编号表示逻辑操作，实际请求序号在行文和 attempts.send_number 中；不能把编号当成请求次数或完成顺序。
+
+开启 detailed 后，另在同级 calls 目录按实际尝试保存请求和客户端记录的响应明细（embedding 保留 usage、vector_count）；其内容同时记录 logical_no 与 logical_call_id，详细文件名继续使用原格式。逻辑 JSON 先写临时文件再替换，事件按跨进程锁逐行追加；计数器、锁和日志全部位于该任务 logs 目录。历史记录不重命名。logging.enabled=false 不生成这些日志。task_store.task_model_token_stats 仍读取 logical_calls，按 call_id 去重汇总供任务/API 使用，不累加 events.log 行；清理这类任务日志会失去逐次排障依据及后续重新统计的来源。
 
 ## 8. 脚本职责与 MCP
 

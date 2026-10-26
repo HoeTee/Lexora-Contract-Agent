@@ -8,6 +8,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
+from typing import Callable
 
 from redis import asyncio as redis_asyncio
 from redis.exceptions import RedisError
@@ -45,6 +46,7 @@ class ModelSemaphoreLease:
     window_count: int = 0
     admitted_at_ms: int | None = None
     acquired_concurrency: int = 0
+    release_event: Callable | None = None
 
 
 LLMGlobalSemaphoreLease = ModelSemaphoreLease
@@ -301,10 +303,29 @@ async def model_semaphore(model_type: str, caller_name: str, model: str, *, budg
     finally:
         try:
             await _finish_cleanup(semaphore.release_async(lease))
+        except asyncio.CancelledError:
+            event = "model_slot_release_failed" if lease.acquired else "model_slot_released"
+            summary = ("Slot release failed. The lease will reclaim the slot." if lease.acquired
+                       else "Model slot released.")
+            _release_event(lease, event, summary)
+            raise
         except Exception:
+            _release_event(lease, "model_slot_release_failed",
+                           "Slot release failed. The lease will reclaim the slot.")
             if not interrupted:
                 raise
             logging.getLogger(__name__).exception("Redis cleanup failed after interruption; lease will reclaim its slot")
+        else:
+            _release_event(lease, "model_slot_released", "Model slot released.")
+
+
+def _release_event(lease: ModelSemaphoreLease, event: str, summary: str) -> None:
+    """Report completed cleanup without allowing log failures to mask cleanup results."""
+    if lease.release_event is not None:
+        try:
+            lease.release_event(event, summary)
+        except Exception:
+            logging.getLogger(__name__).exception("Cannot write model slot cleanup event")
 
 
 @contextmanager
