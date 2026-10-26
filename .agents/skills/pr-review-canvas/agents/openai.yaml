@@ -1,6 +1,0 @@
-interface:
-  display_name: "PR Review Canvas"
-  short_description: "Build an interactive HTML walkthrough for a GitHub PR"
-  default_prompt: "Use $pr-review-canvas to create an interactive walkthrough for this GitHub PR."
-policy:
-  allow_implicit_invocation: false

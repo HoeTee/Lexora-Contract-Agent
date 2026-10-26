@@ -71,9 +71,9 @@ build/
 
 # Local tool and editor state
 .claude/
-.codex/*
-!.codex/agents/
-!.codex/agents/*.toml
+/AGENTS.md
+/.agents/
+/.codex/
 .vscode/
 .idea/
 
