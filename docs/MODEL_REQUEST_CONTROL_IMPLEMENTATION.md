@@ -53,7 +53,7 @@
 
 最终代码全套 unittest：500 项，499 项通过，1 项因 Windows 不支持 Linux prefork 硬时限测试而跳过；该项随后在最终 Linux 镜像单独执行通过（13.552 秒）。因此 500 项均有对应平台的通过证据。编译与相关文件空白检查通过。
 
-回归过程中曾出现 Windows 临时 task.json 重命名被拒绝的 WinError 5；具体占用进程不确定。隔离该用例连续 30 次、480 次并发更新均通过，最终全套也通过。没有放宽断言或为此修改任务锁。原失败日志保留在 data/model-control-tests-round2.log，最终结果在 data/model-control-tests-final-r5.log、data/model-control-linux-celery-r5.log。状态读取竞争另外新增 8 项测试，修复前复现 API 500，修复后 200；仅文件缺失重试 3 次，两次 10ms 等待，总计 20ms。
+回归过程中曾出现 Windows 临时 task.json 重命名被拒绝的 WinError 5；具体占用进程不确定。隔离该用例连续 30 次、480 次并发更新均通过，最终全套也通过。没有放宽断言或为此修改任务锁。状态读取竞争另外新增 8 项测试，修复前复现 API 500，修复后 200；仅文件缺失重试 3 次，两次 10ms 等待，总计 20ms。原根目录测试控制台日志已按用户要求清理；本节保留当时测试结论，逐合同调用记录与验收结果仍在下列任务目录中。
 
 ## 5. 真实合同批次
 
@@ -209,3 +209,5 @@ LLM 最长连续无内容间隔约 4.009 秒，低于 60 秒。单条应用端�
 验收使用的独立 Compose 项目与测试 Redis 容器已停止清理；原始输入、调用日志、批次结果和报告保留在宿主机 data/verification。无关运行容器未操作。
 
 实际镜像与源码/配置校验值由各批次 image.json、configuration.json、fixtures.json 保存。既有 deploy.tar.gz/images.tar 不因镜像构建自动更新；本记录不宣称旧归档已包含本次实现。生产部署需要使用新镜像、更新后的挂载配置，并重建 API 与三个 worker。
+
+2026-10-26 按用户要求清理了 data 根目录 36 个不归属单份合同任务的测试控制台日志（862636 字节），直接移除，不另行归档。各合同任务的 logs/logical_calls、详细 calls、输入、报告及整批 result.json/acceptance_metrics.json 保留。另移除 docs/code-learning 的四个旧学习页面文件及 scripts/build_code_learning_page.py；业务日志生成代码、模型配置和服务流程未修改。

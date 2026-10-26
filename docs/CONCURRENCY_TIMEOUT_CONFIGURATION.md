@@ -157,6 +157,18 @@ retrieval.backend 必须是 docxindex 或 llamaindex。仅启用的后端产生�
 
 基础逻辑调用记录包含实际发送尝试，按 call_id 去重汇总全部重试。输入保存本地计数，usage 另外保存；服务 usage 优先，本地回退有来源标记。失败不清空输入，流式部分输出保留并标记 partial；未收到输出的实际服务生成量未知。向量维度、重排分数不是文本输出 token。未发送的本地拒绝不计服务消耗。API/workflow 结果使用相同尝试汇总，未知输出时总数为已知下限。
 
+logical_calls 是合同任务下的基础日志目录：API 位于 data/api/<task_id>/logs/logical_calls，Web 位于 data/web/<tenant_id>/<task_id>/logs/logical_calls。一次逻辑操作（如一次初审或一批检索扫描）对应一个 JSON；内部的 HTTP 重试、JSON/schema 修复保留在同一条记录的 attempts 中。它不等于整份合同，也不等于整个要点。
+
+| 内容 | 含义 |
+| --- | --- |
+| logical_call_id / task_id / source / stage | 逻辑操作标识、所属合同任务、调用方和阶段 |
+| send_count / retry_count | 实际发送次数、首次发送之外的次数；未发送的本地拒绝不增加这些计数 |
+| attempts | 每次尝试的 call_id、发送状态、失败环节、错误、等待及请求耗时、token 与计数来源 |
+| status | 整次逻辑操作的最终结果；成功记录中仍可包含失败尝试 |
+| input_tokens / output_tokens | 所有已发送尝试的已知消耗总和，包含失败尝试；未知输出配合完整性字段读取 |
+
+logging.enabled=true 时写 logical_calls，不要求 detailed=true；开启 detailed 后，另在同级 calls 目录按实际尝试保存完整请求和响应，并通过 logical_call_id 关联。写入时先生成临时文件再替换目标 JSON，操作结束时保存最终状态。task_store.task_model_token_stats 读取 logical_calls，按 call_id 去重汇总供任务/API 使用；清理这类任务日志会失去逐次排障依据及后续重新统计的来源。
+
 ## 8. 脚本职责与 MCP
 
 endpoints/runtime/model_calls.py 负责公共执行和重试；model_budget.py 负责等待、单次请求和合同截止时间；model_limits.py 负责 Redis 并发、滚动 RPM 与租约；model_tokens.py 负责离线计数；llm_client.py、embedding_client.py、reranker_client.py 负责各自实际请求和协议解析。DocxIndex/LlamaIndex 保留业务适配，旧 llm_semaphore.py 仅保留导入兼容，model_http.py 已删除。
