@@ -37,6 +37,14 @@
 - 总结当前 session 对话时，也应优先按上述角度组织内容。
 - 不要为了套结构而硬展开；如果问题只涉及函数、接口或局部代码，只解释相关部分。
 
+## Test Task Records
+
+- 从此以后，所有测试任务记录必须统一写入本仓库的 `data/api/<task_id>/`，绝对根路径为 `C:\Users\lenovo\Desktop\contract_agent\data\api`。
+- 任务状态、上传合同、索引、调用日志和输出报告必须保存在对应任务目录内；真实模型测试、并发测试及独立 Compose 验收均遵守此要求。
+- 测试脚本的数据根目录和 Docker 的实际数据挂载必须指向上述位置，不能把任务记录另存到 `data/verification/`、系统临时目录或独立部署目录。
+- 批次级验收汇总与构建日志可保存在 `data/verification/`；其中引用的任务记录必须位于 `data/api/<task_id>/`。
+- 测试结束后，报告真实任务编号及 `data/api/<task_id>/` 的绝对路径，并核实文件确实存在。
+
 ## Docker Deployment Pitfalls
 
 - 不要把本地开发机环境默认套用到远端部署环境。
